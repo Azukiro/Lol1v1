@@ -31,8 +31,14 @@ jobs:
           cache-dependency-path: client/package-lock.json
       - run: npm ci
       # Version strictement croissante : la mise à jour automatique compare les numéros de version.
-      - run: npm version "0.1.$((${{ github.run_number }} + 100))" --no-git-tag-version
+      # Le tag doit exister avant la publication (GitHub refuse de publier une Release sans tag).
+      - name: Version et tag
         shell: bash
+        run: |
+          VERSION="0.1.$((${{ github.run_number }} + 100))"
+          npm version "$VERSION" --no-git-tag-version
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
       - run: npm test
       - run: npm run release
         env:

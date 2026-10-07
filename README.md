@@ -41,7 +41,7 @@ Si LoL n'est pas installé dans `C:\Riot Games\League of Legends`, définir `LOL
 ## Tests
 
 ```bash
-cd server && dotnet test
+cd server/Api.Tests && dotnet test
 ```
 
 ```bash

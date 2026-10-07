@@ -13,7 +13,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-      - run: dotnet test server/Lol1v1.sln
+      - run: dotnet test server/Api.Tests/Api.Tests.csproj
 
   client:
     runs-on: windows-latest

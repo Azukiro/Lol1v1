@@ -74,6 +74,11 @@ export class ReferenceService {
     return s && this.version() ? `${DDRAGON}/${this.version()}/img/spell/${s.key}.png` : null;
   }
 
+  /** Ne garde que les champions jouables connus de Data Dragon (la LCU liste aussi des champions de modes événement). */
+  playable(ids: number[]): number[] {
+    return ids.filter((id) => (this.champions.size ? this.champions.has(id) : id > 0 && id < 10000));
+  }
+
   search(ids: number[], query: string): number[] {
     const q = query.trim().toLowerCase();
     const sorted = [...ids].sort((a, b) => this.championName(a).localeCompare(this.championName(b)));

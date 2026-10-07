@@ -3,6 +3,7 @@ import { ApiService, errorMessage } from './api.service';
 import { HubService } from './hub.service';
 import { LolService } from './lol.service';
 import { formatGameTime, Round, SeriesState } from './models';
+import { ReferenceService } from './reference.service';
 import { ToastService } from './toast.service';
 import { evaluate, Facts } from '../../shared/rules-engine';
 import { extractObservations, LiveGameData, localFacts } from '../../shared/live-events';
@@ -24,6 +25,7 @@ export class GameTrackerService {
   private readonly lol = inject(LolService);
   private readonly api = inject(ApiService);
   private readonly toast = inject(ToastService);
+  private readonly reference = inject(ReferenceService);
 
   readonly activeSeriesId = signal<string | null>(null);
   readonly launchOrder = signal<LaunchOrder | null>(null);
@@ -118,8 +120,9 @@ export class GameTrackerService {
 
   async uploadPool(seriesId: string) {
     try {
+      await this.reference.load();
       const pool = await this.lol.pool();
-      this.hub.storeState(seriesId, await this.api.putPool(seriesId, pool.owned, pool.free));
+      this.hub.storeState(seriesId, await this.api.putPool(seriesId, this.reference.playable(pool.owned), this.reference.playable(pool.free)));
     } catch (e) {
       this.toast.error(`Pool non remonté : ${errorMessage(e)}`);
     }

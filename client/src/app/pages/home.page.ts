@@ -7,6 +7,7 @@ import { GameTrackerService } from '../core/game-tracker.service';
 import { HubService } from '../core/hub.service';
 import { LolService } from '../core/lol.service';
 import { Invitation, MODE_LABELS, SeriesSummary, SPELL_MODE_LABELS } from '../core/models';
+import { ReferenceService } from '../core/reference.service';
 import { ToastService } from '../core/toast.service';
 
 @Component({
@@ -156,6 +157,7 @@ export class HomePage implements OnInit, OnDestroy {
   private readonly hub = inject(HubService);
   private readonly tracker = inject(GameTrackerService);
   private readonly toast = inject(ToastService);
+  private readonly reference = inject(ReferenceService);
   private readonly router = inject(Router);
   private sub?: Subscription;
 
@@ -214,7 +216,9 @@ export class HomePage implements OnInit, OnDestroy {
 
   async readPool() {
     try {
-      this.pool.set(await this.lol.pool());
+      await this.reference.load();
+      const pool = await this.lol.pool();
+      this.pool.set({ owned: this.reference.playable(pool.owned), free: this.reference.playable(pool.free) });
       this.poolAt.set(new Date());
     } catch (e) {
       this.toast.error(errorMessage(e));

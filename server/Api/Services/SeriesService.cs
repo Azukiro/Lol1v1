@@ -108,8 +108,11 @@ public sealed class SeriesService(
     public Task UpdatePoolAsync(Guid seriesId, Guid userId, int[] owned, int[]? free) => MutateAsync(seriesId, userId, (series, me) =>
     {
         if (series.Status is SeriesStatus.FINISHED or SeriesStatus.ABORTED) throw new AppException("Série terminée.");
-        var cleanOwned = owned.Where(id => id > 0).Distinct().Order().ToArray();
-        var cleanFree = (free ?? []).Where(id => id > 0 && !cleanOwned.Contains(id)).Distinct().Order().ToArray();
+        // La LCU renvoie aussi des champions de modes événement (ex. « Jade_Annie », id 60001) : on ne garde que ceux de Data Dragon.
+        var known = reference.Current.Champions.Select(c => c.Id).ToHashSet();
+        bool Playable(int id) => id > 0 && (known.Count == 0 ? id < 10000 : known.Contains(id));
+        var cleanOwned = owned.Where(Playable).Distinct().Order().ToArray();
+        var cleanFree = (free ?? []).Where(id => Playable(id) && !cleanOwned.Contains(id)).Distinct().Order().ToArray();
         if (cleanOwned.Length + cleanFree.Length == 0) throw new AppException("Pool vide.");
         me.PoolSnapshot = JsonSerializer.Serialize(new PoolSnapshot(cleanOwned, cleanFree), Json);
         me.PoolUpdatedAt = clock.GetUtcNow();

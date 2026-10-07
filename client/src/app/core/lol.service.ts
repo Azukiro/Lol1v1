@@ -1,4 +1,4 @@
-import { Injectable, signal } from '@angular/core';
+import { effect, Injectable, signal } from '@angular/core';
 import type { ChampSelectState, GameflowState, LcuPool, LcuStatus, Lol1v1Bridge, LolFriend, OverlayData, UpdateStatus } from '../../shared/ipc';
 
 type Bridge = Lol1v1Bridge & { loadConfig(): Promise<{ apiUrl: string; version: string }> };
@@ -24,6 +24,9 @@ export class LolService {
   readonly friendsVersion = signal(0);
   /** Mise à jour de l'app en cours de téléchargement ou prête à installer. */
   readonly update = signal<UpdateStatus | null>(null);
+  /** Demande de premier plan reçue pendant une partie : servie à la sortie de la partie. */
+  private attentionPending = false;
+  private static readonly BUSY_PHASES = ['ChampSelect', 'GameStart', 'InProgress', 'Reconnect'];
 
   constructor() {
     if (!this.bridge) return;
@@ -37,6 +40,17 @@ export class LolService {
     });
     this.bridge.lcu.onChampSelect((c) => this.champSelect.set(c));
     this.bridge.live.onData((d) => this.liveData.set(d));
+    // Sortie de partie / de sélection : demande en attente, ou simplement fin de partie pendant une série.
+    let previous = 'None';
+    effect(() => {
+      const phase = this.gameflow().phase;
+      const wasBusy = LolService.BUSY_PHASES.includes(previous);
+      previous = phase;
+      if (wasBusy && !LolService.BUSY_PHASES.includes(phase) && this.attentionPending) {
+        this.attentionPending = false;
+        void this.bridge?.attention();
+      }
+    });
     void this.bridge.update.status().then((u) => u && this.update.set(u));
     this.bridge.update.onStatus((u) => this.update.set(u));
     this.bridge.lcu.onFriendsChanged(() => this.friendsVersion.update((v) => v + 1));
@@ -75,6 +89,16 @@ export class LolService {
     await this.bridge.overlay.show(data);
     // Secours : notification Windows (si le jeu est en plein écran exclusif, l'overlay n'est pas visible).
     await this.bridge.notify(data.title, `${data.subtitle} — ${data.footer}`);
+  }
+
+  /**
+   * Ramène l'app au premier plan pour un événement à traiter (invitation, choix à faire, fin de manche…).
+   * Jamais pendant une partie ou une sélection LoL : la demande est servie à leur sortie.
+   */
+  attention() {
+    if (!this.bridge) return;
+    if (LolService.BUSY_PHASES.includes(this.gameflow().phase)) this.attentionPending = true;
+    else void this.bridge.attention();
   }
 
   installUpdate(): Promise<void> {

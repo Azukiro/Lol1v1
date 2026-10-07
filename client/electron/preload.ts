@@ -34,6 +34,7 @@ const bridge: Lol1v1Bridge & { loadConfig(): Promise<{ apiUrl: string; version: 
     hide: () => ipcRenderer.invoke('overlay:hide'),
   },
   notify: (title, body) => ipcRenderer.invoke('notify', title, body),
+  attention: () => ipcRenderer.invoke('window:attention'),
   update: {
     status: () => ipcRenderer.invoke('update:status'),
     install: () => ipcRenderer.invoke('update:install'),

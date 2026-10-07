@@ -94,6 +94,8 @@ export interface Lol1v1Bridge {
     hide(): Promise<void>;
   };
   notify(title: string, body: string): Promise<void>;
+  /** Ramène la fenêtre de l'app au premier plan. */
+  attention(): Promise<void>;
   update: {
     status(): Promise<UpdateStatus | null>;
     install(): Promise<void>;

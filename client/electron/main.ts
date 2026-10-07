@@ -99,6 +99,19 @@ function hideOverlay() {
   overlayWindow = null;
 }
 
+/** Ramène l'app au premier plan (Windows bloque le vol de focus : passage temporaire « toujours devant »). */
+function bringToFront() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.setAlwaysOnTop(true);
+  mainWindow.focus();
+  mainWindow.moveTop();
+  setTimeout(() => mainWindow?.setAlwaysOnTop(false), 300);
+  mainWindow.flashFrame(true);
+  mainWindow.once('focus', () => mainWindow?.flashFrame(false));
+}
+
 function registerIpc() {
   ipcMain.handle('config', () => ({ apiUrl, version: app.getVersion() }));
   ipcMain.handle('update:status', () => (updateReady ? { state: 'ready', version: updateReady } : null));
@@ -113,6 +126,7 @@ function registerIpc() {
   ipcMain.handle('lcu:prepareChampSelect', (_e, championId: number, spells: [number, number] | null) => lcu.prepareChampSelect(championId, spells));
   ipcMain.handle('overlay:show', (_e, data: OverlayData) => showOverlay(data));
   ipcMain.handle('overlay:hide', () => hideOverlay());
+  ipcMain.handle('window:attention', () => bringToFront());
   ipcMain.handle('notify', (_e, title: string, body: string) => {
     if (Notification.isSupported()) new Notification({ title, body, urgency: 'critical' }).show();
   });

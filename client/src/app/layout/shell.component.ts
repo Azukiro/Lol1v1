@@ -124,6 +124,7 @@ export class ShellComponent implements OnInit, OnDestroy {
     void this.api.health().catch(() => undefined);
     void this.reference.load();
     this.sub = this.hub.invitations$.subscribe(({ name, invitation }) => {
+      if (name === 'InvitationReceived' || invitation.status === 'ACCEPTED') this.lol.attention();
       if (name === 'InvitationReceived') this.toast.info(`${invitation.from.displayName} te défie : ${invitation.configLabel}`);
       if (name === 'InvitationUpdated' && invitation.status === 'ACCEPTED' && invitation.seriesId) {
         this.toast.success(`${invitation.to.displayName} a accepté ton défi !`);

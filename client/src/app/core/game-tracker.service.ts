@@ -198,7 +198,21 @@ export class GameTrackerService {
     this.toast.info(`Lobby créé, invitation envoyée à ${order.opponentRiotId}. Lance la sélection quand il a rejoint.`);
   }
 
+  /** Événements qui demandent une action du joueur (ou qui concluent une manche) : app au premier plan. */
+  private static readonly ATTENTION_EVENTS = [
+    'BansRevealed',
+    'AssignmentReady',
+    'PicksRevealed',
+    'RoundVoided',
+    'RoundDisputed',
+    'RoundResolved',
+    'SeriesFinished',
+    'VoidRequested',
+    'SeriesAborted',
+  ];
+
   private onEvent(name: string, seriesId: string, payload: any) {
+    if (GameTrackerService.ATTENTION_EVENTS.includes(name)) this.lol.attention();
     const s = this.hub.series()[seriesId];
     const me = s?.players.find((p) => p.slot === s.mySlot);
     const opp = s?.players.find((p) => p.slot !== s.mySlot);

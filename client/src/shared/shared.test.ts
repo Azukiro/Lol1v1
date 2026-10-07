@@ -52,6 +52,23 @@ test('live events: kills, first blood, turrets mapped to SELF / OPPONENT and ded
   assert.equal(facts.self.killTimes.length, 1);
   assert.equal(facts.opponent.firstTowerTime, 300);
   assert.equal(turretOwner('Turret_T2_L_03_A'), 'CHAOS');
+  assert.equal(turretOwner('Turret_TOrder_L1_P3_2250400266_0'), 'ORDER');
+  assert.equal(turretOwner('Turret_TChaos_L1_P3_1234_0'), 'CHAOS');
+});
+
+test('live events: current turret naming (Turret_TOrder_…) counts for the destroying team', () => {
+  const data: LiveGameData = {
+    activePlayer: { riotId: 'Azuki#EUW' },
+    allPlayers: [
+      { riotId: 'Azuki#EUW', riotIdGameName: 'Azuki', team: 'CHAOS', scores: { creepScore: 40 } },
+      { riotId: 'Azran#EUW', riotIdGameName: 'Azran', team: 'ORDER', scores: { creepScore: 30 } },
+    ],
+    events: { Events: [{ EventID: 8, EventName: 'TurretKilled', EventTime: 183.3, KillerName: 'Azuki', TurretKilled: 'Turret_TOrder_L1_P3_2250400266_0' }] },
+    gameData: { gameTime: 200 },
+  };
+  const obs = extractObservations(data, expr, new Set());
+  assert.deepEqual(obs.map((o) => [o.type, o.payload.subject]), [['TURRET', 'SELF']]);
+  assert.equal(localFacts(data).self.firstTowerTime, 183.3);
 });
 
 test('live events: CS thresholds and opponent view', () => {

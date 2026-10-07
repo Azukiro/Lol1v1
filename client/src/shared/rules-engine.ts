@@ -27,6 +27,8 @@ export const CONDITION_LABELS: Record<ConditionCode, string> = {
 };
 
 export const MAX_DEPTH = 3;
+/** La Live Client Data API ne fournit les CS que par paliers de 10, y compris pour le joueur local. */
+export const CS_STEP = 10;
 
 export function needsThreshold(c: ConditionCode): boolean {
   return c === 'KILLS' || c === 'CS';
@@ -88,6 +90,7 @@ export function validate(node: WinNode | undefined, depth = 1): string | null {
   if (depth > MAX_DEPTH) return `Profondeur maximale : ${MAX_DEPTH}.`;
   if (node.condition) {
     if (needsThreshold(node.condition) && (!node.threshold || node.threshold <= 0)) return `${CONDITION_LABELS[node.condition]} : seuil > 0 requis.`;
+    if (node.condition === 'CS' && node.threshold! % CS_STEP !== 0) return `CS : multiple de ${CS_STEP} (le jeu ne donne les CS que par dizaines).`;
     return null;
   }
   if (node.op !== 'AND' && node.op !== 'OR') return 'Opérateur ET / OU attendu.';

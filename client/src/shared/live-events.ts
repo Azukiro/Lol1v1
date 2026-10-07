@@ -67,11 +67,14 @@ export function findPlayers(data: LiveGameData): { self?: LivePlayer; opponent?:
   return { self, opponent };
 }
 
-/** Équipe propriétaire d'une tour d'après son nom (Turret_T1_… = ORDER, Turret_T2_… = CHAOS). */
+/**
+ * Équipe propriétaire d'une tour d'après son nom.
+ * Ancien format : Turret_T1_… (ORDER) / Turret_T2_… (CHAOS) ; format actuel : Turret_TOrder_… / Turret_TChaos_….
+ */
 export function turretOwner(turret: string | undefined): 'ORDER' | 'CHAOS' | null {
   if (!turret) return null;
-  if (/_T1_/i.test(turret)) return 'ORDER';
-  if (/_T2_/i.test(turret)) return 'CHAOS';
+  if (/_T(1|Order)_/i.test(turret)) return 'ORDER';
+  if (/_T(2|Chaos)_/i.test(turret)) return 'CHAOS';
   return null;
 }
 

@@ -114,7 +114,10 @@ const CONDITIONS: { code: ConditionCode; label: string }[] = [
                       </select>
                       @if (needsThreshold(c.condition)) {
                         <span class="muted">≥</span>
-                        <input class="input num" type="number" min="1" [ngModel]="c.threshold" (ngModelChange)="setThreshold(i, j, $event)" />
+                        <input class="input num" type="number" [min]="c.condition === 'CS' ? 10 : 1" [step]="c.condition === 'CS' ? 10 : 1" [ngModel]="c.threshold" (ngModelChange)="setThreshold(i, j, $event)" />
+                        @if (c.condition === 'CS') {
+                          <span class="muted small">par dizaines</span>
+                        }
                       }
                       <span class="spacer"></span>
                       <button class="btn ghost small" title="Retirer" (click)="remove(i, j)">✕</button>

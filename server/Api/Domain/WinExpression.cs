@@ -53,6 +53,7 @@ public sealed record Satisfaction(double Time, WinNode Trigger);
 public static class WinExpression
 {
     public const int MaxDepth = 3;
+    public const int CsStep = 10;
     public static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
     public static WinNode Parse(string json) =>
@@ -76,6 +77,9 @@ public static class WinExpression
             {
                 if (node.Threshold is null or <= 0) throw new DomainException($"{node.Condition} demande un seuil > 0.");
                 if (node.Threshold > 1000) throw new DomainException($"Seuil trop élevé pour {node.Condition}.");
+                // La Live Client Data API ne donne les CS que par dizaines, même pour le joueur local.
+                if (node.Condition == Conditions.Cs && node.Threshold % CsStep != 0)
+                    throw new DomainException($"CS : multiple de {CsStep} (le jeu ne donne les CS que par dizaines).");
             }
             else if (node.Threshold is not null)
                 throw new DomainException($"{node.Condition} ne prend pas de seuil.");

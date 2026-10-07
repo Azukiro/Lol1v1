@@ -22,6 +22,7 @@ public class WinExpressionTests
     [InlineData("""{ "condition": "KILLS" }""")]
     [InlineData("""{ "condition": "KILLS", "threshold": 0 }""")]
     [InlineData("""{ "condition": "FIRST_BLOOD", "threshold": 3 }""")]
+    [InlineData("""{ "condition": "CS", "threshold": 125 }""")]
     [InlineData("""{ "op": "XOR", "children": [ { "condition": "FIRST_BLOOD" }, { "condition": "FIRST_TOWER" } ] }""")]
     [InlineData("""{ "op": "OR", "children": [ { "condition": "FIRST_BLOOD" } ] }""")]
     [InlineData("""{ "op": "OR", "children": [ { "condition": "FIRST_BLOOD" }, { "op": "AND", "children": [ { "condition": "FIRST_TOWER" }, { "op": "OR", "children": [ { "condition": "FIRST_BLOOD" }, { "condition": "FIRST_TOWER" } ] } ] } ] }""")]

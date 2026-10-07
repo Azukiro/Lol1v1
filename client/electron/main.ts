@@ -38,7 +38,7 @@ function createMainWindow() {
     minWidth: 1024,
     minHeight: 680,
     backgroundColor: '#0b0e14',
-    title: 'LoL 1v1',
+    title: `LoL 1v1 v${app.getVersion()}`,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -47,6 +47,8 @@ function createMainWindow() {
       sandbox: true,
     },
   });
+  // Garde « LoL 1v1 vX.Y.Z » au lieu du <title> de la page.
+  mainWindow.on('page-title-updated', (e) => e.preventDefault());
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url);
     return { action: 'deny' };

@@ -1,7 +1,7 @@
 import { Component, computed, effect, inject, OnDestroy, OnInit, untracked } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { Subscription } from 'rxjs';
-import { ApiService, AuthService } from '../core/api.service';
+import { ApiService, appConfig as runtimeConfig, AuthService } from '../core/api.service';
 import { GameTrackerService } from '../core/game-tracker.service';
 import { HubService } from '../core/hub.service';
 import { ReferenceService } from '../core/reference.service';
@@ -42,6 +42,7 @@ import { AvatarComponent } from '../shared/avatar.component';
         <button class="me" (click)="logout()" [title]="'Se déconnecter (' + (auth.user()?.displayName ?? '') + ')'">
           <app-avatar [iconId]="myIcon()" [name]="auth.user()?.displayName ?? ''" />
         </button>
+        <span class="version" [title]="'Version de l’app : ' + version">v{{ version }}</span>
       </nav>
       <main class="content">
         @if (lol.update(); as u) {
@@ -76,6 +77,7 @@ import { AvatarComponent } from '../shared/avatar.component';
     .conn { width: 8px; height: 8px; border-radius: 50%; background: var(--pink); }
     .conn.ok { background: var(--green); box-shadow: 0 0 8px var(--green); }
     .content { flex: 1; overflow: auto; }
+    .version { font-size: 10px; color: var(--muted); letter-spacing: 0.02em; }
     .update { display: flex; align-items: center; gap: 16px; justify-content: center; padding: 8px 16px; background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: 13px; }
     .update.ready { background: var(--cyan-dim); border-bottom-color: rgba(25, 227, 255, 0.4); }
   `,
@@ -92,6 +94,7 @@ export class ShellComponent implements OnInit, OnDestroy {
 
   protected readonly activeSeriesId = this.tracker.activeSeriesId;
   protected readonly lol = inject(LolService);
+  protected readonly version = runtimeConfig.version || 'dev';
   /** Pas de redémarrage pendant une partie : l'app suit la manche en cours. */
   protected readonly inGame = computed(() => ['InProgress', 'GameStart', 'ChampSelect', 'Reconnect'].includes(this.lol.gameflow().phase));
   /** Icône du client LoL connecté si c'est le compte lié, sinon celle enregistrée sur le serveur. */

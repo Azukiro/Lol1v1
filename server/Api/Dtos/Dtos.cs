@@ -10,6 +10,13 @@ public sealed record UserDto(Guid Id, string Email, string DisplayName, RiotAcco
 public sealed record RiotAccountDto(string Puuid, string GameName, string TagLine, string Region, string RiotId);
 public sealed record LinkRiotRequest(string Puuid, string GameName, string TagLine, string Region);
 public sealed record PlayerSearchResult(Guid UserId, string DisplayName, string RiotId);
+public sealed record LookupRequest(string[] Puuids);
+public sealed record RegisteredPlayer(string Puuid, Guid UserId, string DisplayName, string RiotId);
+
+// ---- Pré-configurations ----
+public sealed record PresetDto(string Id, string Name, string Description, SeriesConfig Config, bool BuiltIn);
+public sealed record PresetsResponse(List<PresetDto> Server, List<PresetDto> Mine);
+public sealed record CreatePresetRequest(string Name, SeriesConfig Config);
 
 // ---- Invitations ----
 public sealed record CreateInvitationRequest(string ToRiotId, SeriesConfig Config);

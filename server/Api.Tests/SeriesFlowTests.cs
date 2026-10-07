@@ -154,6 +154,34 @@ public class SeriesFlowTests
     }
 
     [Fact]
+    public async Task Presets_server_and_user_defined()
+    {
+        await using var factory = new ApiFactory();
+        await using var a = await TestPlayer.CreateAsync(factory, "Kaelis");
+        var bad = await a.Http.PostAsJsonAsync("/api/v1/presets", new { name = "Pair", config = Config(4, "MIRROR", "FREE", KillsOrTower) });
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        var created = await (await a.Http.PostAsJsonAsync("/api/v1/presets", new { name = "Mon BO5", config = Config(5, "DECK", "FREE", KillsOrTower) }))
+            .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<JsonObject>();
+        var list = await a.Http.GetFromJsonAsync<PresetsResponse>("/api/v1/presets", ApiJson.Options);
+        Assert.True(list!.Server.Count >= 3);
+        Assert.All(list.Server, p => p.Config.Validate());
+        Assert.Equal("Mon BO5", Assert.Single(list.Mine).Name);
+        (await a.Http.DeleteAsync($"/api/v1/presets/{created!["id"]}")).EnsureSuccessStatusCode();
+        Assert.Empty((await a.Http.GetFromJsonAsync<PresetsResponse>("/api/v1/presets", ApiJson.Options))!.Mine);
+    }
+
+    [Fact]
+    public async Task Lookup_returns_only_registered_friends()
+    {
+        await using var factory = new ApiFactory();
+        await using var a = await TestPlayer.CreateAsync(factory, "Kaelis");
+        await using var b = await TestPlayer.CreateAsync(factory, "Vorn");
+        var res = await (await a.Http.PostAsJsonAsync("/api/v1/users/lookup", new { puuids = new[] { "puuid-Vorn", "puuid-inconnu" } }))
+            .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<List<RegisteredPlayer>>();
+        Assert.Equal("Vorn#EUW", Assert.Single(res!).RiotId);
+    }
+
+    [Fact]
     public async Task Mirror_bo3_played_end_to_end()
     {
         await using var factory = new ApiFactory();

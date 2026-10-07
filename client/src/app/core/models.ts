@@ -39,6 +39,14 @@ export interface SeriesConfig {
   winExpression: WinNode;
 }
 
+export interface Preset {
+  id: string;
+  name: string;
+  description: string;
+  config: SeriesConfig;
+  builtIn: boolean;
+}
+
 export interface Invitation {
   id: string;
   status: string;

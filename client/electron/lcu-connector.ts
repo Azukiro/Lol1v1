@@ -9,7 +9,7 @@ import * as fs from 'node:fs';
 import * as https from 'node:https';
 import * as path from 'node:path';
 import WebSocket from 'ws';
-import type { ChampSelectState, GameflowState, LcuIdentity, LcuPool, LcuStatus } from '../src/shared/ipc';
+import type { ChampSelectState, GameflowState, LcuIdentity, LcuPool, LcuStatus, LolFriend } from '../src/shared/ipc';
 
 interface Credentials {
   port: number;
@@ -196,6 +196,23 @@ export class LcuConnector extends EventEmitter {
     return { owned, free };
   }
 
+  /** Liste d'amis du client LoL (chat Riot). */
+  async friends(): Promise<LolFriend[]> {
+    const list = await this.request<
+      { puuid: string; gameName: string; gameTag: string; availability: string; groupName: string; product: string; lol?: { gameStatus?: string } }[]
+    >('GET', '/lol-chat/v1/friends');
+    return list
+      .filter((f) => f.puuid && f.gameName)
+      .map((f) => ({
+        puuid: f.puuid,
+        gameName: f.gameName,
+        tagLine: f.gameTag,
+        availability: f.availability ?? 'offline',
+        gameStatus: f.product === 'league_of_legends' ? (f.lol?.gameStatus ?? '') : '',
+        groupName: f.groupName ?? '',
+      }));
+  }
+
   // ---------------------------------------------------------------- Lobby
 
   /** Partie personnalisée Abîme hurlant (map 12), 1 joueur par équipe, blind pick (mutator 1). */
@@ -234,7 +251,7 @@ export class LcuConnector extends EventEmitter {
     });
     this.ws = ws;
     ws.on('open', () => {
-      for (const evt of ['OnJsonApiEvent_lol-gameflow_v1_gameflow-phase', 'OnJsonApiEvent_lol-champ-select_v1_session']) {
+      for (const evt of ['OnJsonApiEvent_lol-gameflow_v1_gameflow-phase', 'OnJsonApiEvent_lol-champ-select_v1_session', 'OnJsonApiEvent_lol-chat_v1_friends']) {
         ws.send(JSON.stringify([5, evt]));
       }
     });
@@ -244,6 +261,7 @@ export class LcuConnector extends EventEmitter {
         if (!Array.isArray(msg) || msg[0] !== 8) return;
         const { uri, data, eventType } = msg[2] as { uri: string; data: unknown; eventType: string };
         if (uri === '/lol-gameflow/v1/gameflow-phase') void this.refreshGameflow(data as string);
+        else if (uri.startsWith('/lol-chat/v1/friends')) this.emit('friendsChanged');
         else if (uri === '/lol-champ-select/v1/session') {
           this.emit('champSelect', eventType === 'Delete' ? null : normalizeChampSelect(data as ChampSelectSession));
         }

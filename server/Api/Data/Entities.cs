@@ -28,6 +28,17 @@ public class RiotAccount
     public string RiotId => $"{GameName}#{TagLine}";
 }
 
+/// <summary>Configuration de série enregistrée par un joueur pour la réutiliser.</summary>
+public class UserPreset
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public string Name { get; set; } = "";
+    /// <summary>Configuration de série (jsonb).</summary>
+    public string Config { get; set; } = "{}";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public class Invitation
 {
     public Guid Id { get; set; } = Guid.NewGuid();

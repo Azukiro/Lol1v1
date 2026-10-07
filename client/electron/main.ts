@@ -98,6 +98,7 @@ function registerIpc() {
   ipcMain.handle('config', () => ({ apiUrl, version: app.getVersion() }));
   ipcMain.handle('lcu:status', () => lcu.status());
   ipcMain.handle('lcu:pool', () => lcu.pool());
+  ipcMain.handle('lcu:friends', () => lcu.friends());
   ipcMain.handle('lcu:createLobby', (_e, puuid: string, name: string) => lcu.createLobby(puuid, name));
   ipcMain.handle('lcu:startChampSelect', () => lcu.startChampSelect());
   ipcMain.handle('overlay:show', (_e, data: OverlayData) => showOverlay(data));
@@ -108,6 +109,14 @@ function registerIpc() {
 
   lcu.on('status', (s) => send('lcu:status', s));
   lcu.on('champSelect', (c) => send('lcu:champSelect', c));
+  // Les changements de statut d'amis arrivent en rafale : un seul signal par seconde.
+  let friendsTimer: NodeJS.Timeout | null = null;
+  lcu.on('friendsChanged', () => {
+    friendsTimer ??= setTimeout(() => {
+      friendsTimer = null;
+      send('lcu:friendsChanged', null);
+    }, 1000);
+  });
   lcu.on('gameflow', (g: { phase: string }) => {
     send('lcu:gameflow', g);
     // Le poller ne tourne que pendant la partie.

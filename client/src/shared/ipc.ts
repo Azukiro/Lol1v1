@@ -33,6 +33,17 @@ export type GameflowPhase =
   | 'Reconnect'
   | string;
 
+export interface LolFriend {
+  puuid: string;
+  gameName: string;
+  tagLine: string;
+  /** chat (en ligne), away, dnd (souvent en partie), mobile, offline */
+  availability: string;
+  /** inGame, championSelect, outOfGame… (vide si hors ligne) */
+  gameStatus: string;
+  groupName: string;
+}
+
 export interface GameflowState {
   phase: GameflowPhase;
   gameId?: number;
@@ -57,11 +68,13 @@ export interface Lol1v1Bridge {
   lcu: {
     status(): Promise<LcuStatus>;
     pool(): Promise<LcuPool>;
+    friends(): Promise<LolFriend[]>;
     createLobby(opponentPuuid: string, lobbyName: string): Promise<void>;
     startChampSelect(): Promise<void>;
     onStatus(cb: (s: LcuStatus) => void): () => void;
     onGameflow(cb: (g: GameflowState) => void): () => void;
     onChampSelect(cb: (c: ChampSelectState | null) => void): () => void;
+    onFriendsChanged(cb: () => void): () => void;
   };
   live: {
     onData(cb: (data: unknown) => void): () => void;

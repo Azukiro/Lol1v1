@@ -7,6 +7,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<User> Users => Set<User>();
     public DbSet<RiotAccount> RiotAccounts => Set<RiotAccount>();
     public DbSet<Invitation> Invitations => Set<Invitation>();
+    public DbSet<UserPreset> UserPresets => Set<UserPreset>();
     public DbSet<Series> Series => Set<Series>();
     public DbSet<SeriesPlayer> SeriesPlayers => Set<SeriesPlayer>();
     public DbSet<DeckChampion> DeckChampions => Set<DeckChampion>();
@@ -39,6 +40,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => x.RiotIdNormalized);
             e.HasOne(x => x.User).WithOne(u => u.RiotAccount).HasForeignKey<RiotAccount>(x => x.UserId);
             e.Ignore(x => x.RiotId);
+        });
+
+        b.Entity<UserPreset>(e =>
+        {
+            e.ToTable("user_preset");
+            e.Property(x => x.Name).HasMaxLength(40);
+            e.Property(x => x.Config).HasColumnType("jsonb");
+            e.HasIndex(x => x.UserId);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<Invitation>(e =>

@@ -1,5 +1,5 @@
 import { Injectable, signal } from '@angular/core';
-import type { ChampSelectState, GameflowState, LcuPool, LcuStatus, Lol1v1Bridge, OverlayData } from '../../shared/ipc';
+import type { ChampSelectState, GameflowState, LcuPool, LcuStatus, Lol1v1Bridge, LolFriend, OverlayData } from '../../shared/ipc';
 
 type Bridge = Lol1v1Bridge & { loadConfig(): Promise<{ apiUrl: string; version: string }> };
 
@@ -20,6 +20,8 @@ export class LolService {
   readonly champSelect = signal<ChampSelectState | null>(null);
   /** Dernières données brutes de la Live Client Data API. */
   readonly liveData = signal<unknown>(null);
+  /** Incrémenté à chaque changement de la liste d'amis LoL. */
+  readonly friendsVersion = signal(0);
 
   constructor() {
     if (!this.bridge) return;
@@ -28,6 +30,7 @@ export class LolService {
     this.bridge.lcu.onGameflow((g) => this.gameflow.set(g));
     this.bridge.lcu.onChampSelect((c) => this.champSelect.set(c));
     this.bridge.live.onData((d) => this.liveData.set(d));
+    this.bridge.lcu.onFriendsChanged(() => this.friendsVersion.update((v) => v + 1));
   }
 
   async loadConfig(): Promise<{ apiUrl: string; version: string } | null> {
@@ -36,6 +39,10 @@ export class LolService {
 
   pool(): Promise<LcuPool> {
     return this.require().lcu.pool();
+  }
+
+  friends(): Promise<LolFriend[]> {
+    return this.require().lcu.friends();
   }
 
   createLobby(opponentPuuid: string, lobbyName: string): Promise<void> {

@@ -2,7 +2,8 @@ import { Component, computed, inject, input, OnInit, signal } from '@angular/cor
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ApiService, AuthService, errorMessage } from '../core/api.service';
-import { ChampionMode, MODE_LABELS, SpellMode, SPELL_MODE_LABELS } from '../core/models';
+import { LolService } from '../core/lol.service';
+import { ChampionMode, MODE_LABELS, SeriesConfig, SpellMode, SPELL_MODE_LABELS } from '../core/models';
 import { ToastService } from '../core/toast.service';
 import { ConditionCode, describe, needsThreshold, validate, WinNode } from '../../shared/rules-engine';
 
@@ -41,6 +42,14 @@ const CONDITIONS: { code: ConditionCode; label: string }[] = [
             <div class="row">
               <input class="input grow" placeholder="Pseudo#TAG" [(ngModel)]="opponent" name="opp" />
             </div>
+            @if (friends().length) {
+              <div class="row wrap recent">
+                <span class="muted">Amis</span>
+                @for (r of friends(); track r.riotId) {
+                  <button class="chip" [class.cyan]="opponent === r.riotId" (click)="opponent = r.riotId">{{ r.riotId }}</button>
+                }
+              </div>
+            }
             @if (recent().length) {
               <div class="row wrap recent">
                 <span class="muted">Récents</span>
@@ -143,6 +152,7 @@ const CONDITIONS: { code: ConditionCode; label: string }[] = [
               <div class="error-text">{{ error() }}</div>
             }
             <button class="btn primary big" (click)="send()" [disabled]="busy() || !!exprError() || !opponent.includes('#')">Envoyer le défi</button>
+            <button class="btn ghost" (click)="savePreset()" [disabled]="busy() || !!exprError()">Enregistrer comme config perso</button>
           </div>
         </aside>
       </div>
@@ -185,6 +195,10 @@ export class NewChallengePage implements OnInit {
 
   /** Pré-rempli par « Revanche » (?opponent=Pseudo#TAG). */
   readonly opponentParam = input<string | undefined>(undefined, { alias: 'opponent' });
+  /** Pré-configuration choisie sur l'accueil (?preset=id). */
+  readonly presetParam = input<string | undefined>(undefined, { alias: 'preset' });
+  private readonly lol = inject(LolService);
+  protected readonly friends = signal<{ riotId: string }[]>([]);
   protected opponent = '';
   protected readonly recent = signal<{ userId: string; displayName: string; riotId: string }[]>([]);
   protected readonly bestOf = signal(5);
@@ -219,10 +233,70 @@ export class NewChallengePage implements OnInit {
 
   async ngOnInit() {
     this.opponent = this.opponentParam() ?? '';
+    const presetId = this.presetParam();
+    if (presetId) {
+      try {
+        const { server, mine } = await this.api.presets();
+        const preset = [...server, ...mine].find((x) => x.id === presetId);
+        if (preset) this.apply(preset.config);
+      } catch (e) {
+        this.error.set(errorMessage(e));
+      }
+    }
     try {
       this.recent.set(await this.api.recentOpponents());
     } catch {
       /* facultatif */
+    }
+    void this.loadFriends();
+  }
+
+  /** Amis LoL ayant un compte sur l'app (nécessite le client LoL lancé). */
+  private async loadFriends() {
+    if (!this.lol.status().connected) return;
+    try {
+      const friends = await this.lol.friends();
+      const registered = await this.api.lookupPlayers(friends.map((f) => f.puuid));
+      this.friends.set(registered.map((r) => ({ riotId: r.riotId })));
+    } catch {
+      /* facultatif */
+    }
+  }
+
+  /** Remplit le formulaire depuis une configuration (pré-config serveur ou perso). */
+  private apply(config: SeriesConfig) {
+    this.bestOf.set(config.bestOf);
+    this.mode.set(config.championMode);
+    this.spellMode.set(config.spellMode);
+    const toCond = (n: WinNode): Cond => ({ condition: n.condition!, threshold: n.threshold ?? 1 });
+    const expr = config.winExpression;
+    if (expr.condition) {
+      this.items.set([{ op: 'OR', conds: [toCond(expr)] }]);
+      return;
+    }
+    this.topOp.set(expr.op ?? 'OR');
+    this.items.set(
+      (expr.children ?? []).map((child): Item =>
+        child.condition
+          ? { op: 'OR', conds: [toCond(child)] }
+          : { op: child.op ?? 'AND', conds: (child.children ?? []).filter((c) => c.condition).map(toCond) },
+      ),
+    );
+  }
+
+  async savePreset() {
+    const expr = this.expression();
+    if (!expr) return;
+    const name = prompt('Nom de la config (ex. « BO5 deck du jeudi ») :')?.trim();
+    if (!name) return;
+    this.busy.set(true);
+    try {
+      await this.api.createPreset(name, { bestOf: this.bestOf(), championMode: this.mode(), spellMode: this.spellMode(), winExpression: expr });
+      this.toast.success(`Config « ${name} » enregistrée : elle apparaît sur l'accueil.`);
+    } catch (e) {
+      this.error.set(errorMessage(e));
+    } finally {
+      this.busy.set(false);
     }
   }
 

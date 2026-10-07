@@ -92,6 +92,16 @@ public sealed class UsersController(AppDbContext db) : ControllerBase
         return new PlayerSearchResult(account.UserId, account.User.DisplayName, account.RiotId);
     }
 
+    /// <summary>Parmi ces PUUID (amis LoL lus via la LCU), lesquels ont un compte sur l'app.</summary>
+    [HttpPost("users/lookup")]
+    public async Task<List<RegisteredPlayer>> Lookup(LookupRequest req)
+    {
+        var puuids = (req.Puuids ?? []).Where(p => !string.IsNullOrWhiteSpace(p)).Distinct().Take(500).ToList();
+        if (puuids.Count == 0) return [];
+        var accounts = await db.RiotAccounts.Include(r => r.User).Where(r => puuids.Contains(r.Puuid)).ToListAsync();
+        return accounts.Select(a => new RegisteredPlayer(a.Puuid, a.UserId, a.User.DisplayName, a.RiotId)).ToList();
+    }
+
     /// <summary>Adversaires récents (pour l'écran « Nouveau défi »).</summary>
     [HttpGet("users/recent-opponents")]
     public async Task<List<PlayerSearchResult>> Recent()
@@ -103,6 +113,53 @@ public sealed class UsersController(AppDbContext db) : ControllerBase
             .OrderByDescending(p => p.Series.CreatedAt).Take(50).ToListAsync();
         return opponents.DistinctBy(p => p.UserId).Take(5)
             .Select(p => new PlayerSearchResult(p.UserId, p.User.DisplayName, p.RiotAccount.RiotId)).ToList();
+    }
+}
+
+[ApiController]
+[Authorize]
+[Route("api/v1/presets")]
+public sealed class PresetsController(AppDbContext db) : ControllerBase
+{
+    public const int MaxPerUser = 12;
+
+    [HttpGet]
+    public async Task<PresetsResponse> List()
+    {
+        var userId = User.UserId();
+        var mine = await db.UserPresets.Where(p => p.UserId == userId).OrderBy(p => p.CreatedAt).ToListAsync();
+        return new PresetsResponse(BuiltInPresets.All.ToList(), mine.Select(ToDto).ToList());
+    }
+
+    [HttpPost]
+    public async Task<PresetDto> Create(CreatePresetRequest req)
+    {
+        var userId = User.UserId();
+        var name = req.Name?.Trim() ?? "";
+        if (name.Length is < 1 or > 40) throw new AppException("Nom : entre 1 et 40 caractères.");
+        try { req.Config.Validate(); } catch (DomainException e) { throw new AppException(e.Message); }
+        if (await db.UserPresets.CountAsync(p => p.UserId == userId) >= MaxPerUser)
+            throw new AppException($"Maximum {MaxPerUser} pré-configurations.");
+        var preset = new UserPreset { UserId = userId, Name = name, Config = JsonSerializer.Serialize(req.Config, Mapping.Json) };
+        db.UserPresets.Add(preset);
+        await db.SaveChangesAsync();
+        return ToDto(preset);
+    }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id)
+    {
+        var preset = await db.UserPresets.FirstOrDefaultAsync(p => p.Id == id && p.UserId == User.UserId())
+            ?? throw new AppException("Pré-configuration introuvable.", 404);
+        db.UserPresets.Remove(preset);
+        await db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    private static PresetDto ToDto(UserPreset p)
+    {
+        var config = JsonSerializer.Deserialize<SeriesConfig>(p.Config, Mapping.Json)!;
+        return new PresetDto(p.Id.ToString(), p.Name, Mapping.ConfigLabel(config), config, false);
     }
 }
 

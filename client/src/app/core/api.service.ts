@@ -1,7 +1,7 @@
 import { HttpClient, HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
 import { inject, Injectable, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
-import { AuthResponse, ChampionRef, Invitation, RiotAccount, SeriesConfig, SeriesState, SeriesSummary, SpellRef, User } from './models';
+import { AuthResponse, ChampionRef, Invitation, Preset, RiotAccount, SeriesConfig, SeriesState, SeriesSummary, SpellRef, User } from './models';
 
 /** URL de l'API : fournie par Electron (API_URL), sinon localhost. */
 export const appConfig = { apiUrl: 'http://localhost:5080', version: '' };
@@ -75,8 +75,21 @@ export class ApiService {
   recentOpponents() {
     return this.get<{ userId: string; displayName: string; riotId: string }[]>('/users/recent-opponents');
   }
+  lookupPlayers(puuids: string[]) {
+    return this.post<{ puuid: string; userId: string; displayName: string; riotId: string }[]>('/users/lookup', { puuids });
+  }
   searchPlayer(riotId: string) {
     return this.get<{ userId: string; displayName: string; riotId: string }>(`/users/search?riotId=${encodeURIComponent(riotId)}`);
+  }
+
+  presets() {
+    return this.get<{ server: Preset[]; mine: Preset[] }>('/presets');
+  }
+  createPreset(name: string, config: SeriesConfig) {
+    return this.post<Preset>('/presets', { name, config });
+  }
+  deletePreset(id: string) {
+    return firstValueFrom(this.http.delete<void>(this.url(`/presets/${id}`)));
   }
 
   invitations() {

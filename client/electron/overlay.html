@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>LoL 1v1 – overlay</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; }
+  body { display: flex; align-items: center; justify-content: center; background: rgba(5, 8, 14, 0.55); }
+  .card {
+    min-width: 520px; padding: 36px 56px; text-align: center; color: #f2f5fa;
+    background: rgba(12, 16, 24, 0.94); border: 2px solid var(--tone); border-radius: 16px;
+    box-shadow: 0 0 60px color-mix(in srgb, var(--tone) 45%, transparent);
+    animation: pop 0.35s ease-out;
+  }
+  .kicker { color: var(--tone); font-weight: 700; letter-spacing: 0.18em; font-size: 14px; text-transform: uppercase; }
+  h1 { margin: 10px 0 6px; font-size: 64px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .subtitle { color: #b7c0cf; font-size: 18px; }
+  .score { margin: 22px 0; font-size: 44px; font-weight: 800; letter-spacing: 0.06em; }
+  .footer { display: inline-block; padding: 12px 22px; border-radius: 10px; background: var(--tone); color: #071016; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+  @keyframes pop { from { transform: scale(0.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="kicker" id="kicker"></div>
+    <h1 id="title"></h1>
+    <div class="subtitle" id="subtitle"></div>
+    <div class="score" id="score"></div>
+    <div class="footer" id="footer"></div>
+  </div>
+  <script>
+    const data = __DATA__;
+    const tones = { win: '#19e3ff', loss: '#ff3366', info: '#ffc94d' };
+    document.documentElement.style.setProperty('--tone', tones[data.tone] || tones.info);
+    document.getElementById('kicker').textContent = 'Validé par le serveur';
+    document.getElementById('title').textContent = data.title;
+    document.getElementById('subtitle').textContent = data.subtitle;
+    document.getElementById('score').textContent = data.score;
+    document.getElementById('footer').textContent = data.footer;
+  </script>
+</body>
+</html>

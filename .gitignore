@@ -1,0 +1,15 @@
+bin/
+obj/
+node_modules/
+dist/
+release/
+.angular/
+*.user
+.vs/
+.vscode/
+.env
+dist-electron/
+appsettings.*.local.json
+
+# Specs gardées en local
+Documents/

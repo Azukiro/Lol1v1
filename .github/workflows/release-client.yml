@@ -1,0 +1,29 @@
+name: Release client Windows
+
+# Pousser un tag vX.Y.Z (même version que client/package.json) publie l'installeur
+# en brouillon dans GitHub Releases ; le publier active la mise à jour automatique.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # le GITHUB_TOKEN intégré suffit pour publier la Release (pas de PAT nécessaire)
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      - run: npm run release
+        env:
+          API_URL: ${{ vars.API_URL }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

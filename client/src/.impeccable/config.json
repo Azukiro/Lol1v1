@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/shared/champion-card.component.ts"
+        ],
+        "createdAt": "2026-10-07T19:18:19.038Z",
+        "reason": "Claude: Angular [src] property binding to Data Dragon URL, rendered only inside @if (image(); as src)"
+      }
+    ]
+  }
+}

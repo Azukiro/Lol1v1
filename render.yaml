@@ -1,0 +1,24 @@
+# Blueprint Render : API ASP.NET Core en conteneur Docker (plan gratuit, Francfort).
+services:
+  - type: web
+    name: lol1v1-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    rootDir: server
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    branch: main
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ConnectionStrings__Default
+        sync: false   # chaîne Npgsql Neon, saisie dans le dashboard
+      - key: Jwt__Key
+        sync: false   # secret fort (≥ 32 caractères), voir CONFIGURATION-EXTERNE.md §3.1
+      - key: Jwt__Issuer
+        value: lol1v1
+      - key: Jwt__Audience
+        value: lol1v1-client

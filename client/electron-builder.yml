@@ -1,0 +1,21 @@
+appId: fr.lol1v1.app
+productName: LoL 1v1
+directories:
+  output: release
+files:
+  - dist/client/browser/**
+  - dist-electron/**
+  - "!dist-electron/src/shared/*.test.js"
+  - electron/overlay.html
+  - package.json
+win:
+  target: nsis
+nsis:
+  oneClick: true
+  perMachine: false
+# Mise à jour automatique via GitHub Releases (le dépôt doit être public pour electron-updater).
+publish:
+  provider: github
+  owner: Azukiro
+  repo: Lol1v1
+  releaseType: draft

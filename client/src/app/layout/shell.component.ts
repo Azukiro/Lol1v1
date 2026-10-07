@@ -1,0 +1,121 @@
+import { Component, computed, inject, OnDestroy, OnInit } from '@angular/core';
+import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { Subscription } from 'rxjs';
+import { ApiService, AuthService } from '../core/api.service';
+import { GameTrackerService } from '../core/game-tracker.service';
+import { HubService } from '../core/hub.service';
+import { ReferenceService } from '../core/reference.service';
+import { ToastService } from '../core/toast.service';
+
+@Component({
+  selector: 'app-shell',
+  imports: [RouterOutlet, RouterLink, RouterLinkActive],
+  template: `
+    <div class="shell">
+      <nav class="rail">
+        <a class="logo" routerLink="/" title="Accueil">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+            <path d="M5 4l14 16M19 4L5 20M8 4H4v4M16 4h4v4" />
+          </svg>
+        </a>
+        <a routerLink="/" routerLinkActive="on" [routerLinkActiveOptions]="{ exact: true }" title="Accueil">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z" /></svg>
+        </a>
+        <a routerLink="/new" routerLinkActive="on" title="Nouveau défi">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14" /></svg>
+        </a>
+        @if (activeSeriesId(); as id) {
+          <a [routerLink]="['/series', id]" routerLinkActive="on" title="Série en cours">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 4l14 16M19 4L5 20" /></svg>
+          </a>
+        }
+        <a routerLink="/history" routerLinkActive="on" title="Historique">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>
+        </a>
+        <span class="spacer"></span>
+        <span class="conn" [class.ok]="hub.state() === 'connected'" [title]="'Serveur arbitre : ' + hub.state()"></span>
+        <button class="me" (click)="logout()" [title]="'Se déconnecter (' + (auth.user()?.displayName ?? '') + ')'">
+          {{ initial() }}
+        </button>
+      </nav>
+      <main class="content"><router-outlet /></main>
+    </div>
+    <div class="toasts">
+      @for (t of toast.toasts(); track t.id) {
+        <div class="toast" [class]="t.tone" (click)="toast.dismiss(t.id)">{{ t.text }}</div>
+      }
+    </div>
+  `,
+  styles: `
+    .shell { display: flex; height: 100vh; }
+    .rail { width: 72px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px 0; background: #080a0f; border-right: 1px solid var(--line); }
+    .rail a, .rail .me { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--muted); }
+    .rail a:hover { color: var(--text); background: var(--panel); }
+    .rail a.on { color: var(--cyan); background: var(--cyan-dim); }
+    .rail .logo { background: var(--cyan); color: #04141a; margin-bottom: 14px; box-shadow: 0 0 18px rgba(25, 227, 255, 0.4); }
+    .rail .logo:hover { background: var(--cyan); color: #04141a; }
+    .rail .me { border: 2px solid var(--cyan); background: transparent; color: var(--cyan); font-family: var(--display); font-weight: 700; cursor: pointer; border-radius: 50%; }
+    .conn { width: 8px; height: 8px; border-radius: 50%; background: var(--pink); }
+    .conn.ok { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .content { flex: 1; overflow: auto; }
+  `,
+})
+export class ShellComponent implements OnInit, OnDestroy {
+  protected readonly auth = inject(AuthService);
+  protected readonly hub = inject(HubService);
+  protected readonly toast = inject(ToastService);
+  private readonly api = inject(ApiService);
+  private readonly tracker = inject(GameTrackerService);
+  private readonly reference = inject(ReferenceService);
+  private readonly router = inject(Router);
+  private sub?: Subscription;
+
+  protected readonly initial = computed(() => (this.auth.user()?.displayName ?? '?').charAt(0).toUpperCase());
+  protected readonly activeSeriesId = this.tracker.activeSeriesId;
+
+  async ngOnInit() {
+    // Réveille le service (Render endormi) pendant que le joueur navigue.
+    void this.api.health().catch(() => undefined);
+    void this.reference.load();
+    this.sub = this.hub.invitations$.subscribe(({ name, invitation }) => {
+      if (name === 'InvitationReceived') this.toast.info(`${invitation.from.displayName} te défie : ${invitation.configLabel}`);
+      if (name === 'InvitationUpdated' && invitation.status === 'ACCEPTED' && invitation.seriesId) {
+        this.toast.success(`${invitation.to.displayName} a accepté ton défi !`);
+        void this.router.navigate(['/series', invitation.seriesId]);
+      }
+      if (name === 'InvitationUpdated' && invitation.status === 'DECLINED') this.toast.info(`${invitation.to.displayName} a refusé ton défi.`);
+    });
+    try {
+      await this.hub.connect();
+      // Reprend la série en cours, s'il y en a une.
+      const running = (await this.api.series()).find((s) => s.status !== 'FINISHED' && s.status !== 'ABORTED');
+      if (running && !this.tracker.activeSeriesId()) {
+        this.tracker.setActive(running.id);
+        await this.hub.join(running.id);
+      }
+    } catch {
+      this.toast.error('Serveur injoignable : il se réveille peut-être (≈ 1 min sur l’offre gratuite).');
+      setTimeout(() => this.retry(), 15000);
+    }
+  }
+
+  private async retry() {
+    try {
+      await this.hub.connect();
+    } catch {
+      setTimeout(() => this.retry(), 15000);
+    }
+  }
+
+  ngOnDestroy() {
+    this.sub?.unsubscribe();
+  }
+
+  async logout() {
+    if (!confirm('Se déconnecter ?')) return;
+    await this.hub.disconnect();
+    this.tracker.setActive(null);
+    this.auth.logout();
+    void this.router.navigateByUrl('/login');
+  }
+}

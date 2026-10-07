@@ -152,7 +152,10 @@ const CONDITIONS: { code: ConditionCode; label: string }[] = [
               <div class="error-text">{{ error() }}</div>
             }
             <button class="btn primary big" (click)="send()" [disabled]="busy() || !!exprError() || !opponent.includes('#')">Envoyer le défi</button>
-            <button class="btn ghost" (click)="savePreset()" [disabled]="busy() || !!exprError()">Enregistrer comme config perso</button>
+            <div class="save">
+              <input class="input" placeholder="Nom de la config perso" maxlength="40" [(ngModel)]="presetName" name="presetName" (keydown.enter)="savePreset()" />
+              <button class="btn" (click)="savePreset()" [disabled]="busy() || !!exprError() || !presetName.trim()">Enregistrer</button>
+            </div>
           </div>
         </aside>
       </div>
@@ -177,6 +180,8 @@ const CONDITIONS: { code: ConditionCode; label: string }[] = [
     dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0; }
     dt { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; align-self: center; }
     dd { margin: 0; font-family: var(--display); font-weight: 700; font-size: 17px; letter-spacing: 0.06em; }
+    .save { display: flex; gap: 8px; }
+    .save .input { flex: 1; }
     .expr { margin: 0; padding: 12px; border-radius: 10px; background: #0a0d13; font-weight: 600; }
     p { margin: 0; }
   `,
@@ -200,6 +205,7 @@ export class NewChallengePage implements OnInit {
   private readonly lol = inject(LolService);
   protected readonly friends = signal<{ riotId: string }[]>([]);
   protected opponent = '';
+  protected presetName = '';
   protected readonly recent = signal<{ userId: string; displayName: string; riotId: string }[]>([]);
   protected readonly bestOf = signal(5);
   protected readonly mode = signal<ChampionMode>('DECK');
@@ -287,12 +293,14 @@ export class NewChallengePage implements OnInit {
   async savePreset() {
     const expr = this.expression();
     if (!expr) return;
-    const name = prompt('Nom de la config (ex. « BO5 deck du jeudi ») :')?.trim();
-    if (!name) return;
+    // window.prompt() n'existe pas dans Electron : le nom vient du champ du récapitulatif.
+    const name = this.presetName.trim();
+    if (!name || this.busy()) return;
     this.busy.set(true);
     try {
       await this.api.createPreset(name, { bestOf: this.bestOf(), championMode: this.mode(), spellMode: this.spellMode(), winExpression: expr });
       this.toast.success(`Config « ${name} » enregistrée : elle apparaît sur l'accueil.`);
+      this.presetName = '';
     } catch (e) {
       this.error.set(errorMessage(e));
     } finally {

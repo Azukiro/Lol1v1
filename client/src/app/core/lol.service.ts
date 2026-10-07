@@ -54,6 +54,10 @@ export class LolService {
     return this.require().lcu.createLobby(opponentPuuid, lobbyName);
   }
 
+  prepareChampSelect(championId: number, spells: [number, number] | null): Promise<boolean> {
+    return this.require().lcu.prepareChampSelect(championId, spells);
+  }
+
   startChampSelect(): Promise<void> {
     return this.require().lcu.startChampSelect();
   }

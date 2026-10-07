@@ -19,6 +19,7 @@ const bridge: Lol1v1Bridge & { loadConfig(): Promise<{ apiUrl: string; version: 
     friends: () => ipcRenderer.invoke('lcu:friends'),
     createLobby: (puuid, name) => ipcRenderer.invoke('lcu:createLobby', puuid, name),
     startChampSelect: () => ipcRenderer.invoke('lcu:startChampSelect'),
+    prepareChampSelect: (championId, spells) => ipcRenderer.invoke('lcu:prepareChampSelect', championId, spells),
     onStatus: (cb) => subscribe('lcu:status', cb),
     onGameflow: (cb) => subscribe('lcu:gameflow', cb),
     onChampSelect: (cb) => subscribe('lcu:champSelect', cb),

@@ -44,6 +44,7 @@ export class GameTrackerService {
   private seenRoundId: string | null = null;
   private startedRoundId: string | null = null;
   private champSelectRoundId: string | null = null;
+  private preparedRoundId: string | null = null;
   private lastChampSelectKey = '';
   private poolSentFor = new Set<string>();
 
@@ -80,6 +81,25 @@ export class GameTrackerService {
       if (round && ['LOBBY', 'CHAMP_SELECT'].includes(round.status) && (phase === 'ChampSelect' || this.lol.champSelect())) {
         this.champSelectRoundId = round.id;
       }
+    });
+
+    // Sélection LoL : survole le champion attribué et règle les sorts (une fois par tentative de manche).
+    effect(() => {
+      const cs = this.lol.champSelect();
+      const s = this.activeSeries();
+      const round = this.currentRound();
+      if (!cs || cs.locked || !s || !round || !['LOBBY', 'CHAMP_SELECT'].includes(round.status)) return;
+      if (this.preparedRoundId === round.id) return;
+      const mine = round.assignments.find((a) => a.slot === s.mySlot);
+      if (!mine?.championId) return;
+      const spells: [number, number] | null = s.spellMode !== 'FREE' && mine.spell1Id && mine.spell2Id ? [mine.spell1Id, mine.spell2Id] : null;
+      this.preparedRoundId = round.id;
+      this.lol
+        .prepareChampSelect(mine.championId, spells)
+        .then((done) => {
+          if (!done) this.preparedRoundId = null; // phase de pick pas encore ouverte : on réessaiera au prochain événement
+        })
+        .catch(() => (this.preparedRoundId = null));
     });
 
     // Début de partie : gameId du gameflow LCU + dernier pick connu.

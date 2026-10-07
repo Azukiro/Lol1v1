@@ -62,7 +62,7 @@ public sealed class TestPlayer : IAsyncDisposable
         var auth = await (await http.PostAsJsonAsync("/api/v1/auth/register", new { email = $"{name}@test.fr", password = "password123", displayName = name }))
             .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<AuthResponse>();
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", auth!.Token);
-        (await http.PostAsJsonAsync("/api/v1/riot-accounts/link", new { puuid = $"puuid-{name}", gameName = name, tagLine = "EUW", region = "EUW" }))
+        (await http.PostAsJsonAsync("/api/v1/riot-accounts/link", new { puuid = $"puuid-{name}", gameName = name, tagLine = "EUW", region = "EUW", profileIconId = 29 }))
             .EnsureSuccessStatusCode();
 
         var hub = new HubConnectionBuilder()
@@ -179,6 +179,7 @@ public class SeriesFlowTests
         var res = await (await a.Http.PostAsJsonAsync("/api/v1/users/lookup", new { puuids = new[] { "puuid-Vorn", "puuid-inconnu" } }))
             .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<List<RegisteredPlayer>>();
         Assert.Equal("Vorn#EUW", Assert.Single(res!).RiotId);
+        Assert.Equal(29, res![0].ProfileIconId);
     }
 
     [Fact]

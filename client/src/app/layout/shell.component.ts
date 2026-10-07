@@ -1,4 +1,4 @@
-import { Component, computed, inject, OnDestroy, OnInit } from '@angular/core';
+import { Component, computed, effect, inject, OnDestroy, OnInit, untracked } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ApiService, AuthService } from '../core/api.service';
@@ -6,10 +6,12 @@ import { GameTrackerService } from '../core/game-tracker.service';
 import { HubService } from '../core/hub.service';
 import { ReferenceService } from '../core/reference.service';
 import { ToastService } from '../core/toast.service';
+import { LolService } from '../core/lol.service';
+import { AvatarComponent } from '../shared/avatar.component';
 
 @Component({
   selector: 'app-shell',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, AvatarComponent],
   template: `
     <div class="shell">
       <nav class="rail">
@@ -38,7 +40,7 @@ import { ToastService } from '../core/toast.service';
         <span class="spacer"></span>
         <span class="conn" [class.ok]="hub.state() === 'connected'" [title]="'Serveur arbitre : ' + hub.state()"></span>
         <button class="me" (click)="logout()" [title]="'Se déconnecter (' + (auth.user()?.displayName ?? '') + ')'">
-          {{ initial() }}
+          <app-avatar [iconId]="myIcon()" [name]="auth.user()?.displayName ?? ''" />
         </button>
       </nav>
       <main class="content"><router-outlet /></main>
@@ -57,7 +59,8 @@ import { ToastService } from '../core/toast.service';
     .rail a.on { color: var(--cyan); background: var(--cyan-dim); }
     .rail .logo { background: var(--cyan); color: #04141a; margin-bottom: 14px; box-shadow: 0 0 18px rgba(25, 227, 255, 0.4); }
     .rail .logo:hover { background: var(--cyan); color: #04141a; }
-    .rail .me { border: 2px solid var(--cyan); background: transparent; color: var(--cyan); font-family: var(--display); font-weight: 700; cursor: pointer; border-radius: 50%; }
+    .rail .me app-avatar { width: 100%; height: 100%; }
+    .rail .me { overflow: hidden; padding: 0; border: 2px solid var(--cyan); background: transparent; color: var(--cyan); font-family: var(--display); font-weight: 700; cursor: pointer; border-radius: 50%; }
     .conn { width: 8px; height: 8px; border-radius: 50%; background: var(--pink); }
     .conn.ok { background: var(--green); box-shadow: 0 0 8px var(--green); }
     .content { flex: 1; overflow: auto; }
@@ -73,8 +76,29 @@ export class ShellComponent implements OnInit, OnDestroy {
   private readonly router = inject(Router);
   private sub?: Subscription;
 
-  protected readonly initial = computed(() => (this.auth.user()?.displayName ?? '?').charAt(0).toUpperCase());
   protected readonly activeSeriesId = this.tracker.activeSeriesId;
+  private readonly lol = inject(LolService);
+  /** Icône du client LoL connecté si c'est le compte lié, sinon celle enregistrée sur le serveur. */
+  protected readonly myIcon = computed(() => {
+    const id = this.lol.status().identity;
+    const linked = this.auth.user()?.riotAccount;
+    return id && linked && id.puuid === linked.puuid ? id.profileIconId : (linked?.profileIconId ?? null);
+  });
+
+  constructor() {
+    // Icône changée dans LoL : on met à jour celle enregistrée sur le serveur (visible par les adversaires).
+    effect(() => {
+      const id = this.lol.status().identity;
+      const linked = this.auth.user()?.riotAccount;
+      if (!id || !linked || id.puuid !== linked.puuid || id.profileIconId === linked.profileIconId) return;
+      untracked(() =>
+        this.api
+          .linkRiot({ puuid: id.puuid, gameName: id.gameName, tagLine: id.tagLine, region: id.region, profileIconId: id.profileIconId })
+          .then(() => this.auth.refresh())
+          .catch(() => undefined),
+      );
+    });
+  }
 
   async ngOnInit() {
     // Réveille le service (Render endormi) pendant que le joueur navigue.

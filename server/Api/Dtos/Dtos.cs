@@ -7,11 +7,11 @@ public sealed record RegisterRequest(string Email, string Password, string Displ
 public sealed record LoginRequest(string Email, string Password);
 public sealed record AuthResponse(string Token, UserDto User);
 public sealed record UserDto(Guid Id, string Email, string DisplayName, RiotAccountDto? RiotAccount);
-public sealed record RiotAccountDto(string Puuid, string GameName, string TagLine, string Region, string RiotId);
-public sealed record LinkRiotRequest(string Puuid, string GameName, string TagLine, string Region);
-public sealed record PlayerSearchResult(Guid UserId, string DisplayName, string RiotId);
+public sealed record RiotAccountDto(string Puuid, string GameName, string TagLine, string Region, string RiotId, int? ProfileIconId);
+public sealed record LinkRiotRequest(string Puuid, string GameName, string TagLine, string Region, int? ProfileIconId = null);
+public sealed record PlayerSearchResult(Guid UserId, string DisplayName, string RiotId, int? ProfileIconId = null);
 public sealed record LookupRequest(string[] Puuids);
-public sealed record RegisteredPlayer(string Puuid, Guid UserId, string DisplayName, string RiotId);
+public sealed record RegisteredPlayer(string Puuid, Guid UserId, string DisplayName, string RiotId, int? ProfileIconId);
 
 // ---- Pré-configurations ----
 public sealed record PresetDto(string Id, string Name, string Description, SeriesConfig Config, bool BuiltIn);
@@ -32,7 +32,7 @@ public sealed record SpellBudgetRequest(Dictionary<int, int> Tokens);
 
 public sealed record SeriesSummaryDto(
     Guid Id, string Status, int BestOf, string ChampionMode, string SpellMode, string WinExpressionLabel,
-    string MySlot, string OpponentName, string OpponentRiotId, int MyWins, int OpponentWins,
+    string MySlot, string OpponentName, string OpponentRiotId, int? OpponentProfileIconId, int MyWins, int OpponentWins,
     string? WinnerSlot, DateTimeOffset CreatedAt, DateTimeOffset? FinishedAt);
 
 public sealed record SeriesStateDto
@@ -62,7 +62,7 @@ public sealed record SeriesStateDto
 public sealed record RulesDto(int MinDeckSize, int BansPerPlayer, int SpellBudget, int SpellCap, IReadOnlyList<int> AllowedSpellIds);
 
 public sealed record PlayerDto(
-    string Slot, Guid UserId, string DisplayName, string RiotId, string Puuid, int RoundsWon,
+    string Slot, Guid UserId, string DisplayName, string RiotId, string Puuid, int? ProfileIconId, int RoundsWon,
     int PoolSize, int FreeCount, DateTimeOffset? PoolUpdatedAt, bool DeckLocked, int DeckSize,
     bool SpellBudgetLocked, bool BansSubmitted);
 

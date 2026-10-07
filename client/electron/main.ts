@@ -104,6 +104,7 @@ function registerIpc() {
   ipcMain.handle('lcu:friends', () => lcu.friends());
   ipcMain.handle('lcu:createLobby', (_e, puuid: string, name: string) => lcu.createLobby(puuid, name));
   ipcMain.handle('lcu:startChampSelect', () => lcu.startChampSelect());
+  ipcMain.handle('lcu:prepareChampSelect', (_e, championId: number, spells: [number, number] | null) => lcu.prepareChampSelect(championId, spells));
   ipcMain.handle('overlay:show', (_e, data: OverlayData) => showOverlay(data));
   ipcMain.handle('overlay:hide', () => hideOverlay());
   ipcMain.handle('notify', (_e, title: string, body: string) => {

@@ -61,6 +61,10 @@ export class ReferenceService {
     return c && this.version() ? `${DDRAGON}/${this.version()}/img/champion/${c.key}.png` : null;
   }
 
+  profileIcon(id: number | null | undefined): string | null {
+    return id != null && id >= 0 && this.version() ? `${DDRAGON}/${this.version()}/img/profileicon/${id}.png` : null;
+  }
+
   spell(id: number | null | undefined): SpellRef | undefined {
     return id == null ? undefined : this.spellMap.get(id);
   }

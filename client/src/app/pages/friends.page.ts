@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { ApiService, errorMessage } from '../core/api.service';
 import { LolService } from '../core/lol.service';
 import type { LolFriend } from '../../shared/ipc';
+import { AvatarComponent } from '../shared/avatar.component';
 
 interface FriendRow extends LolFriend {
   riotId: string;
@@ -29,7 +30,7 @@ const GAME_STATUS: Record<string, string> = {
 /** Amis lus dans le client LoL, croisés avec les comptes de l'app pour les défier en un clic. */
 @Component({
   selector: 'app-friends',
-  imports: [FormsModule],
+  imports: [FormsModule, AvatarComponent],
   template: `
     <div class="page">
       <header class="page-head">
@@ -50,7 +51,7 @@ const GAME_STATUS: Record<string, string> = {
         <div class="card list">
           @for (f of onApp(); track f.puuid) {
             <div class="list-item">
-              <div class="avatar win">{{ f.gameName.charAt(0).toUpperCase() }}</div>
+              <app-avatar class="avatar win" [iconId]="f.icon" [name]="f.gameName" />
               <div class="grow">
                 <strong>{{ f.gameName }}</strong><span class="muted">#{{ f.tagLine }}</span>
                 <div class="muted small"><span class="dot" [class]="statusTone(f)"></span>{{ statusLabel(f) }} · {{ f.appName }} sur l'app</div>
@@ -66,7 +67,7 @@ const GAME_STATUS: Record<string, string> = {
         <div class="card list">
           @for (f of others(); track f.puuid) {
             <div class="list-item dim">
-              <div class="avatar neutral">{{ f.gameName.charAt(0).toUpperCase() }}</div>
+              <app-avatar class="avatar neutral" [iconId]="f.icon" [name]="f.gameName" />
               <div class="grow">
                 <strong>{{ f.gameName }}</strong><span class="muted">#{{ f.tagLine }}</span>
                 <div class="muted small"><span class="dot" [class]="statusTone(f)"></span>{{ statusLabel(f) }}</div>

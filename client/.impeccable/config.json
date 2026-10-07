@@ -20,6 +20,15 @@
         ],
         "createdAt": "2026-10-07T19:19:04.576Z",
         "reason": "Claude: Angular [src] binding to Data Dragon URL inside @if guard"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/shared/avatar.component.ts"
+        ],
+        "createdAt": "2026-10-07T20:45:22.092Z",
+        "reason": "Claude: Angular [src] binding to Data Dragon profile icon inside @if guard"
       }
     ]
   }

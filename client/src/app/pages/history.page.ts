@@ -3,10 +3,11 @@ import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ApiService, errorMessage } from '../core/api.service';
 import { MODE_LABELS, SeriesSummary, SPELL_MODE_LABELS } from '../core/models';
+import { AvatarComponent } from '../shared/avatar.component';
 
 @Component({
   selector: 'app-history',
-  imports: [RouterLink, DatePipe],
+  imports: [RouterLink, DatePipe, AvatarComponent],
   template: `
     <div class="page">
       <header class="page-head">
@@ -21,6 +22,7 @@ import { MODE_LABELS, SeriesSummary, SPELL_MODE_LABELS } from '../core/models';
       <div class="card">
         @for (s of series(); track s.id) {
           <a class="list-item" [routerLink]="['/series', s.id]">
+            <app-avatar class="avatar neutral" [iconId]="s.opponentProfileIconId" [name]="s.opponentName" />
             <div class="avatar" [class.win]="s.winnerSlot === s.mySlot" [class.loss]="s.winnerSlot && s.winnerSlot !== s.mySlot" [class.neutral]="!s.winnerSlot">
               {{ s.status === 'FINISHED' ? (s.winnerSlot === s.mySlot ? 'V' : 'D') : '…' }}
             </div>

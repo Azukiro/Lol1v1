@@ -6,6 +6,7 @@ export interface LcuIdentity {
   tagLine: string;
   summonerId: number;
   region: string;
+  profileIconId: number;
 }
 
 export interface LcuStatus {
@@ -42,6 +43,8 @@ export interface LolFriend {
   /** inGame, championSelect, outOfGame… (vide si hors ligne) */
   gameStatus: string;
   groupName: string;
+  /** Icône d'invocateur (Data Dragon img/profileicon). */
+  icon: number;
 }
 
 export interface GameflowState {
@@ -71,6 +74,7 @@ export interface Lol1v1Bridge {
     friends(): Promise<LolFriend[]>;
     createLobby(opponentPuuid: string, lobbyName: string): Promise<void>;
     startChampSelect(): Promise<void>;
+    prepareChampSelect(championId: number, spells: [number, number] | null): Promise<boolean>;
     onStatus(cb: (s: LcuStatus) => void): () => void;
     onGameflow(cb: (g: GameflowState) => void): () => void;
     onChampSelect(cb: (c: ChampSelectState | null) => void): () => void;

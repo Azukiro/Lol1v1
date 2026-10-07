@@ -63,7 +63,7 @@ public sealed class SeriesService(
             var opp = s.Players.First(p => p.Id != me.Id);
             return new SeriesSummaryDto(s.Id, s.Status.ToString(), s.BestOf, s.ChampionMode.ToString(), s.SpellMode.ToString(),
                 WinExpression.Describe(WinExpression.Parse(s.WinExpression)), me.Slot.ToString(), opp.User.DisplayName,
-                opp.RiotAccount.RiotId, me.RoundsWon, opp.RoundsWon,
+                opp.RiotAccount.RiotId, opp.RiotAccount.ProfileIconId, me.RoundsWon, opp.RoundsWon,
                 s.WinnerPlayerId is null ? null : s.Players.First(p => p.Id == s.WinnerPlayerId).Slot.ToString(),
                 s.CreatedAt, s.FinishedAt);
         }).ToList();
@@ -715,7 +715,7 @@ public sealed class SeriesService(
             Players = series.Players.OrderBy(p => p.Slot).Select(p =>
             {
                 var pool = Pool(p);
-                return new PlayerDto(p.Slot.ToString(), p.UserId, p.User.DisplayName, p.RiotAccount.RiotId, p.RiotAccount.Puuid, p.RoundsWon,
+                return new PlayerDto(p.Slot.ToString(), p.UserId, p.User.DisplayName, p.RiotAccount.RiotId, p.RiotAccount.Puuid, p.RiotAccount.ProfileIconId, p.RoundsWon,
                     pool?.All.Count ?? 0, pool?.Free.Length ?? 0, p.PoolUpdatedAt, p.DeckLockedAt is not null, p.Deck.Count,
                     p.SpellBudgetLockedAt is not null, series.Bans.Any(b => b.ByPlayerId == p.Id));
             }).ToList(),

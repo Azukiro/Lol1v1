@@ -76,7 +76,7 @@ export class ApiService {
     return this.get<{ userId: string; displayName: string; riotId: string }[]>('/users/recent-opponents');
   }
   lookupPlayers(puuids: string[]) {
-    return this.post<{ puuid: string; userId: string; displayName: string; riotId: string }[]>('/users/lookup', { puuids });
+    return this.post<{ puuid: string; userId: string; displayName: string; riotId: string; profileIconId: number | null }[]>('/users/lookup', { puuids });
   }
   searchPlayer(riotId: string) {
     return this.get<{ userId: string; displayName: string; riotId: string }>(`/users/search?riotId=${encodeURIComponent(riotId)}`);

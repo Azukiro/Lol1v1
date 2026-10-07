@@ -23,6 +23,8 @@ public class RiotAccount
     /// <summary>Riot ID normalisé en minuscules ("pseudo#euw") pour la recherche.</summary>
     public string RiotIdNormalized { get; set; } = "";
     public string Region { get; set; } = "";
+    /// <summary>Icône d'invocateur (Data Dragon img/profileicon/{id}.png), rafraîchie à chaque liaison.</summary>
+    public int? ProfileIconId { get; set; }
     public DateTimeOffset LinkedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public string RiotId => $"{GameName}#{TagLine}";

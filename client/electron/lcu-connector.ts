@@ -171,14 +171,14 @@ export class LcuConnector extends EventEmitter {
   // ---------------------------------------------------------------- Lecture
 
   private async loadIdentity(): Promise<LcuIdentity> {
-    const s = await this.request<{ puuid: string; gameName: string; tagLine: string; summonerId: number }>('GET', '/lol-summoner/v1/current-summoner');
+    const s = await this.request<{ puuid: string; gameName: string; tagLine: string; summonerId: number; profileIconId: number }>('GET', '/lol-summoner/v1/current-summoner');
     let region = '';
     try {
       region = (await this.request<{ region: string }>('GET', '/riotclient/region-locale')).region ?? '';
     } catch {
       /* région facultative */
     }
-    return { puuid: s.puuid, gameName: s.gameName, tagLine: s.tagLine, summonerId: s.summonerId, region };
+    return { puuid: s.puuid, gameName: s.gameName, tagLine: s.tagLine, summonerId: s.summonerId, region, profileIconId: s.profileIconId };
   }
 
   /** Champions possédés + rotation gratuite. */
@@ -199,7 +199,7 @@ export class LcuConnector extends EventEmitter {
   /** Liste d'amis du client LoL (chat Riot). */
   async friends(): Promise<LolFriend[]> {
     const list = await this.request<
-      { puuid: string; gameName: string; gameTag: string; availability: string; groupName: string; product: string; lol?: { gameStatus?: string } }[]
+      { puuid: string; gameName: string; gameTag: string; availability: string; groupName: string; product: string; icon: number; lol?: { gameStatus?: string } }[]
     >('GET', '/lol-chat/v1/friends');
     return list
       .filter((f) => f.puuid && f.gameName)
@@ -210,6 +210,7 @@ export class LcuConnector extends EventEmitter {
         availability: f.availability ?? 'offline',
         gameStatus: f.product === 'league_of_legends' ? (f.lol?.gameStatus ?? '') : '',
         groupName: f.groupName ?? '',
+        icon: f.icon,
       }));
   }
 
@@ -259,6 +260,24 @@ export class LcuConnector extends EventEmitter {
 
   async startChampSelect(): Promise<void> {
     await this.request('POST', '/lol-lobby/v1/lobby/custom/start-champ-select');
+  }
+
+  // ---------------------------------------------------------------- Sélection des champions
+
+  /**
+   * Prépare la sélection : survole le champion attribué et règle les sorts.
+   * Le verrouillage reste au joueur (pas d'automatisation du choix final).
+   * Retourne false si la phase de pick du joueur n'est pas encore ouverte.
+   */
+  async prepareChampSelect(championId: number, spells: [number, number] | null): Promise<boolean> {
+    const session = await this.request<ChampSelectSession>('GET', '/lol-champ-select/v1/session');
+    const pick = (session.actions ?? [])
+      .flat()
+      .find((a) => a.actorCellId === session.localPlayerCellId && a.type === 'pick' && !a.completed);
+    if (!pick) return false;
+    if (spells) await this.request('PATCH', '/lol-champ-select/v1/session/my-selection', { spell1Id: spells[0], spell2Id: spells[1] });
+    if (pick.championId !== championId) await this.request('PATCH', `/lol-champ-select/v1/session/actions/${pick.id}`, { championId });
+    return true;
   }
 
   // ---------------------------------------------------------------- Événements
@@ -313,7 +332,7 @@ export class LcuConnector extends EventEmitter {
 export interface ChampSelectSession {
   localPlayerCellId: number;
   myTeam: { cellId: number; championId: number; championPickIntent: number; spell1Id: number; spell2Id: number }[];
-  actions: { actorCellId: number; championId: number; completed: boolean; type: string }[][];
+  actions: { id: number; actorCellId: number; championId: number; completed: boolean; type: string }[][];
 }
 
 export function normalizeChampSelect(session: ChampSelectSession): ChampSelectState | null {

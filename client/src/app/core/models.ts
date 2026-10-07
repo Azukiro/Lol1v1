@@ -12,6 +12,7 @@ export interface RiotAccount {
   tagLine: string;
   region: string;
   riotId: string;
+  profileIconId: number | null;
 }
 
 export interface User {
@@ -30,6 +31,7 @@ export interface PlayerRef {
   userId: string;
   displayName: string;
   riotId: string;
+  profileIconId?: number | null;
 }
 
 export interface SeriesConfig {
@@ -69,6 +71,7 @@ export interface SeriesSummary {
   mySlot: SlotName;
   opponentName: string;
   opponentRiotId: string;
+  opponentProfileIconId: number | null;
   myWins: number;
   opponentWins: number;
   winnerSlot: SlotName | null;
@@ -82,6 +85,7 @@ export interface Player {
   displayName: string;
   riotId: string;
   puuid: string;
+  profileIconId: number | null;
   roundsWon: number;
   poolSize: number;
   freeCount: number;

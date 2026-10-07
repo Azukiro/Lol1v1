@@ -8,10 +8,11 @@ import { HubService } from '../core/hub.service';
 import { LolService } from '../core/lol.service';
 import { Invitation, MODE_LABELS, Preset, SeriesSummary, SPELL_MODE_LABELS } from '../core/models';
 import { ToastService } from '../core/toast.service';
+import { AvatarComponent } from '../shared/avatar.component';
 
 @Component({
   selector: 'app-home',
-  imports: [RouterLink, DatePipe],
+  imports: [RouterLink, DatePipe, AvatarComponent],
   template: `
     <div class="page">
       <header class="page-head">
@@ -83,7 +84,7 @@ import { ToastService } from '../core/toast.service';
           <h2>Invitations</h2>
           @for (inv of received(); track inv.id) {
             <article class="card pink invite">
-              <div class="avatar loss big">{{ inv.from.displayName.charAt(0).toUpperCase() }}</div>
+              <app-avatar class="avatar loss big" [iconId]="inv.from.profileIconId" [name]="inv.from.displayName" />
               <div class="grow">
                 <h3>{{ inv.from.displayName }} te défie</h3>
                 <div class="row wrap chips">
@@ -259,7 +260,7 @@ export class HomePage implements OnInit, OnDestroy {
     if (!id) return;
     this.busy.set(true);
     try {
-      await this.api.linkRiot({ puuid: id.puuid, gameName: id.gameName, tagLine: id.tagLine, region: id.region });
+      await this.api.linkRiot({ puuid: id.puuid, gameName: id.gameName, tagLine: id.tagLine, region: id.region, profileIconId: id.profileIconId });
       await this.auth.refresh();
       this.toast.success(`Compte Riot ${id.gameName}#${id.tagLine} lié.`);
     } catch (e) {

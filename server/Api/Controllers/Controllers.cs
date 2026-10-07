@@ -76,6 +76,7 @@ public sealed class UsersController(AppDbContext db) : ControllerBase
         account.TagLine = req.TagLine.Trim();
         account.RiotIdNormalized = Mapping.NormalizeRiotId(account.GameName, account.TagLine);
         account.Region = req.Region?.Trim() ?? "";
+        if (req.ProfileIconId is > 0) account.ProfileIconId = req.ProfileIconId;
         account.LinkedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
         return Mapping.ToDto(account);
@@ -89,7 +90,7 @@ public sealed class UsersController(AppDbContext db) : ControllerBase
         var key = Mapping.NormalizeRiotId(parts[0], parts[1]);
         var account = await db.RiotAccounts.Include(r => r.User).FirstOrDefaultAsync(r => r.RiotIdNormalized == key);
         if (account is null) return NotFound(new { error = "Aucun joueur lié avec ce Riot ID." });
-        return new PlayerSearchResult(account.UserId, account.User.DisplayName, account.RiotId);
+        return new PlayerSearchResult(account.UserId, account.User.DisplayName, account.RiotId, account.ProfileIconId);
     }
 
     /// <summary>Parmi ces PUUID (amis LoL lus via la LCU), lesquels ont un compte sur l'app.</summary>
@@ -99,7 +100,7 @@ public sealed class UsersController(AppDbContext db) : ControllerBase
         var puuids = (req.Puuids ?? []).Where(p => !string.IsNullOrWhiteSpace(p)).Distinct().Take(500).ToList();
         if (puuids.Count == 0) return [];
         var accounts = await db.RiotAccounts.Include(r => r.User).Where(r => puuids.Contains(r.Puuid)).ToListAsync();
-        return accounts.Select(a => new RegisteredPlayer(a.Puuid, a.UserId, a.User.DisplayName, a.RiotId)).ToList();
+        return accounts.Select(a => new RegisteredPlayer(a.Puuid, a.UserId, a.User.DisplayName, a.RiotId, a.ProfileIconId)).ToList();
     }
 
     /// <summary>Adversaires récents (pour l'écran « Nouveau défi »).</summary>
@@ -112,7 +113,7 @@ public sealed class UsersController(AppDbContext db) : ControllerBase
             .Where(p => seriesIds.Contains(p.SeriesId) && p.UserId != userId)
             .OrderByDescending(p => p.Series.CreatedAt).Take(50).ToListAsync();
         return opponents.DistinctBy(p => p.UserId).Take(5)
-            .Select(p => new PlayerSearchResult(p.UserId, p.User.DisplayName, p.RiotAccount.RiotId)).ToList();
+            .Select(p => new PlayerSearchResult(p.UserId, p.User.DisplayName, p.RiotAccount.RiotId, p.RiotAccount.ProfileIconId)).ToList();
     }
 }
 
@@ -264,8 +265,8 @@ public sealed class InvitationsController(AppDbContext db, SeriesService seriesS
     {
         var config = JsonSerializer.Deserialize<SeriesConfig>(i.Config, Mapping.Json)!;
         return new InvitationDto(i.Id, i.Status.ToString(), config, Mapping.ConfigLabel(config),
-            new PlayerSearchResult(i.FromUserId, i.FromUser.DisplayName, i.FromUser.RiotAccount?.RiotId ?? ""),
-            new PlayerSearchResult(i.ToUserId, i.ToUser.DisplayName, i.ToUser.RiotAccount?.RiotId ?? ""),
+            new PlayerSearchResult(i.FromUserId, i.FromUser.DisplayName, i.FromUser.RiotAccount?.RiotId ?? "", i.FromUser.RiotAccount?.ProfileIconId),
+            new PlayerSearchResult(i.ToUserId, i.ToUser.DisplayName, i.ToUser.RiotAccount?.RiotId ?? "", i.ToUser.RiotAccount?.ProfileIconId),
             i.CreatedAt, i.ExpiresAt, i.SeriesId);
     }
 }
@@ -328,7 +329,7 @@ public static class Mapping
 
     public static UserDto ToDto(User u) => new(u.Id, u.Email, u.DisplayName, u.RiotAccount is null ? null : ToDto(u.RiotAccount));
 
-    public static RiotAccountDto ToDto(RiotAccount r) => new(r.Puuid, r.GameName, r.TagLine, r.Region, r.RiotId);
+    public static RiotAccountDto ToDto(RiotAccount r) => new(r.Puuid, r.GameName, r.TagLine, r.Region, r.RiotId, r.ProfileIconId);
 
     public static string ConfigLabel(SeriesConfig c)
     {

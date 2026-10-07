@@ -99,6 +99,9 @@ function hideOverlay() {
 
 function registerIpc() {
   ipcMain.handle('config', () => ({ apiUrl, version: app.getVersion() }));
+  ipcMain.handle('update:status', () => (updateReady ? { state: 'ready', version: updateReady } : null));
+  // Installation silencieuse puis relance de l'app.
+  ipcMain.handle('update:install', () => autoUpdater.quitAndInstall(true, true));
   ipcMain.handle('lcu:status', () => lcu.status());
   ipcMain.handle('lcu:pool', () => lcu.pool());
   ipcMain.handle('lcu:friends', () => lcu.friends());
@@ -131,12 +134,32 @@ function registerIpc() {
   live.on('data', (d) => send('live:data', d));
 }
 
+/**
+ * Mise à jour automatique depuis GitHub Releases : vérification au démarrage puis toutes les 30 min,
+ * téléchargement en arrière-plan, installation silencieuse à la fermeture (ou tout de suite via l'interface).
+ */
+let updateReady: string | null = null;
+
+function startAutoUpdate() {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('update-available', (info) => send('update:status', { state: 'downloading', version: info.version }));
+  autoUpdater.on('update-downloaded', (info) => {
+    updateReady = info.version;
+    send('update:status', { state: 'ready', version: info.version });
+  });
+  autoUpdater.on('error', () => undefined); // hors ligne, GitHub indisponible… on réessaiera au prochain passage
+  const check = () => void autoUpdater.checkForUpdates().catch(() => undefined);
+  check();
+  setInterval(check, 30 * 60 * 1000);
+}
+
 app.setAppUserModelId('fr.lol1v1.app');
 app.whenReady().then(() => {
   registerIpc();
   createMainWindow();
   lcu.start();
-  if (!isDev) void autoUpdater.checkForUpdatesAndNotify().catch(() => undefined);
+  if (!isDev) startAutoUpdate();
 });
 
 app.on('window-all-closed', () => {

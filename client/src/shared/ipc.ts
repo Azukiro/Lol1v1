@@ -66,6 +66,11 @@ export interface OverlayData {
   tone: 'win' | 'loss' | 'info';
 }
 
+export interface UpdateStatus {
+  state: 'downloading' | 'ready';
+  version: string;
+}
+
 export interface Lol1v1Bridge {
   config: { apiUrl: string; version: string };
   lcu: {
@@ -89,4 +94,9 @@ export interface Lol1v1Bridge {
     hide(): Promise<void>;
   };
   notify(title: string, body: string): Promise<void>;
+  update: {
+    status(): Promise<UpdateStatus | null>;
+    install(): Promise<void>;
+    onStatus(cb: (s: UpdateStatus) => void): () => void;
+  };
 }

@@ -1,5 +1,5 @@
 import { Injectable, signal } from '@angular/core';
-import type { ChampSelectState, GameflowState, LcuPool, LcuStatus, Lol1v1Bridge, LolFriend, OverlayData } from '../../shared/ipc';
+import type { ChampSelectState, GameflowState, LcuPool, LcuStatus, Lol1v1Bridge, LolFriend, OverlayData, UpdateStatus } from '../../shared/ipc';
 
 type Bridge = Lol1v1Bridge & { loadConfig(): Promise<{ apiUrl: string; version: string }> };
 
@@ -22,6 +22,8 @@ export class LolService {
   readonly liveData = signal<unknown>(null);
   /** Incrémenté à chaque changement de la liste d'amis LoL. */
   readonly friendsVersion = signal(0);
+  /** Mise à jour de l'app en cours de téléchargement ou prête à installer. */
+  readonly update = signal<UpdateStatus | null>(null);
 
   constructor() {
     if (!this.bridge) return;
@@ -35,6 +37,8 @@ export class LolService {
     });
     this.bridge.lcu.onChampSelect((c) => this.champSelect.set(c));
     this.bridge.live.onData((d) => this.liveData.set(d));
+    void this.bridge.update.status().then((u) => u && this.update.set(u));
+    this.bridge.update.onStatus((u) => this.update.set(u));
     this.bridge.lcu.onFriendsChanged(() => this.friendsVersion.update((v) => v + 1));
   }
 
@@ -71,6 +75,10 @@ export class LolService {
     await this.bridge.overlay.show(data);
     // Secours : notification Windows (si le jeu est en plein écran exclusif, l'overlay n'est pas visible).
     await this.bridge.notify(data.title, `${data.subtitle} — ${data.footer}`);
+  }
+
+  installUpdate(): Promise<void> {
+    return this.require().update.install();
   }
 
   async hideOverlay(): Promise<void> {

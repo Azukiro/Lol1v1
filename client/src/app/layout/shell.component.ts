@@ -43,7 +43,19 @@ import { AvatarComponent } from '../shared/avatar.component';
           <app-avatar [iconId]="myIcon()" [name]="auth.user()?.displayName ?? ''" />
         </button>
       </nav>
-      <main class="content"><router-outlet /></main>
+      <main class="content">
+        @if (lol.update(); as u) {
+          <div class="update" [class.ready]="u.state === 'ready'">
+            @if (u.state === 'ready') {
+              <span>Mise à jour <strong>{{ u.version }}</strong> prête. Elle s'installera à la fermeture de l'app.</span>
+              <button class="btn small primary" (click)="lol.installUpdate()" [disabled]="inGame()">{{ inGame() ? 'Après la partie' : 'Redémarrer maintenant' }}</button>
+            } @else {
+              <span class="muted">Téléchargement de la mise à jour {{ u.version }}…</span>
+            }
+          </div>
+        }
+        <router-outlet />
+      </main>
     </div>
     <div class="toasts">
       @for (t of toast.toasts(); track t.id) {
@@ -64,6 +76,8 @@ import { AvatarComponent } from '../shared/avatar.component';
     .conn { width: 8px; height: 8px; border-radius: 50%; background: var(--pink); }
     .conn.ok { background: var(--green); box-shadow: 0 0 8px var(--green); }
     .content { flex: 1; overflow: auto; }
+    .update { display: flex; align-items: center; gap: 16px; justify-content: center; padding: 8px 16px; background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: 13px; }
+    .update.ready { background: var(--cyan-dim); border-bottom-color: rgba(25, 227, 255, 0.4); }
   `,
 })
 export class ShellComponent implements OnInit, OnDestroy {
@@ -77,7 +91,9 @@ export class ShellComponent implements OnInit, OnDestroy {
   private sub?: Subscription;
 
   protected readonly activeSeriesId = this.tracker.activeSeriesId;
-  private readonly lol = inject(LolService);
+  protected readonly lol = inject(LolService);
+  /** Pas de redémarrage pendant une partie : l'app suit la manche en cours. */
+  protected readonly inGame = computed(() => ['InProgress', 'GameStart', 'ChampSelect', 'Reconnect'].includes(this.lol.gameflow().phase));
   /** Icône du client LoL connecté si c'est le compte lié, sinon celle enregistrée sur le serveur. */
   protected readonly myIcon = computed(() => {
     const id = this.lol.status().identity;

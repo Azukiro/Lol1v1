@@ -304,7 +304,7 @@ C'est une modification dans le dépôt, mais avec une valeur qui dépend de ton 
 - Alternative sans PAT, si le workflow et les Releases sont dans le **même** dépôt : le workflow peut utiliser `secrets.GITHUB_TOKEN` avec `permissions: contents: write`. Dans ce cas, vérifie **Settings → Actions → General → Workflow permissions**. Ne l'applique que si le workflow est écrit ainsi.
 
 ### 8.4 Releases
-1. Le workflow (ou `electron-builder --publish`) crée une Release, souvent en **brouillon** (*draft*). Va dans **Releases** et clique sur **Publish release**. Tant qu'elle reste en brouillon, `electron-updater` ne la voit pas.
+1. Chaque push sur `dev` touchant `client/` publie automatiquement une Release `v0.1.<n°>` (pas de brouillon, rien à cliquer). `electron-updater` la détecte dans les apps installées (au démarrage puis toutes les 30 min).
 2. Vérifie que la Release contient l'installeur `.exe`, `latest.yml` (indispensable à la mise à jour automatique) et le `.blockmap`.
 3. Envoie à ton ami le lien de la page Releases. Au premier lancement, Windows SmartScreen affichera « Windows a protégé votre ordinateur » (binaire non signé, voir [§11](#11-signature-de-code-windows)) : **Informations complémentaires → Exécuter quand même**.
 4. À chaque nouvelle version, augmente `version` dans `client/package.json`. Sinon, la mise à jour n'est pas proposée.

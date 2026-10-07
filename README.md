@@ -51,7 +51,7 @@ cd client && npm test
 ## Déploiement
 
 - API : `render.yaml` (Blueprint Render, Docker, `server/Dockerfile`), base Neon via `ConnectionStrings__Default`.
-- Client : `API_URL=https://<service>.onrender.com npm run dist` produit l'installeur dans `client/release/`. Un tag `vX.Y.Z` lance `.github/workflows/release-client.yml`, qui publie sur GitHub Releases (mise à jour automatique).
+- Client : chaque push sur `dev` qui touche `client/` lance `.github/workflows/release-client.yml`, qui publie la version `0.1.<n°>` dans GitHub Releases. Les apps installées la téléchargent en arrière-plan et l'installent à la fermeture (bandeau « Redémarrer maintenant » dans l'app). Build local : `API_URL=https://<service>.onrender.com npm run dist` (installeur dans `client/release/`).
 
 ## Choix d'implémentation à connaître
 

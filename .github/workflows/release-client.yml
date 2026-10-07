@@ -1,13 +1,20 @@
 name: Release client Windows
 
-# Pousser un tag vX.Y.Z (même version que client/package.json) publie l'installeur
-# en brouillon dans GitHub Releases ; le publier active la mise à jour automatique.
+# Chaque push sur dev qui touche au client publie une nouvelle version 0.1.<n°>
+# dans GitHub Releases. Les apps installées la détectent, la téléchargent en arrière-plan
+# et l'installent à la fermeture (ou tout de suite via « Redémarrer »).
 on:
   push:
-    tags: ['v*']
+    branches: [dev]
+    paths: ['client/**', '.github/workflows/release-client.yml']
+  workflow_dispatch:
 
 permissions:
   contents: write   # le GITHUB_TOKEN intégré suffit pour publier la Release (pas de PAT nécessaire)
+
+concurrency:
+  group: release-client
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -23,6 +30,10 @@ jobs:
           cache: npm
           cache-dependency-path: client/package-lock.json
       - run: npm ci
+      # Version strictement croissante : la mise à jour automatique compare les numéros de version.
+      - run: npm version "0.1.$((${{ github.run_number }} + 100))" --no-git-tag-version
+        shell: bash
+      - run: npm test
       - run: npm run release
         env:
           API_URL: ${{ vars.API_URL }}

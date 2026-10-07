@@ -10,7 +10,7 @@ services:
     dockerContext: .
     healthCheckPath: /health
     autoDeploy: true
-    branch: main
+    branch: dev
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production

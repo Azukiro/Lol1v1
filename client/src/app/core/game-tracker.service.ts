@@ -130,8 +130,10 @@ export class GameTrackerService {
 
   /** US-4.2 : le créateur crée le lobby Abîme hurlant 1v1 blind pick et invite l'adversaire. */
   async launchLobby() {
+    // L'événement LaunchLobby peut arriver juste après la réponse à RequestLaunch.
+    for (let i = 0; i < 30 && !this.launchOrder(); i++) await new Promise((r) => setTimeout(r, 100));
     const order = this.launchOrder();
-    if (!order) return;
+    if (!order) throw new Error('Le serveur n’a pas donné l’ordre de lancement.');
     const s = this.hub.series()[order.seriesId];
     const round = s?.rounds.find((r) => r.id === order.roundId);
     await this.lol.createLobby(order.opponentPuuid, `1v1 M${round?.number ?? ''} ${order.seriesId.slice(0, 4)}`);

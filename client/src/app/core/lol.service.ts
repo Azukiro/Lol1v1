@@ -58,6 +58,10 @@ export class LolService {
     return this.require().lcu.prepareChampSelect(championId, spells);
   }
 
+  setSummonerSpells(spells: [number, number]): Promise<void> {
+    return this.require().lcu.setSummonerSpells(spells);
+  }
+
   startChampSelect(): Promise<void> {
     return this.require().lcu.startChampSelect();
   }

@@ -280,6 +280,11 @@ export class LcuConnector extends EventEmitter {
     return true;
   }
 
+  /** Règle les sorts d'invocateur, y compris après le verrouillage du champion (modifiables jusqu'à la fin de la sélection). */
+  async setSummonerSpells(spells: [number, number]): Promise<void> {
+    await this.request('PATCH', '/lol-champ-select/v1/session/my-selection', { spell1Id: spells[0], spell2Id: spells[1] });
+  }
+
   // ---------------------------------------------------------------- Événements
 
   private openSocket(): void {

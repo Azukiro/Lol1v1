@@ -187,6 +187,9 @@ export class PickPhaseComponent {
           }
         </div>
 
+        @if (s.spellMode !== 'FREE') {
+          <p class="muted small">Blitz, Porofessor… : désactive l'import automatique des sorts, sinon ils remplacent les sorts imposés.</p>
+        }
         <details class="card manual">
           <summary>Création manuelle (secours)</summary>
           <ol class="muted small">

@@ -45,6 +45,8 @@ export class GameTrackerService {
   private startedRoundId: string | null = null;
   private champSelectRoundId: string | null = null;
   private preparedRoundId: string | null = null;
+  private readonly spellFixes = new Map<string, number>();
+  private spellFixTimer: ReturnType<typeof setTimeout> | null = null;
   private lastChampSelectKey = '';
   private poolSentFor = new Set<string>();
 
@@ -100,6 +102,27 @@ export class GameTrackerService {
           if (!done) this.preparedRoundId = null; // phase de pick pas encore ouverte : on réessaiera au prochain événement
         })
         .catch(() => (this.preparedRoundId = null));
+    });
+
+    // Sorts imposés écrasés par un autre outil (Blitz, Porofessor… importent leurs propres sorts après le pick) :
+    // on les ré-impose, avec un délai pour passer après l'outil et un nombre limité de tentatives.
+    effect(() => {
+      const cs = this.lol.champSelect();
+      const s = this.activeSeries();
+      const round = this.currentRound();
+      if (!cs || !s || s.spellMode === 'FREE' || !round || !['LOBBY', 'CHAMP_SELECT'].includes(round.status)) return;
+      const mine = round.assignments.find((a) => a.slot === s.mySlot);
+      if (!mine?.spell1Id || !mine.spell2Id) return;
+      const expected: [number, number] = [mine.spell1Id, mine.spell2Id];
+      if ([...cs.spells].sort().join() === [...expected].sort().join()) return;
+      const attempts = this.spellFixes.get(round.id) ?? 0;
+      if (attempts >= 5 || this.spellFixTimer) return;
+      this.spellFixes.set(round.id, attempts + 1);
+      this.spellFixTimer = setTimeout(() => {
+        this.spellFixTimer = null;
+        void this.lol.setSummonerSpells(expected).catch(() => undefined);
+      }, 700);
+      if (attempts === 2) this.toast.info('Un autre outil (Blitz ?) change tes sorts : désactive son import automatique des sorts.');
     });
 
     // Début de partie : gameId du gameflow LCU + dernier pick connu.

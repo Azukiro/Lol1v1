@@ -75,6 +75,7 @@ export interface Lol1v1Bridge {
     createLobby(opponentPuuid: string, lobbyName: string): Promise<void>;
     startChampSelect(): Promise<void>;
     prepareChampSelect(championId: number, spells: [number, number] | null): Promise<boolean>;
+    setSummonerSpells(spells: [number, number]): Promise<void>;
     onStatus(cb: (s: LcuStatus) => void): () => void;
     onGameflow(cb: (g: GameflowState) => void): () => void;
     onChampSelect(cb: (c: ChampSelectState | null) => void): () => void;

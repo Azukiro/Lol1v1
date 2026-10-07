@@ -31,16 +31,25 @@ jobs:
           cache-dependency-path: client/package-lock.json
       - run: npm ci
       # Version strictement croissante : la mise à jour automatique compare les numéros de version.
-      # Le tag doit exister avant la publication (GitHub refuse de publier une Release sans tag).
-      - name: Version et tag
+      # Une seule Release en brouillon est créée d'abord : electron-builder y dépose tous ses fichiers
+      # (sinon ses envois parallèles créent plusieurs Releases pour le même tag), puis on la publie.
+      - name: Version et Release brouillon
+        id: version
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="0.1.$((${{ github.run_number }} + 100))"
           npm version "$VERSION" --no-git-tag-version
-          git tag "v$VERSION"
-          git push origin "v$VERSION"
+          gh release create "v$VERSION" --draft --title "$VERSION" --target "$GITHUB_SHA" --notes "Version automatique depuis dev (${GITHUB_SHA::7})."
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - run: npm test
       - run: npm run release
         env:
           API_URL: ${{ vars.API_URL }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publier la Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "v${{ steps.version.outputs.version }}" --draft=false --latest

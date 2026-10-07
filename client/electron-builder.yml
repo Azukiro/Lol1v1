@@ -18,4 +18,4 @@ publish:
   provider: github
   owner: Azukiro
   repo: Lol1v1
-  releaseType: release
+  releaseType: draft

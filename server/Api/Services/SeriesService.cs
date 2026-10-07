@@ -262,6 +262,8 @@ public sealed class SeriesService(
     {
         var round = CurrentRound(series);
         if (round is null || round.Status is not (RoundStatus.LOBBY or RoundStatus.CHAMP_SELECT or RoundStatus.IN_GAME)) return Task.CompletedTask;
+        // Partie déjà utilisée par une manche précédente (pas encore quittée) : ce n'est pas la partie de cette manche.
+        if (lolGameId > 0 && series.Rounds.Any(r => r.Id != round.Id && r.LolGameId == lolGameId)) return Task.CompletedTask;
         var a = round.Assignments.First(x => x.PlayerId == me.Id);
         if (championId is > 0) a.ReportedChampionId = championId;
         if (spells is { Length: 2 }) { a.ReportedSpell1Id = spells[0]; a.ReportedSpell2Id = spells[1]; }

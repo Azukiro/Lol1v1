@@ -43,6 +43,7 @@ export class GameTrackerService {
   private seen = new Set<string>();
   private seenRoundId: string | null = null;
   private startedRoundId: string | null = null;
+  private champSelectRoundId: string | null = null;
   private lastChampSelectKey = '';
   private poolSentFor = new Set<string>();
 
@@ -72,13 +73,25 @@ export class GameTrackerService {
       this.hub.send('ReportChampSelect', s.id, cs.championId, cs.locked, cs.spells);
     });
 
+    // Sélection LoL vue pour la manche courante : seule une partie lancée après elle compte.
+    effect(() => {
+      const phase = this.lol.gameflow().phase;
+      const round = this.currentRound();
+      if (round && ['LOBBY', 'CHAMP_SELECT'].includes(round.status) && (phase === 'ChampSelect' || this.lol.champSelect())) {
+        this.champSelectRoundId = round.id;
+      }
+    });
+
     // Début de partie : gameId du gameflow LCU + dernier pick connu.
+    // Sans sélection vue pour cette manche, une partie « InProgress » est celle de la manche précédente
+    // (pas encore quittée) : on l'ignore, sinon ses kills seraient attribués à la nouvelle manche.
     effect(() => {
       const flow = this.lol.gameflow();
       const s = this.activeSeries();
       const round = this.currentRound();
       if (!s || !round || flow.phase !== 'InProgress') return;
-      if (!['LOBBY', 'CHAMP_SELECT', 'IN_GAME'].includes(round.status) || this.startedRoundId === round.id) return;
+      if (!['LOBBY', 'CHAMP_SELECT'].includes(round.status) || this.startedRoundId === round.id) return;
+      if (this.champSelectRoundId !== round.id) return;
       this.startedRoundId = round.id;
       const cs = untracked(() => this.lol.champSelect());
       this.hub.send('ReportGameStarted', s.id, flow.gameId ?? 0, cs?.championId || null, cs ? cs.spells : null);

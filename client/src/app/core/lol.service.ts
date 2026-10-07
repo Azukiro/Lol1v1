@@ -27,7 +27,12 @@ export class LolService {
     if (!this.bridge) return;
     void this.bridge.lcu.status().then((s) => this.status.set(s));
     this.bridge.lcu.onStatus((s) => this.status.set(s));
-    this.bridge.lcu.onGameflow((g) => this.gameflow.set(g));
+    this.bridge.lcu.onGameflow((g) => {
+      this.gameflow.set(g);
+      // Hors partie, on oublie les données de la partie précédente (et la sélection une fois revenu au lobby).
+      if (!['InProgress', 'GameStart', 'Reconnect'].includes(g.phase)) this.liveData.set(null);
+      if (['None', 'Lobby', 'EndOfGame', 'PreEndOfGame', 'WaitingForStats'].includes(g.phase)) this.champSelect.set(null);
+    });
     this.bridge.lcu.onChampSelect((c) => this.champSelect.set(c));
     this.bridge.live.onData((d) => this.liveData.set(d));
     this.bridge.lcu.onFriendsChanged(() => this.friendsVersion.update((v) => v + 1));

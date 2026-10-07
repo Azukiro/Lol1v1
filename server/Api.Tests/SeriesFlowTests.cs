@@ -219,6 +219,10 @@ public class SeriesFlowTests
         // Observation tardive ignorée.
         await b.Kill(id, "3", 330, "SELF");
 
+        // Partie de la manche 1 pas encore quittée : la signaler pour la manche 2 est ignoré.
+        await b.Hub.InvokeAsync("ReportGameStarted", id, 4242L, (int?)null, (int[]?)null);
+        Assert.Equal("LOBBY", (await a.State(id)).Rounds[1].Status);
+
         // Manche 2 : champion différent, A gagne à nouveau → série terminée 2:0.
         var r2 = state.Rounds[1];
         Assert.NotEqual(state.Rounds[0].Assignments[0].ChampionId, r2.Assignments[0].ChampionId);

@@ -182,8 +182,9 @@ export class GameTrackerService {
         this.launchOrder.set({ seriesId, ...payload });
         break;
       case 'AssignmentReady':
+        // Pas de hideOverlay ici : la manche suivante est créée dans la foulée de RoundResolved,
+        // le bandeau « Manche gagnée » doit rester jusqu'à ce que le joueur quitte la partie.
         this.lastChampSelectKey = '';
-        void this.lol.hideOverlay();
         break;
       case 'PickWarning':
         if (s && payload.slot === s.mySlot) this.toast.error('Champion ou sorts non conformes : corrige avant de verrouiller, sinon la manche sera annulée.');

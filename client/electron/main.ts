@@ -64,13 +64,16 @@ function createMainWindow() {
  * Jamais d'injection dans le processus du jeu. Nécessite le jeu en « fenêtré sans bordure ».
  */
 function showOverlay(data: OverlayData) {
+  // Bandeau compact en haut au centre, sous la barre de score du jeu : la fenêtre ne couvre que le bandeau.
   const { bounds } = screen.getPrimaryDisplay();
+  const width = 440;
+  const height = 92;
   if (!overlayWindow || overlayWindow.isDestroyed()) {
     overlayWindow = new BrowserWindow({
-      x: bounds.x,
-      y: bounds.y,
-      width: bounds.width,
-      height: bounds.height,
+      x: bounds.x + Math.round((bounds.width - width) / 2),
+      y: bounds.y + Math.round(bounds.height * 0.09),
+      width,
+      height,
       transparent: true,
       frame: false,
       resizable: false,

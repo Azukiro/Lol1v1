@@ -215,18 +215,38 @@ export class LcuConnector extends EventEmitter {
 
   // ---------------------------------------------------------------- Lobby
 
-  /** Partie personnalisée Abîme hurlant (map 12), 1 joueur par équipe, blind pick (mutator 1). */
+  /**
+   * File personnalisée « Abîme hurlant (partie personnalisée aveugle) ».
+   * Le client exige désormais un queueId pour créer un lobby perso (sinon : INVALID_LOBBY).
+   */
+  private async customAramBlindQueue(): Promise<{ id: number; gameTypeConfigId: number }> {
+    const fallback = { id: 3200, gameTypeConfigId: 19 };
+    try {
+      const queues = await this.request<
+        { id: number; mapId: number; gameMode: string; category: string; queueAvailability: string; gameTypeConfig?: { id: number } }[]
+      >('GET', '/lol-game-queues/v1/queues');
+      const custom = queues.filter((q) => q.category === 'Custom' && q.mapId === 12 && q.gameMode === 'ARAM' && q.queueAvailability === 'Available');
+      const blind = custom.find((q) => q.id === fallback.id) ?? custom.find((q) => q.gameTypeConfig?.id === fallback.gameTypeConfigId);
+      return blind ? { id: blind.id, gameTypeConfigId: blind.gameTypeConfig?.id ?? fallback.gameTypeConfigId } : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  /** Partie personnalisée Abîme hurlant (map 12), 1 joueur par équipe, blind pick. */
   async createLobby(opponentPuuid: string, lobbyName: string): Promise<void> {
+    const queue = await this.customAramBlindQueue();
     await this.request('POST', '/lol-lobby/v2/lobby', {
+      queueId: queue.id,
       customGameLobby: {
         configuration: {
           gameMode: 'ARAM',
-          gameMutator: '',
-          gameServerRegion: '',
           mapId: 12,
-          mutators: { id: 1 },
+          mutators: { id: queue.gameTypeConfigId },
+          gameTypeConfig: { id: queue.gameTypeConfigId },
           spectatorPolicy: 'AllAllowed',
           teamSize: 1,
+          maxPlayerCount: 2,
         },
         lobbyName,
         lobbyPassword: '',

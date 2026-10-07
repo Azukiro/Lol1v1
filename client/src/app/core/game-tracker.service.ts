@@ -80,7 +80,8 @@ export class GameTrackerService {
     effect(() => {
       const phase = this.lol.gameflow().phase;
       const round = this.currentRound();
-      if (round && ['LOBBY', 'CHAMP_SELECT'].includes(round.status) && (phase === 'ChampSelect' || this.lol.champSelect())) {
+      // Uniquement la phase ChampSelect en cours : la sélection de la manche précédente reste en mémoire pendant la partie.
+      if (round && ['LOBBY', 'CHAMP_SELECT'].includes(round.status) && phase === 'ChampSelect') {
         this.champSelectRoundId = round.id;
       }
     });
@@ -91,7 +92,7 @@ export class GameTrackerService {
       const s = this.activeSeries();
       const round = this.currentRound();
       if (!cs || cs.locked || !s || !round || !['LOBBY', 'CHAMP_SELECT'].includes(round.status)) return;
-      if (this.preparedRoundId === round.id) return;
+      if (this.lol.gameflow().phase !== 'ChampSelect' || this.preparedRoundId === round.id) return;
       const mine = round.assignments.find((a) => a.slot === s.mySlot);
       if (!mine?.championId) return;
       const spells: [number, number] | null = s.spellMode !== 'FREE' && mine.spell1Id && mine.spell2Id ? [mine.spell1Id, mine.spell2Id] : null;
@@ -111,6 +112,7 @@ export class GameTrackerService {
       const s = this.activeSeries();
       const round = this.currentRound();
       if (!cs || !s || s.spellMode === 'FREE' || !round || !['LOBBY', 'CHAMP_SELECT'].includes(round.status)) return;
+      if (this.lol.gameflow().phase !== 'ChampSelect') return;
       const mine = round.assignments.find((a) => a.slot === s.mySlot);
       if (!mine?.spell1Id || !mine.spell2Id) return;
       const expected: [number, number] = [mine.spell1Id, mine.spell2Id];

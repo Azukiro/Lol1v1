@@ -91,19 +91,20 @@ export function extractObservations(data: LiveGameData, expression: WinNode, see
     nameMatches(name, self) ? 'SELF' : nameMatches(name, opponent) ? 'OPPONENT' : null;
 
   const push = (o: Observation) => {
-    const key = `${o.type}:${o.eventId}`;
+    const key = `${o.type}:${o.eventId}:${o.payload.subject}`;
     if (seen.has(key)) return;
     seen.add(key);
     out.push(o);
   };
 
   for (const e of data.events?.Events ?? []) {
-    const id = String(e.EventID);
+    // L'EventID n'est pas stable entre les deux PC ni après une reconnexion : on identifie par l'horodatage de jeu.
+    const id = `t${Math.round(e.EventTime * 1000)}`;
     switch (e.EventName) {
       case 'ChampionKill': {
         // Compte si le jeu attribue le kill au joueur (y compris coup final d'une tour ou d'un minion).
         const subject = subjectOf(e.KillerName);
-        if (subject) push({ type: 'KILL', eventId: id, eventTime: e.EventTime, payload: { subject, raw: e.KillerName } });
+        if (subject) push({ type: 'KILL', eventId: `${id}-${subject}`, eventTime: e.EventTime, payload: { subject, raw: e.KillerName } });
         break;
       }
       case 'FirstBlood': {

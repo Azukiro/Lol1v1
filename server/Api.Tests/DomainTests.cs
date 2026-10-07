@@ -152,6 +152,36 @@ public class ArbitrationTests
     }
 
     [Fact]
+    public void Same_kill_with_different_event_ids_counts_once()
+    {
+        // Partie réelle : le client de A a renuméroté ses événements après une reconnexion (n° 3 chez A, n° 20 chez B).
+        var expr = WinNode.Leaf(Conditions.Kills, 2);
+        var events = new List<ObservedEvent>
+        {
+            E(Slot.A, ObservationType.KILL, "3", 485.3, Slot.B), E(Slot.B, ObservationType.KILL, "20", 485.3, Slot.B),
+        };
+        var o = Arbitration.Evaluate(expr, events, T0.AddSeconds(30));
+        Assert.Equal(1, o.Facts[Slot.B].Kills);
+        Assert.False(o.Confirmed.Single().SingleSource);
+        Assert.Null(o.Winner);
+    }
+
+    [Fact]
+    public void Simultaneous_trade_is_not_a_contradiction()
+    {
+        var expr = WinNode.Leaf(Conditions.Kills, 3);
+        var events = new List<ObservedEvent>
+        {
+            E(Slot.A, ObservationType.KILL, "1", 200, Slot.A), E(Slot.A, ObservationType.KILL, "2", 200, Slot.B),
+            E(Slot.B, ObservationType.KILL, "1", 200, Slot.A), E(Slot.B, ObservationType.KILL, "2", 200, Slot.B),
+        };
+        var o = Arbitration.Evaluate(expr, events, T0);
+        Assert.False(o.Disputed);
+        Assert.Equal(1, o.Facts[Slot.A].Kills);
+        Assert.Equal(1, o.Facts[Slot.B].Kills);
+    }
+
+    [Fact]
     public void Single_source_waits_for_delay()
     {
         var events = new List<ObservedEvent> { E(Slot.B, ObservationType.TURRET, "9", 400, Slot.B) };

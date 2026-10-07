@@ -41,9 +41,9 @@ test('live events: kills, first blood, turrets mapped to SELF / OPPONENT and ded
   assert.deepEqual(
     obs.map((o) => [o.type, o.eventId, o.payload.subject]),
     [
-      ['FIRST_BLOOD', '1', 'SELF'],
-      ['KILL', '2', 'SELF'],
-      ['TURRET', '4', 'OPPONENT'],
+      ['FIRST_BLOOD', 't95000', 'SELF'],
+      ['KILL', 't95000-SELF', 'SELF'],
+      ['TURRET', 't300000', 'OPPONENT'],
     ],
   );
   assert.equal(extractObservations(data, expr, seen).length, 0);
@@ -69,6 +69,15 @@ test('live events: current turret naming (Turret_TOrder_…) counts for the dest
   const obs = extractObservations(data, expr, new Set());
   assert.deepEqual(obs.map((o) => [o.type, o.payload.subject]), [['TURRET', 'SELF']]);
   assert.equal(localFacts(data).self.firstTowerTime, 183.3);
+});
+
+test('live events: renumbered EventIDs after a reconnection are not mistaken for duplicates', () => {
+  const seen = new Set<string>();
+  const kill = (id: number, t: number, killer: string) => ({ EventID: id, EventName: 'ChampionKill', EventTime: t, KillerName: killer, VictimName: 'x' });
+  extractObservations(game({ Events: [kill(1, 35.5, 'Kaelis')] }), expr, seen);
+  // Après reconnexion le client repart à EventID 1 : ce nouveau kill doit être remonté.
+  const obs = extractObservations(game({ Events: [kill(1, 430.9, 'Kaelis')] }), expr, seen);
+  assert.deepEqual(obs.map((o) => [o.type, o.eventTime]), [['KILL', 430.9]]);
 });
 
 test('live events: CS thresholds and opponent view', () => {

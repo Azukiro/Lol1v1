@@ -34,6 +34,29 @@ public static class Arbitration
     public static readonly TimeSpan ConfirmationDelay = TimeSpan.FromSeconds(10);
     public const int CsTolerance = 10;
 
+    /** Écart maximal d'horodatage entre deux remontées du même événement. */
+    public const double SameEventTolerance = 0.3;
+
+    /// <summary>Regroupe les remontées d'un même type dont l'horodatage de jeu coïncide (à la tolérance près).</summary>
+    private static IEnumerable<List<ObservedEvent>> SharedEventClusters(IReadOnlyList<ObservedEvent> events)
+    {
+        foreach (var byType in events.Where(e => e.Type is ObservationType.KILL or ObservationType.FIRST_BLOOD or ObservationType.TURRET)
+                                     .GroupBy(e => e.Type))
+        {
+            List<ObservedEvent>? current = null;
+            foreach (var e in byType.OrderBy(e => e.EventTime))
+            {
+                if (current is null || e.EventTime - current[^1].EventTime > SameEventTolerance)
+                {
+                    if (current is not null) yield return current;
+                    current = [];
+                }
+                current.Add(e);
+            }
+            if (current is not null) yield return current;
+        }
+    }
+
     public static ArbitrationOutcome Evaluate(WinNode expression, IReadOnlyList<ObservedEvent> events, DateTimeOffset now)
     {
         var outcome = new ArbitrationOutcome();
@@ -41,24 +64,29 @@ public static class Arbitration
 
         void Pending(double t) => outcome.EarliestPendingTime = Math.Min(outcome.EarliestPendingTime ?? double.MaxValue, t);
 
-        // 1. Événements partagés (kills, first blood, tours) : même EventID vu par les deux clients.
-        foreach (var group in events.Where(e => e.Type is ObservationType.KILL or ObservationType.FIRST_BLOOD or ObservationType.TURRET)
-                                    .GroupBy(e => (e.Type, e.EventId)))
+        // 1. Événements partagés (kills, first blood, tours) : rapprochés par type et horodatage de jeu.
+        //    L'EventID n'est pas fiable entre les deux PC (le client LoL renumérote après une reconnexion).
+        foreach (var cluster in SharedEventClusters(events))
         {
-            var subjects = group.Select(e => e.Subject).Distinct().ToList();
-            var first = group.OrderBy(e => e.ReceivedAt).First();
-            if (subjects.Count > 1)
+            var eventTime = cluster.Min(e => e.EventTime);
+            var key = $"{cluster[0].Type}@{eventTime:0.0}";
+            var bySubject = cluster.GroupBy(e => e.Reporter).ToDictionary(g => g.Key, g => g.Select(e => e.Subject).ToHashSet());
+            // (un même client qui renvoie le même instant sous un autre identifiant ne compte qu'une fois : HashSet)
+            // Les deux clients ont vu l'instant mais ne l'attribuent pas pareil (un échange simultané est vu identique des deux côtés).
+            if (bySubject.Count == 2 && !bySubject[Slot.A].SetEquals(bySubject[Slot.B]))
             {
-                outcome.Contradictions.Add($"{group.Key.Type} #{group.Key.EventId} : attribution contradictoire.");
+                outcome.Contradictions.Add($"{cluster[0].Type} à {eventTime:0.0} s : attribution contradictoire.");
                 continue;
             }
-            var reporters = group.Select(e => e.Reporter).Distinct().Count();
-            var eventTime = group.Min(e => e.EventTime);
-            bool single;
-            if (reporters >= 2) single = false;
-            else if (now - first.ReceivedAt >= ConfirmationDelay) single = true;
-            else { Pending(eventTime); continue; }
-            outcome.Confirmed.Add(new ConfirmedEvent(group.Key.Type, group.Key.EventId, eventTime, subjects[0], null, single));
+            foreach (var subject in bySubject.Values.SelectMany(s => s).Distinct())
+            {
+                var reports = cluster.Where(e => e.Subject == subject).ToList();
+                bool single;
+                if (reports.Select(e => e.Reporter).Distinct().Count() >= 2) single = false;
+                else if (now - reports.Min(e => e.ReceivedAt) >= ConfirmationDelay) single = true;
+                else { Pending(eventTime); continue; }
+                outcome.Confirmed.Add(new ConfirmedEvent(cluster[0].Type, $"{key}:{subject}", eventTime, subject, null, single));
+            }
         }
 
         // 2. CS : auto-déclaré par le joueur, corroboré par la vue de l'adversaire (± tolérance).

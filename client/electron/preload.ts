@@ -35,6 +35,13 @@ const bridge: Lol1v1Bridge & { loadConfig(): Promise<{ apiUrl: string; version: 
   },
   notify: (title, body) => ipcRenderer.invoke('notify', title, body),
   attention: () => ipcRenderer.invoke('window:attention'),
+  window: {
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
+    close: () => ipcRenderer.invoke('window:close'),
+    isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+    onMaximized: (cb) => subscribe('window:maximized', cb),
+  },
   update: {
     status: () => ipcRenderer.invoke('update:status'),
     install: () => ipcRenderer.invoke('update:install'),

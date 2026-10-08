@@ -39,7 +39,7 @@ import { AuthService, errorMessage } from '../core/api.service';
     </div>
   `,
   styles: `
-    .wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px;
+    .wrap { min-height: 100%; display: grid; place-items: center; padding: 24px;
       background: radial-gradient(circle at 20% 20%, rgba(25, 227, 255, 0.08), transparent 40%), radial-gradient(circle at 80% 80%, rgba(255, 51, 102, 0.08), transparent 40%); }
     .box { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 16px; padding: 32px; }
     h1 { font-size: 36px; }

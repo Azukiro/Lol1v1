@@ -8,6 +8,7 @@ import { HubService } from '../core/hub.service';
 import { LolService } from '../core/lol.service';
 import { Invitation, MODE_LABELS, Preset, SeriesSummary, SPELL_MODE_LABELS } from '../core/models';
 import { ToastService } from '../core/toast.service';
+import { ConfirmService } from '../core/confirm.service';
 import { AvatarComponent } from '../shared/avatar.component';
 
 @Component({
@@ -98,8 +99,16 @@ import { AvatarComponent } from '../shared/avatar.component';
           }
           @for (inv of sent(); track inv.id) {
             <article class="card sent">
-              <span class="dot wait"></span>
-              <span>Défi envoyé à <strong>{{ inv.to.displayName }}</strong> ({{ inv.to.riotId }}) · {{ inv.configLabel }}</span>
+              <app-avatar class="avatar neutral" [iconId]="inv.to.profileIconId" [name]="inv.to.displayName" />
+              <div class="grow">
+                <div class="who"><span class="dot wait"></span>Défi envoyé à <strong>{{ inv.to.displayName }}</strong> <span class="muted">{{ inv.to.riotId }}</span></div>
+                <div class="row wrap chips">
+                  <span class="chip">BO{{ inv.config.bestOf }}</span>
+                  <span class="chip">{{ modeLabel[inv.config.championMode] }}</span>
+                  <span class="chip">{{ spellLabel[inv.config.spellMode] }}</span>
+                </div>
+                <div class="muted small">{{ condLabel(inv.configLabel) }} · expire {{ inv.expiresAt | date: 'dd/MM HH:mm' }}</div>
+              </div>
             </article>
           }
           @if (!received().length && !sent().length) {
@@ -123,7 +132,14 @@ import { AvatarComponent } from '../shared/avatar.component';
                 </div>
               </div>
               <div class="row between">
-                <span class="muted small">BO{{ s.bestOf }} · {{ modeLabel[s.championMode] }} · {{ s.winExpressionLabel }}</span>
+                <div class="stack tight">
+                  <div class="row wrap chips">
+                    <span class="chip">BO{{ s.bestOf }}</span>
+                    <span class="chip">{{ modeLabel[s.championMode] }}</span>
+                    <span class="chip">{{ spellLabel[s.spellMode] }}</span>
+                  </div>
+                  <span class="muted small">{{ s.winExpressionLabel }}</span>
+                </div>
                 <span class="btn outline small">{{ s.status === 'SETUP' ? 'Préparer' : s.status === 'BANS' ? 'Bannir' : 'Continuer' }} →</span>
               </div>
             </a>
@@ -139,7 +155,7 @@ import { AvatarComponent } from '../shared/avatar.component';
     .link p { margin: 6px 0 0; }
     .presets { margin-bottom: 32px; }
     .presets h2 { margin: 0; }
-    .strip { display: grid; grid-auto-flow: column; grid-auto-columns: 230px; gap: 14px; overflow-x: auto; padding: 14px 2px 10px; }
+    .strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; padding-top: 14px; }
     .preset { display: flex; flex-direction: column; gap: 10px; padding: 16px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel); cursor: pointer; transition: border-color 0.15s, transform 0.1s; }
     .preset:hover, .preset:focus-visible { border-color: var(--cyan); outline: none; transform: translateY(-2px); }
     .preset.mine:hover, .preset.mine:focus-visible { border-color: var(--yellow); }
@@ -156,7 +172,10 @@ import { AvatarComponent } from '../shared/avatar.component';
     .chips { gap: 6px; }
     .grow { flex: 1; min-width: 0; }
     .small { font-size: 12px; }
-    .sent { display: flex; align-items: center; gap: 8px; padding: 14px 18px; }
+    .sent { display: flex; align-items: center; gap: 14px; padding: 14px 18px; }
+    .sent .who { margin-bottom: 8px; }
+    .sent .chips { margin-bottom: 6px; }
+    .tight { gap: 6px; }
     .current { display: flex; flex-direction: column; gap: 14px;
       background: linear-gradient(110deg, rgba(25, 227, 255, 0.07), var(--panel) 50%, rgba(255, 51, 102, 0.07)); }
     .current:hover { border-color: #3a465c; }
@@ -173,6 +192,7 @@ export class HomePage implements OnInit, OnDestroy {
   private readonly tracker = inject(GameTrackerService);
   private readonly toast = inject(ToastService);
   private readonly router = inject(Router);
+  private readonly confirm = inject(ConfirmService);
   private sub?: Subscription;
 
   protected readonly modeLabel = MODE_LABELS;
@@ -242,7 +262,7 @@ export class HomePage implements OnInit, OnDestroy {
 
   async deletePreset(p: Preset, event: Event) {
     event.stopPropagation();
-    if (!confirm(`Supprimer la config « ${p.name} » ?`)) return;
+    if (!(await this.confirm.ask({ title: 'Supprimer la config ?', text: `« ${p.name} » sera retirée de tes configs prêtes.`, confirmLabel: 'Supprimer', danger: true }))) return;
     try {
       await this.api.deletePreset(p.id);
       this.presets.update((list) => list.filter((x) => x.id !== p.id));

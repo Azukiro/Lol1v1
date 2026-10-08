@@ -1,17 +1,20 @@
-import { Component, computed, effect, inject, OnDestroy, OnInit, untracked } from '@angular/core';
+import { Component, computed, effect, ElementRef, inject, OnDestroy, OnInit, signal, untracked } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { Subscription } from 'rxjs';
-import { ApiService, appConfig as runtimeConfig, AuthService } from '../core/api.service';
+import { ApiService, AuthService } from '../core/api.service';
 import { GameTrackerService } from '../core/game-tracker.service';
 import { HubService } from '../core/hub.service';
 import { ReferenceService } from '../core/reference.service';
 import { ToastService } from '../core/toast.service';
 import { LolService } from '../core/lol.service';
 import { AvatarComponent } from '../shared/avatar.component';
+import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
+import { ConfirmService } from '../core/confirm.service';
 
 @Component({
   selector: 'app-shell',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, AvatarComponent],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, AvatarComponent, ConfirmDialogComponent],
+  host: { '(document:click)': 'closeMenu($event)', '(document:keydown.escape)': 'menuOpen.set(false)' },
   template: `
     <div class="shell">
       <nav class="rail">
@@ -39,10 +42,26 @@ import { AvatarComponent } from '../shared/avatar.component';
         </a>
         <span class="spacer"></span>
         <span class="conn" [class.ok]="hub.state() === 'connected'" [title]="'Serveur arbitre : ' + hub.state()"></span>
-        <button class="me" (click)="logout()" [title]="'Se déconnecter (' + (auth.user()?.displayName ?? '') + ')'">
-          <app-avatar [iconId]="myIcon()" [name]="auth.user()?.displayName ?? ''" />
-        </button>
-        <span class="version" [title]="'Version de l’app : ' + version">v{{ version }}</span>
+        <div class="profile">
+          <button class="me" [class.open]="menuOpen()" (click)="menuOpen.set(!menuOpen())" title="Mon profil" aria-haspopup="menu" [attr.aria-expanded]="menuOpen()">
+            <app-avatar [iconId]="myIcon()" [name]="auth.user()?.displayName ?? ''" />
+          </button>
+          @if (menuOpen()) {
+            <div class="menu" role="menu">
+              <div class="who">
+                <app-avatar class="mini" [iconId]="myIcon()" [name]="auth.user()?.displayName ?? ''" />
+                <div>
+                  <strong>{{ auth.user()?.displayName }}</strong>
+                  <div class="muted small">{{ auth.user()?.riotAccount?.riotId ?? 'Compte Riot non lié' }}</div>
+                </div>
+              </div>
+              <button class="item danger" role="menuitem" (click)="logout()">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10" /></svg>
+                Se déconnecter
+              </button>
+            </div>
+          }
+        </div>
       </nav>
       <main class="content">
         @if (lol.update(); as u) {
@@ -58,6 +77,7 @@ import { AvatarComponent } from '../shared/avatar.component';
         <router-outlet />
       </main>
     </div>
+    <app-confirm-dialog />
     <div class="toasts">
       @for (t of toast.toasts(); track t.id) {
         <div class="toast" [class]="t.tone" (click)="toast.dismiss(t.id)">{{ t.text }}</div>
@@ -65,18 +85,29 @@ import { AvatarComponent } from '../shared/avatar.component';
     </div>
   `,
   styles: `
-    .shell { display: flex; height: 100vh; }
+    .shell { display: flex; height: 100%; }
     .rail { width: 72px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px 0; background: #080a0f; border-right: 1px solid var(--line); }
     .rail a, .rail .logo, .rail .me { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--muted); }
     .rail a:hover { color: var(--text); background: var(--panel); }
     .rail a.on { color: var(--cyan); background: var(--cyan-dim); }
     .rail .logo { background: var(--cyan); color: #04141a; margin-bottom: 14px; box-shadow: 0 0 18px rgba(25, 227, 255, 0.4); }
     .rail .me app-avatar { width: 100%; height: 100%; }
+    .profile { position: relative; }
+    .rail .me.open { box-shadow: 0 0 0 3px var(--cyan-dim), 0 0 16px rgba(25, 227, 255, 0.4); }
+    .menu { position: absolute; z-index: 40; left: calc(100% + 14px); bottom: 0; width: 240px; padding: 8px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel-2); box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55); animation: pop 0.12s ease-out; }
+    .who { display: flex; align-items: center; gap: 10px; padding: 8px 8px 12px; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+    .who .mini { width: 36px; height: 36px; border-radius: 50%; overflow: hidden; flex-shrink: 0; }
+    .who strong { font-family: var(--display); letter-spacing: 0.06em; text-transform: uppercase; }
+    .small { font-size: 12px; }
+    .item { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: none; border-radius: 8px; background: none; cursor: pointer; text-align: left; }
+    .item:hover { background: var(--panel); }
+    .item.danger { color: var(--pink); }
+    .item.danger:hover { background: var(--pink-dim); }
+    @keyframes pop { from { opacity: 0; transform: translateX(-4px); } }
     .rail .me { overflow: hidden; padding: 0; border: 2px solid var(--cyan); background: transparent; color: var(--cyan); font-family: var(--display); font-weight: 700; cursor: pointer; border-radius: 50%; }
     .conn { width: 8px; height: 8px; border-radius: 50%; background: var(--pink); }
     .conn.ok { background: var(--green); box-shadow: 0 0 8px var(--green); }
     .content { flex: 1; overflow: auto; }
-    .version { font-size: 10px; color: var(--muted); letter-spacing: 0.02em; }
     .update { display: flex; align-items: center; gap: 16px; justify-content: center; padding: 8px 16px; background: var(--panel-2); border-bottom: 1px solid var(--line); font-size: 13px; }
     .update.ready { background: var(--cyan-dim); border-bottom-color: rgba(25, 227, 255, 0.4); }
   `,
@@ -89,11 +120,13 @@ export class ShellComponent implements OnInit, OnDestroy {
   private readonly tracker = inject(GameTrackerService);
   private readonly reference = inject(ReferenceService);
   private readonly router = inject(Router);
+  private readonly confirm = inject(ConfirmService);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private sub?: Subscription;
+  protected readonly menuOpen = signal(false);
 
   protected readonly activeSeriesId = this.tracker.activeSeriesId;
   protected readonly lol = inject(LolService);
-  protected readonly version = runtimeConfig.version || 'dev';
   /** Pas de redémarrage pendant une partie : l'app suit la manche en cours. */
   protected readonly inGame = computed(() => ['InProgress', 'GameStart', 'ChampSelect', 'Reconnect'].includes(this.lol.gameflow().phase));
   /** Icône du client LoL connecté si c'est le compte lié, sinon celle enregistrée sur le serveur. */
@@ -157,8 +190,14 @@ export class ShellComponent implements OnInit, OnDestroy {
     this.sub?.unsubscribe();
   }
 
+  protected closeMenu(event: Event) {
+    const profile = this.host.nativeElement.querySelector('.profile');
+    if (profile && !profile.contains(event.target as Node)) this.menuOpen.set(false);
+  }
+
   async logout() {
-    if (!confirm('Se déconnecter ?')) return;
+    this.menuOpen.set(false);
+    if (!(await this.confirm.ask({ title: 'Se déconnecter ?', text: 'Tu devras te reconnecter pour défier tes amis.', confirmLabel: 'Se déconnecter', danger: true }))) return;
     await this.hub.disconnect();
     this.tracker.setActive(null);
     this.auth.logout();

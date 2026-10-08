@@ -5,6 +5,7 @@ import { ApiService, AuthService, errorMessage } from '../core/api.service';
 import { LolService } from '../core/lol.service';
 import { ChampionMode, MODE_LABELS, SeriesConfig, SpellMode, SPELL_MODE_LABELS } from '../core/models';
 import { ToastService } from '../core/toast.service';
+import { SelectComponent, SelectOption } from '../shared/select.component';
 import { ConditionCode, describe, needsThreshold, validate, WinNode } from '../../shared/rules-engine';
 
 interface Cond {
@@ -25,7 +26,7 @@ const CONDITIONS: { code: ConditionCode; label: string }[] = [
 
 @Component({
   selector: 'app-new-challenge',
-  imports: [FormsModule],
+  imports: [FormsModule, SelectComponent],
   template: `
     <div class="page">
       <header class="page-head">
@@ -107,11 +108,7 @@ const CONDITIONS: { code: ConditionCode; label: string }[] = [
                       <button class="op inner" (click)="toggleGroupOp(i)">{{ item.op === 'OR' ? 'OU' : 'ET' }}</button>
                     }
                     <div class="row cond">
-                      <select class="input" [ngModel]="c.condition" (ngModelChange)="setCond(i, j, $event)">
-                        @for (opt of conditions; track opt.code) {
-                          <option [value]="opt.code" [disabled]="takenBySiblings(i, j).has(opt.code)">{{ opt.label }}</option>
-                        }
-                      </select>
+                      <app-select [options]="condOptions(i, j)" [value]="c.condition" (valueChange)="setCond(i, j, $event)" />
                       @if (needsThreshold(c.condition)) {
                         <span class="muted">≥</span>
                         <input class="input num" type="number" [min]="c.condition === 'CS' ? 10 : 1" [step]="c.condition === 'CS' ? 10 : 1" [ngModel]="c.threshold" (ngModelChange)="setThreshold(i, j, $event)" />
@@ -178,7 +175,6 @@ const CONDITIONS: { code: ConditionCode; label: string }[] = [
     .small { font-size: 12px; }
     .cond-block { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
     .cond-block.group { border-color: rgba(255, 201, 77, 0.4); }
-    .cond select { min-width: 200px; }
     .op { align-self: flex-start; padding: 4px 14px; border-radius: 8px; border: 1px solid rgba(255, 201, 77, 0.5); background: transparent; color: var(--yellow); font-family: var(--display); font-weight: 700; letter-spacing: 0.1em; cursor: pointer; }
     .op.inner { margin-left: 12px; }
     .add-inner { align-self: flex-start; color: var(--muted); }
@@ -346,6 +342,11 @@ export class NewChallengePage implements OnInit {
     const taken = item.conds.length === 1 ? new Set(this.topCodes()) : new Set(item.conds.filter((_, m) => m !== j).map((c) => c.condition));
     taken.delete(own);
     return taken;
+  }
+
+  protected condOptions(i: number, j: number): SelectOption<ConditionCode>[] {
+    const taken = this.takenBySiblings(i, j);
+    return this.conditions.map((c) => ({ value: c.code, label: c.label, disabled: taken.has(c.code) }));
   }
 
   protected freeCode(taken: Set<ConditionCode>): ConditionCode | undefined {

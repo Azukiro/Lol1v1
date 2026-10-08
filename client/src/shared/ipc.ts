@@ -96,6 +96,14 @@ export interface Lol1v1Bridge {
   notify(title: string, body: string): Promise<void>;
   /** Ramène la fenêtre de l'app au premier plan. */
   attention(): Promise<void>;
+  /** Contrôles de la fenêtre sans cadre (barre de titre de l'app). */
+  window: {
+    minimize(): Promise<void>;
+    toggleMaximize(): Promise<void>;
+    close(): Promise<void>;
+    isMaximized(): Promise<boolean>;
+    onMaximized(cb: (maximized: boolean) => void): () => void;
+  };
   update: {
     status(): Promise<UpdateStatus | null>;
     install(): Promise<void>;

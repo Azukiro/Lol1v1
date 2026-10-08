@@ -39,6 +39,8 @@ function createMainWindow() {
     minHeight: 680,
     backgroundColor: '#0b0e14',
     title: `LoL 1v1 v${app.getVersion()}`,
+    // Barre de titre dessinée par l'app (TitleBarComponent) : pas de cadre Windows.
+    frame: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -55,6 +57,8 @@ function createMainWindow() {
   });
   if (isDev) void mainWindow.loadURL(DEV_URL);
   else void mainWindow.loadFile(path.join(__dirname, '..', '..', 'dist', 'client', 'browser', 'index.html'));
+  mainWindow.on('maximize', () => send('window:maximized', true));
+  mainWindow.on('unmaximize', () => send('window:maximized', false));
   mainWindow.on('closed', () => {
     mainWindow = null;
     overlayWindow?.close();
@@ -127,6 +131,10 @@ function registerIpc() {
   ipcMain.handle('overlay:show', (_e, data: OverlayData) => showOverlay(data));
   ipcMain.handle('overlay:hide', () => hideOverlay());
   ipcMain.handle('window:attention', () => bringToFront());
+  ipcMain.handle('window:minimize', () => mainWindow?.minimize());
+  ipcMain.handle('window:toggleMaximize', () => (mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize()));
+  ipcMain.handle('window:close', () => mainWindow?.close());
+  ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized() ?? false);
   ipcMain.handle('notify', (_e, title: string, body: string) => {
     if (Notification.isSupported()) new Notification({ title, body, urgency: 'critical' }).show();
   });

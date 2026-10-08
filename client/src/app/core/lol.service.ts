@@ -24,6 +24,10 @@ export class LolService {
   readonly friendsVersion = signal(0);
   /** Mise à jour de l'app en cours de téléchargement ou prête à installer. */
   readonly update = signal<UpdateStatus | null>(null);
+  /** Fenêtre agrandie (icône du bouton agrandir / restaurer). */
+  readonly maximized = signal(false);
+  /** Contrôles de la fenêtre, absents hors Electron. */
+  readonly window = this.bridge?.window;
   /** Demande de premier plan reçue pendant une partie : servie à la sortie de la partie. */
   private attentionPending = false;
   private static readonly BUSY_PHASES = ['ChampSelect', 'GameStart', 'InProgress', 'Reconnect'];
@@ -54,6 +58,8 @@ export class LolService {
     void this.bridge.update.status().then((u) => u && this.update.set(u));
     this.bridge.update.onStatus((u) => this.update.set(u));
     this.bridge.lcu.onFriendsChanged(() => this.friendsVersion.update((v) => v + 1));
+    void this.bridge.window.isMaximized().then((m) => this.maximized.set(m));
+    this.bridge.window.onMaximized((m) => this.maximized.set(m));
   }
 
   async loadConfig(): Promise<{ apiUrl: string; version: string } | null> {

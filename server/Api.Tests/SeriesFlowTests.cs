@@ -240,6 +240,17 @@ public class SeriesFlowTests
         var history = await b.Http.GetFromJsonAsync<List<SeriesSummaryDto>>("/api/v1/series?status=FINISHED", ApiJson.Options);
         Assert.Single(history!);
         Assert.Equal(0, history![0].MyWins);
+
+        // Historique détaillé, vu de B : manche 1 perdue sur 2 kills de A.
+        var detailed = await b.Http.GetFromJsonAsync<List<HistoryEntryDto>>("/api/v1/series/history", ApiJson.Options);
+        var entry = Assert.Single(detailed!);
+        Assert.Equal(2, entry.Rounds.Count);
+        var round1 = entry.Rounds[0];
+        Assert.Equal("A", round1.WinnerSlot);
+        Assert.Equal(2, round1.Opponent.Kills);
+        Assert.Equal(0, round1.Me.Kills);
+        Assert.Equal(r1.Assignments[0].ChampionId, round1.Me.ChampionId);
+        Assert.True(entry.Rounds[1].Opponent.FirstTower);
     }
 
     [Fact]

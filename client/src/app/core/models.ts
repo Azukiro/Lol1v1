@@ -79,6 +79,33 @@ export interface SeriesSummary {
   finishedAt: string | null;
 }
 
+export interface HistoryPlayerRound {
+  championId: number | null;
+  spell1Id: number | null;
+  spell2Id: number | null;
+  kills: number;
+  cs: number;
+  firstBlood: boolean;
+  firstTower: boolean;
+}
+
+export interface HistoryRound {
+  number: number;
+  winnerSlot: SlotName | null;
+  winningLabel: string | null;
+  /** Temps de jeu (s) auquel la condition de victoire a été remplie. */
+  winningTime: number | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  me: HistoryPlayerRound;
+  opponent: HistoryPlayerRound;
+}
+
+export interface HistoryEntry {
+  series: SeriesSummary;
+  rounds: HistoryRound[];
+}
+
 export interface Player {
   slot: SlotName;
   userId: string;

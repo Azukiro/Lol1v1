@@ -35,6 +35,16 @@ public sealed record SeriesSummaryDto(
     string MySlot, string OpponentName, string OpponentRiotId, int? OpponentProfileIconId, int MyWins, int OpponentWins,
     string? WinnerSlot, DateTimeOffset CreatedAt, DateTimeOffset? FinishedAt);
 
+/// <summary>Série de l'historique, avec le récapitulatif de chaque manche jouée.</summary>
+public sealed record HistoryEntryDto(SeriesSummaryDto Series, List<HistoryRoundDto> Rounds);
+
+/// <summary>Manche jouée (tentatives annulées exclues), vue du joueur courant.</summary>
+public sealed record HistoryRoundDto(
+    int Number, string? WinnerSlot, string? WinningLabel, double? WinningTime,
+    DateTimeOffset? StartedAt, DateTimeOffset? EndedAt, HistoryPlayerRoundDto Me, HistoryPlayerRoundDto Opponent);
+
+public sealed record HistoryPlayerRoundDto(int? ChampionId, int? Spell1Id, int? Spell2Id, int Kills, int Cs, bool FirstBlood, bool FirstTower);
+
 public sealed record SeriesStateDto
 {
     public Guid Id { get; init; }

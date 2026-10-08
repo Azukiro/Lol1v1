@@ -29,6 +29,15 @@
         ],
         "createdAt": "2026-10-07T20:45:22.092Z",
         "reason": "Claude: Angular [src] binding to Data Dragon profile icon inside @if guard"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/pages/history.page.ts"
+        ],
+        "createdAt": "2026-10-08T22:31:27.067Z",
+        "reason": "Claude: <img> src bound via [src] inside @if guards on Data Dragon URLs, never empty"
       }
     ]
   }

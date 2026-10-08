@@ -57,16 +57,51 @@ public sealed class SeriesService(
             .Where(s => s.Players.Any(p => p.UserId == userId));
         if (status is not null) query = query.Where(s => s.Status == status);
         var list = await query.OrderByDescending(s => s.CreatedAt).Take(100).ToListAsync();
+        return list.Select(s => Summary(s, userId)).ToList();
+    }
+
+    /// <summary>Séries terminées ou interrompues, avec champions, sorts et statistiques de chaque manche jouée.</summary>
+    public async Task<List<HistoryEntryDto>> HistoryAsync(Guid userId)
+    {
+        var list = await db.Series
+            .Include(s => s.Players).ThenInclude(p => p.User)
+            .Include(s => s.Players).ThenInclude(p => p.RiotAccount)
+            .Include(s => s.Rounds).ThenInclude(r => r.Assignments)
+            .Include(s => s.Rounds).ThenInclude(r => r.Observations)
+            .Where(s => s.Players.Any(p => p.UserId == userId) && (s.Status == SeriesStatus.FINISHED || s.Status == SeriesStatus.ABORTED))
+            .OrderByDescending(s => s.CreatedAt).Take(50)
+            .AsSplitQuery()
+            .ToListAsync();
         return list.Select(s =>
         {
             var me = s.Players.First(p => p.UserId == userId);
             var opp = s.Players.First(p => p.Id != me.Id);
-            return new SeriesSummaryDto(s.Id, s.Status.ToString(), s.BestOf, s.ChampionMode.ToString(), s.SpellMode.ToString(),
-                WinExpression.Describe(WinExpression.Parse(s.WinExpression)), me.Slot.ToString(), opp.User.DisplayName,
-                opp.RiotAccount.RiotId, opp.RiotAccount.ProfileIconId, me.RoundsWon, opp.RoundsWon,
-                s.WinnerPlayerId is null ? null : s.Players.First(p => p.Id == s.WinnerPlayerId).Slot.ToString(),
-                s.CreatedAt, s.FinishedAt);
+            var rounds = s.Rounds.Where(r => r.Status == RoundStatus.VALIDATED).OrderBy(r => r.Number).Select(r =>
+            {
+                var facts = Evaluate(s, r).Facts;
+                var condition = r.WinningCondition is null ? null : JsonSerializer.Deserialize<WinningConditionDto>(r.WinningCondition, Json);
+                HistoryPlayerRoundDto Player(SeriesPlayer p)
+                {
+                    var a = r.Assignments.FirstOrDefault(x => x.PlayerId == p.Id);
+                    var f = facts[p.Slot];
+                    return new HistoryPlayerRoundDto(a?.ChampionId, a?.Spell1Id, a?.Spell2Id, f.Kills, f.Cs, f.FirstBloodTime is not null, f.FirstTowerTime is not null);
+                }
+                return new HistoryRoundDto(r.Number, r.WinnerPlayerId is null ? null : SlotName(s, r.WinnerPlayerId.Value),
+                    condition?.Label, condition?.EventTime, r.StartedAt, r.EndedAt, Player(me), Player(opp));
+            }).ToList();
+            return new HistoryEntryDto(Summary(s, userId), rounds);
         }).ToList();
+    }
+
+    private static SeriesSummaryDto Summary(Series s, Guid userId)
+    {
+        var me = s.Players.First(p => p.UserId == userId);
+        var opp = s.Players.First(p => p.Id != me.Id);
+        return new SeriesSummaryDto(s.Id, s.Status.ToString(), s.BestOf, s.ChampionMode.ToString(), s.SpellMode.ToString(),
+            WinExpression.Describe(WinExpression.Parse(s.WinExpression)), me.Slot.ToString(), opp.User.DisplayName,
+            opp.RiotAccount.RiotId, opp.RiotAccount.ProfileIconId, me.RoundsWon, opp.RoundsWon,
+            s.WinnerPlayerId is null ? null : s.Players.First(p => p.Id == s.WinnerPlayerId).Slot.ToString(),
+            s.CreatedAt, s.FinishedAt);
     }
 
     // =====================================================================

@@ -1,7 +1,7 @@
 import { HttpClient, HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
 import { inject, Injectable, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
-import { AuthResponse, ChampionRef, Invitation, Preset, RiotAccount, SeriesConfig, SeriesState, SeriesSummary, SpellRef, User } from './models';
+import { AuthResponse, ChampionRef, HistoryEntry, Invitation, Preset, RiotAccount, SeriesConfig, SeriesState, SeriesSummary, SpellRef, User } from './models';
 
 /** URL de l'API : fournie par Electron (API_URL), sinon localhost. */
 export const appConfig = { apiUrl: 'http://localhost:5080', version: '' };
@@ -107,6 +107,9 @@ export class ApiService {
 
   series(status?: string) {
     return this.get<SeriesSummary[]>(`/series${status ? `?status=${status}` : ''}`);
+  }
+  history() {
+    return this.get<HistoryEntry[]>('/series/history');
   }
   seriesState(id: string) {
     return this.get<SeriesState>(`/series/${id}`);

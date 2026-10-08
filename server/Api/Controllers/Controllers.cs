@@ -279,6 +279,9 @@ public sealed class SeriesController(SeriesService series) : ControllerBase
     [HttpGet]
     public Task<List<SeriesSummaryDto>> List([FromQuery] SeriesStatus? status) => series.ListAsync(User.UserId(), status);
 
+    [HttpGet("history")]
+    public Task<List<HistoryEntryDto>> History() => series.HistoryAsync(User.UserId());
+
     [HttpGet("{id:guid}")]
     public Task<SeriesStateDto> Get(Guid id) => series.GetStateAsync(id, User.UserId());
 

@@ -136,22 +136,24 @@ interface Suggestion {
             </div>
 
             @if (!advanced()) {
-              <div class="conds">
+              <div class="objectives">
                 @for (c of conditions; track c.code) {
                   @let on = isActive(c.code);
-                  <div class="cond-card" [class.on]="on" role="checkbox" [attr.aria-checked]="on" tabindex="0"
-                       (click)="toggleCondition(c.code)" (keydown.enter)="toggleCondition(c.code)" (keydown.space)="$event.preventDefault(); toggleCondition(c.code)">
-                    <div class="row">
-                      <span class="check">@if (on) { ✓ }</span>
+                  <div class="objective" [class.on]="on">
+                    <button class="switch" role="switch" [attr.aria-checked]="on" [attr.aria-label]="c.label" (click)="toggleCondition(c.code)"><i></i></button>
+                    <div class="obj-label" (click)="toggleCondition(c.code)">
                       <strong>{{ c.label }}</strong>
+                      <span class="muted small">{{ c.hint }}</span>
                     </div>
-                    <span class="muted small">{{ c.hint }}</span>
-                    @if (on && needsThreshold(c.code)) {
-                      <div class="stepper" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
-                        <button (click)="step(c.code, -1)" [disabled]="threshold(c.code) <= stepOf(c.code)" aria-label="Moins">−</button>
-                        <span>{{ threshold(c.code) }}</span>
-                        <button (click)="step(c.code, 1)" [disabled]="threshold(c.code) >= 1000" aria-label="Plus">+</button>
-                      </div>
+                    @if (range(c.code); as r) {
+                      @let value = on ? threshold(c.code) : defaultThreshold(c.code);
+                      <input class="slider" type="range" [min]="r.min" [max]="r.max" [step]="r.step" [value]="value"
+                             [style.--fill]="((value - r.min) / (r.max - r.min)) * 100 + '%'" [attr.aria-label]="c.label + ' à atteindre'"
+                             (input)="setValue(c.code, $any($event.target).valueAsNumber)" />
+                      <span class="value">{{ value }}</span>
+                    } @else {
+                      <span class="slider-spacer"></span>
+                      <span class="value">{{ on ? '✓' : '' }}</span>
                     }
                   </div>
                 }
@@ -270,19 +272,29 @@ interface Suggestion {
 
     .small-seg button { padding: 6px 12px; font-size: 13px; }
 
-    .conds { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-    .cond-card { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: #0a0d13; cursor: pointer; transition: border-color 0.15s, background 0.15s; outline: none; }
-    .cond-card:hover, .cond-card:focus-visible { border-color: #3a465c; }
-    .cond-card.on { border-color: var(--yellow); background: rgba(255, 201, 77, 0.08); }
-    .cond-card strong { font-family: var(--display); font-size: 16px; letter-spacing: 0.06em; text-transform: uppercase; }
-    .cond-card .row { gap: 8px; }
-    .check { width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--line); display: grid; place-items: center; font-size: 12px; font-weight: 800; color: #1a1300; flex-shrink: 0; }
-    .cond-card.on .check { background: var(--yellow); border-color: var(--yellow); }
-    .stepper { display: inline-flex; align-items: center; align-self: flex-start; margin-top: 4px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); cursor: default; }
-    .stepper button { width: 30px; height: 30px; border: none; background: none; color: var(--text); cursor: pointer; font-size: 16px; font-weight: 700; }
-    .stepper button:hover:not(:disabled) { color: var(--yellow); }
-    .stepper button:disabled { opacity: 0.35; cursor: not-allowed; }
-    .stepper span { min-width: 40px; text-align: center; font-family: var(--display); font-weight: 700; font-size: 17px; }
+    .objectives { display: flex; flex-direction: column; gap: 6px; }
+    .objective { display: grid; grid-template-columns: 44px minmax(180px, 260px) minmax(0, 1fr) 56px; align-items: center; gap: 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: #0a0d13; transition: border-color 0.15s, background 0.15s; }
+    .objective.on { border-color: rgba(255, 201, 77, 0.45); background: rgba(255, 201, 77, 0.06); }
+    .obj-label { display: flex; flex-direction: column; gap: 2px; cursor: pointer; min-width: 0; }
+    .obj-label strong { font-family: var(--display); font-size: 16px; letter-spacing: 0.06em; text-transform: uppercase; }
+    .objective:not(.on) .obj-label strong { color: var(--muted); }
+
+    .switch { position: relative; width: 40px; height: 22px; padding: 0; border-radius: 11px; border: 1px solid var(--line); background: var(--panel-2); cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+    .switch i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform 0.15s, background 0.15s; }
+    .objective.on .switch { background: var(--yellow); border-color: var(--yellow); }
+    .objective.on .switch i { transform: translateX(18px); background: #1a1300; }
+    .switch:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+    .slider { --fill: 0%; width: 100%; height: 22px; margin: 0; background: transparent; cursor: pointer; -webkit-appearance: none; appearance: none; }
+    .slider::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--track-on, #3a465c) var(--fill), #232b3b var(--fill)); }
+    .slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; margin-top: -6px; border-radius: 50%; border: 3px solid #0a0d13; background: var(--muted); box-shadow: 0 0 0 1px var(--line); transition: transform 0.1s; }
+    .slider:hover::-webkit-slider-thumb { transform: scale(1.12); }
+    .objective.on .slider { --track-on: var(--yellow); }
+    .objective.on .slider::-webkit-slider-thumb { background: var(--yellow); box-shadow: 0 0 10px rgba(255, 201, 77, 0.5); }
+    .slider:focus-visible { outline: none; }
+    .slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--cyan); }
+    .value { font-family: var(--display); font-weight: 700; font-size: 20px; text-align: right; color: var(--muted); }
+    .objective.on .value { color: var(--yellow); }
 
     .link { margin-top: 12px; padding: 0; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
     .link:hover { color: var(--cyan); }
@@ -305,7 +317,11 @@ interface Suggestion {
     .save { display: flex; gap: 8px; }
     .save .input { flex: 1; }
 
-    @media (max-width: 1250px) { .conds { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 1250px) {
+      .objective { grid-template-columns: 44px minmax(0, 1fr) 56px; }
+      .objective .slider, .objective .slider-spacer { grid-column: 2 / 3; }
+      .objective .value { grid-row: 1; grid-column: 3; }
+    }
     @media (max-width: 1100px) {
       .layout { grid-template-columns: 1fr; }
       .recap { position: static; }
@@ -474,6 +490,24 @@ export class NewChallengePage implements OnInit {
     return code === 'CS' ? CS_STEP : 1;
   }
 
+  /** Plage du curseur (null : condition sans seuil). */
+  protected range(code: ConditionCode) {
+    if (code === 'KILLS') return { min: 1, max: 10, step: 1 };
+    if (code === 'CS') return { min: CS_STEP, max: 300, step: CS_STEP };
+    return null;
+  }
+
+  protected defaultThreshold(code: ConditionCode) {
+    return this.cond(code).threshold;
+  }
+
+  /** Bouger le curseur d'un objectif inactif l'active avec cette valeur. */
+  protected setValue(code: ConditionCode, value: number) {
+    if (!this.isActive(code)) this.toggleCondition(code);
+    this.appliedPreset.set(null);
+    this.items.update((list) => list.map((it) => (it.conds[0].condition === code ? { ...it, conds: [{ ...it.conds[0], threshold: value }] } : it)));
+  }
+
   protected toggleCondition(code: ConditionCode) {
     this.appliedPreset.set(null);
     if (this.isActive(code)) {
@@ -483,16 +517,6 @@ export class NewChallengePage implements OnInit {
     // Garde l'ordre du catalogue pour un libellé stable.
     const order = (c: ConditionCode) => CONDITIONS.findIndex((x) => x.code === c);
     this.items.update((list) => [...list, { op: 'OR' as const, conds: [this.cond(code)] }].sort((a, b) => order(a.conds[0].condition) - order(b.conds[0].condition)));
-  }
-
-  protected step(code: ConditionCode, direction: 1 | -1) {
-    this.appliedPreset.set(null);
-    const delta = this.stepOf(code) * direction;
-    this.items.update((list) =>
-      list.map((it) =>
-        it.conds[0].condition === code ? { ...it, conds: [{ ...it.conds[0], threshold: Math.min(1000, Math.max(this.stepOf(code), it.conds[0].threshold + delta)) }] } : it,
-      ),
-    );
   }
 
   // ---------------------------------------------------------------------

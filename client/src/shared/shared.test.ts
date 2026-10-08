@@ -3,6 +3,7 @@ import * as assert from 'node:assert/strict';
 import { describe, evaluate, emptyFacts, validate, WinNode } from './rules-engine';
 import { extractObservations, LiveGameData, localFacts, turretOwner } from './live-events';
 import { banStats, championHighlights, championStats, headToHead, modeStats, opponentHighlights, opponents, overview, StatsSeries, winConditions, winRate } from './stats';
+import { labObservations, progress } from './lab';
 
 const expr: WinNode = { op: 'OR', children: [{ condition: 'KILLS', threshold: 2 }, { condition: 'FIRST_TOWER' }] };
 
@@ -161,4 +162,39 @@ test('stats: overview, champions, comebacks and head-to-head', () => {
   const hl = opponentHighlights(opponents(entries));
   assert.equal(hl.favorite?.riotId, 'Vorn#EUW');
   assert.equal(hl.nemesis, null);
+});
+
+test('lab: generic CS steps and game clock, whatever the objective', () => {
+  const seen = new Set<string>();
+  const first = labObservations({ ...game({ Events: [] }, 23, 15), gameData: { gameTime: 65 } }, seen);
+  assert.deepEqual(
+    first.map((o) => [o.type, o.eventId]),
+    [
+      ['CS', 'self-10'],
+      ['CS', 'self-20'],
+      ['CS', 'view-10'],
+      ['CLOCK', 't-2'],
+    ],
+  );
+  assert.equal(labObservations({ ...game({ Events: [] }, 23, 15), gameData: { gameTime: 70 } }, seen).length, 0);
+});
+
+test('lab: progress = count / threshold, OR = max, AND = mean; every tower counts', () => {
+  const data = game(
+    {
+      Events: [
+        { EventID: 1, EventName: 'TurretKilled', EventTime: 300, TurretKilled: 'Turret_T2_C_05_A' },
+        { EventID: 2, EventName: 'TurretKilled', EventTime: 420, TurretKilled: 'Turret_T2_C_04_A' },
+        { EventID: 3, EventName: 'ChampionKill', EventTime: 200, KillerName: 'Kaelis' },
+      ],
+    },
+    60,
+  );
+  const self = localFacts(data).self;
+  assert.deepEqual(self.towerTimes, [300, 420]);
+  assert.equal(evaluate({ condition: 'TOWERS', threshold: 2 }, self), 420);
+  assert.equal(progress({ condition: 'KILLS', threshold: 2 }, self), 0.5);
+  assert.equal(progress({ op: 'AND', children: [{ condition: 'KILLS', threshold: 2 }, { condition: 'CS', threshold: 120 }] }, self), 0.5);
+  assert.equal(progress({ op: 'OR', children: [{ condition: 'KILLS', threshold: 2 }, { condition: 'TOWERS', threshold: 2 }] }, self), 1);
+  assert.equal(describe({ condition: 'TOWERS', threshold: 2 }), 'Tours ≥ 2');
 });

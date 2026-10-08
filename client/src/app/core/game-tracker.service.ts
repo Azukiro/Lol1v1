@@ -7,6 +7,7 @@ import { ReferenceService } from './reference.service';
 import { ToastService } from './toast.service';
 import { evaluate, Facts } from '../../shared/rules-engine';
 import { extractObservations, LiveGameData, localFacts } from '../../shared/live-events';
+import { labObservations } from '../../shared/lab';
 
 export interface LaunchOrder {
   seriesId: string;
@@ -153,14 +154,17 @@ export class GameTrackerService {
         this.seenRoundId = round.id;
       }
       const facts = localFacts(data);
+      // Labo « objectifs secrets » : pas d'expression commune, chacun évalue la sienne.
+      const mine = s.winExpression ?? s.lab?.current?.mine?.expression ?? null;
       this.localProgress.set({
         ...facts,
-        selfAt: evaluate(s.winExpression, facts.self),
-        opponentAt: evaluate(s.winExpression, facts.opponent),
+        selfAt: mine ? evaluate(mine, facts.self) : null,
+        opponentAt: s.winExpression ? evaluate(s.winExpression, facts.opponent) : null,
         gameTime: data.gameData?.gameTime ?? 0,
       });
       if (round.status !== 'IN_GAME') return;
-      for (const o of extractObservations(data, s.winExpression, this.seen)) this.hub.reportObservation(s.id, o);
+      const observations = s.winExpression ? extractObservations(data, s.winExpression, this.seen) : labObservations(data, this.seen);
+      for (const o of observations) this.hub.reportObservation(s.id, o);
     });
 
     // Fin de partie côté LoL : on retire l'overlay.

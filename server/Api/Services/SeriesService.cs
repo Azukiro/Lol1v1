@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Api.Data;
 using Api.Domain;
+using Api.Domain.Lab;
 using Api.Dtos;
 using Microsoft.EntityFrameworkCore;
 
@@ -102,7 +103,7 @@ public sealed class SeriesService(
         var me = s.Players.First(p => p.UserId == userId);
         var opp = s.Players.First(p => p.Id != me.Id);
         return new SeriesSummaryDto(s.Id, s.Status.ToString(), s.BestOf, s.ChampionMode.ToString(), s.SpellMode.ToString(),
-            WinExpression.Describe(WinExpression.Parse(s.WinExpression)), me.Slot.ToString(), opp.User.DisplayName,
+            ExpressionLabel(s), me.Slot.ToString(), opp.User.DisplayName,
             opp.RiotAccount.RiotId, opp.RiotAccount.ProfileIconId, me.RoundsWon, opp.RoundsWon,
             s.WinnerPlayerId is null ? null : s.Players.First(p => p.Id == s.WinnerPlayerId).Slot.ToString(),
             s.CreatedAt, s.FinishedAt);
@@ -120,7 +121,8 @@ public sealed class SeriesService(
             BestOf = config.BestOf,
             ChampionMode = config.ChampionMode,
             SpellMode = config.SpellMode,
-            WinExpression = WinExpression.Serialize(config.WinExpression),
+            WinExpression = config.Lab is null ? WinExpression.Serialize(config.WinExpression!) : "{}",
+            LabConfig = config.Lab is null ? null : JsonSerializer.Serialize(config.Lab, Json),
             DrawSeed = DrawService.NewSeed(),
             CreatedAt = clock.GetUtcNow(),
         };
@@ -323,6 +325,16 @@ public sealed class SeriesService(
         {
             round.Status = RoundStatus.IN_GAME;
             round.StartedAt = clock.GetUtcNow();
+            if (Objectives(round) is { } objectives)
+            {
+                // Labo : chaque joueur découvre son objectif secret au chargement, après le verrouillage des champions.
+                foreach (var p in series.Players)
+                {
+                    var objective = SecretObjectives.Get(objectives.IdOf(p.Slot));
+                    notifier.Enqueue(series, NotifierEvent.To(p.UserId, "SecretObjectiveRevealed",
+                        new { roundId = round.Id, label = objective.Label, tier = objectives.Tier.ToString(), timeLimit = objectives.TimeLimit }));
+                }
+            }
         }
         return Task.CompletedTask;
     });
@@ -393,6 +405,11 @@ public sealed class SeriesService(
 
     private void Arbitrate(Series series, Round round)
     {
+        if (Objectives(round) is { } objectives)
+        {
+            ArbitrateSecret(series, round, objectives);
+            return;
+        }
         var outcome = Evaluate(series, round);
         if (outcome.Disputed)
         {
@@ -408,6 +425,70 @@ public sealed class SeriesService(
         }
     }
 
+    /// <summary>
+    /// Labo « objectifs secrets » : chacun son expression. Au temps limite sans vainqueur,
+    /// la meilleure progression (faits antérieurs à la limite) l'emporte ; égalité → manche rejouée.
+    /// </summary>
+    private void ArbitrateSecret(Series series, Round round, RoundObjectives objectives)
+    {
+        var outcome = Evaluate(series, round);
+        if (outcome.Disputed)
+        {
+            round.Status = RoundStatus.DISPUTED;
+            notifier.Enqueue(series, NotifierEvent.All("RoundDisputed", new { roundId = round.Id, reasons = outcome.Contradictions }));
+            return;
+        }
+        var limit = objectives.TimeLimit;
+        if (outcome.Winner is { } winner && outcome.WinningSatisfaction!.Time <= limit)
+        {
+            var objective = SecretObjectives.Get(objectives.IdOf(winner));
+            ValidateRound(series, round, series.Players.First(p => p.Slot == winner),
+                new WinningConditionDto($"Objectif secret · {objective.Label}", null, null, outcome.WinningSatisfaction.Time, outcome.WinnerSingleSource));
+            return;
+        }
+        var gameClock = Math.Max(GameClock(round), outcome.WinningSatisfaction?.Time ?? 0);
+        if (gameClock < limit) return;
+        // Un événement antérieur à la limite attend encore sa confirmation : on attend aussi.
+        if (outcome.EarliestPendingTime is { } pending && pending <= limit) return;
+
+        var progress = new[] { Slot.A, Slot.B }.ToDictionary(s => s, s => SecretObjectives.Progress(objectives.ExpressionOf(s), outcome.Facts[s], limit));
+        static string Pct(double p) => $"{Math.Round(p * 100)} %";
+        if (Math.Abs(progress[Slot.A] - progress[Slot.B]) < 0.005)
+        {
+            VoidRound(series, round, $"Égalité au temps limite ({Pct(progress[Slot.A])} chacun)");
+            return;
+        }
+        var best = progress[Slot.A] > progress[Slot.B] ? Slot.A : Slot.B;
+        var label = SecretObjectives.Get(objectives.IdOf(best)).Label;
+        ValidateRound(series, round, series.Players.First(p => p.Slot == best),
+            new WinningConditionDto($"Temps limite · {Pct(progress[best])} contre {Pct(progress[best.Other()])} ({label})", null, null, limit, false));
+    }
+
+    /// <summary>Délai avant d'accepter l'horloge d'un seul client (l'autre envoie la sienne toutes les 30 s).</summary>
+    public static readonly TimeSpan SingleClockDelay = TimeSpan.FromSeconds(45);
+
+    /// <summary>
+    /// Temps de jeu atteint d'après les observations CLOCK : le plus petit des deux clients quand
+    /// les deux en envoient (un client ne peut pas avancer seul l'horloge). Si un seul client en envoie
+    /// (adversaire déconnecté), ses relevés comptent une fois le délai écoulé.
+    /// </summary>
+    private double GameClock(Round round)
+    {
+        var clocks = round.Observations.Where(o => o.Type == ObservationType.CLOCK).GroupBy(o => o.ReportedByPlayerId).ToList();
+        if (clocks.Count == 2) return clocks.Min(g => g.Max(o => o.EventTime));
+        var now = clock.GetUtcNow();
+        return clocks.SelectMany(g => g).Where(o => now - o.ReceivedAt >= SingleClockDelay).Select(o => o.EventTime).DefaultIfEmpty(0).Max();
+    }
+
+    private static RoundObjectives? Objectives(Round round) =>
+        round.LabState is null ? null : JsonSerializer.Deserialize<RoundObjectives>(round.LabState, Json);
+
+    private static LabConfig? Lab(Series series) =>
+        series.LabConfig is null ? null : JsonSerializer.Deserialize<LabConfig>(series.LabConfig, Json);
+
+    private static string ExpressionLabel(Series series) =>
+        Lab(series) is { } lab ? lab.Label : WinExpression.Describe(WinExpression.Parse(series.WinExpression));
+
     private ArbitrationOutcome Evaluate(Series series, Round round)
     {
         var events = round.Observations
@@ -415,6 +496,8 @@ public sealed class SeriesService(
             .Select(o => new ObservedEvent(SlotOf(series, o.ReportedByPlayerId), o.Type, o.EventId, o.EventTime,
                 SlotOf(series, o.SubjectPlayerId!.Value), o.Value, o.ReceivedAt))
             .ToList();
+        if (Objectives(round) is { } objectives)
+            return Arbitration.Evaluate(objectives.ExpressionOf, events, clock.GetUtcNow());
         return Arbitration.Evaluate(WinExpression.Parse(series.WinExpression), events, clock.GetUtcNow());
     }
 
@@ -528,6 +611,9 @@ public sealed class SeriesService(
                 assignA.SubmittedAt = assignB.SubmittedAt = clock.GetUtcNow();
             }
         }
+
+        if (Lab(series) is { Mode: LabMode.SECRET_OBJECTIVES } lab)
+            round.LabState = JsonSerializer.Serialize(SecretObjectives.Draw(series.DrawSeed, number, attempt, lab.Tier), Json);
 
         round.Assignments.AddRange([assignA, assignB]);
         series.Rounds.Add(round);
@@ -690,7 +776,8 @@ public sealed class SeriesService(
     public SeriesStateDto BuildState(Series series, SeriesPlayer me)
     {
         var opp = Opponent(series, me);
-        var expr = WinExpression.Parse(series.WinExpression);
+        var lab = Lab(series);
+        var expr = lab is null ? WinExpression.Parse(series.WinExpression) : null;
         var bothDecks = series.Players.All(p => p.DeckLockedAt is not null);
         var bansRevealed = series.Status != SeriesStatus.SETUP && series.Status != SeriesStatus.BANS;
         var myPool = Pool(me);
@@ -744,7 +831,7 @@ public sealed class SeriesService(
             ChampionMode = series.ChampionMode.ToString(),
             SpellMode = series.SpellMode.ToString(),
             WinExpression = expr,
-            WinExpressionLabel = WinExpression.Describe(expr),
+            WinExpressionLabel = ExpressionLabel(series),
             WinnerSlot = series.WinnerPlayerId is null ? null : SlotName(series, series.WinnerPlayerId.Value),
             MySlot = me.Slot.ToString(),
             CreatedAt = series.CreatedAt,
@@ -767,6 +854,37 @@ public sealed class SeriesService(
             Rounds = rounds,
             CurrentRoundId = current?.Id,
             Live = live,
+            Lab = lab is null ? null : BuildLab(series, lab, me, current),
         };
+    }
+
+    /// <summary>
+    /// Vue labo d'un joueur : son objectif dès le début de la partie, celui de l'adversaire
+    /// seulement une fois la manche terminée (jamais pendant).
+    /// </summary>
+    private LabStateDto BuildLab(Series series, LabConfig lab, SeriesPlayer me, Round? current)
+    {
+        LabRoundDto? currentDto = null;
+        if (current is not null && Objectives(current) is { } objectives)
+        {
+            var started = current.StartedAt is not null;
+            double? myProgress = null;
+            if (started && current.Status is RoundStatus.IN_GAME or RoundStatus.DISPUTED)
+                myProgress = SecretObjectives.Progress(objectives.ExpressionOf(me.Slot), Evaluate(series, current).Facts[me.Slot]);
+            currentDto = new LabRoundDto(current.Id, objectives.Tier.ToString(), objectives.TimeLimit,
+                started ? LabMapping.ToDto(SecretObjectives.Get(objectives.IdOf(me.Slot))) : null, myProgress, GameClock(current));
+        }
+
+        var history = series.Rounds
+            .Where(r => r.StartedAt is not null && r.Status is RoundStatus.VALIDATED or RoundStatus.VOIDED)
+            .OrderBy(r => r.Number).ThenBy(r => r.Attempt)
+            .Select(r => (Round: r, Objectives: Objectives(r)))
+            .Where(x => x.Objectives is not null)
+            .Select(x => new LabRevealDto(x.Round.Id, x.Round.Number, x.Round.Attempt,
+                LabMapping.ToDto(SecretObjectives.Get(x.Objectives!.IdOf(me.Slot))),
+                LabMapping.ToDto(SecretObjectives.Get(x.Objectives.IdOf(me.Slot.Other())))))
+            .ToList();
+
+        return new LabStateDto(lab.Mode.ToString(), lab.Tier?.ToString(), currentDto, history);
     }
 }

@@ -386,6 +386,7 @@ export class NewChallengePage implements OnInit {
     this.spellMode.set(config.spellMode);
     const toCond = (n: WinNode): Cond => ({ condition: n.condition!, threshold: n.threshold ?? 1 });
     const expr = config.winExpression;
+    if (!expr) return;
     if (expr.condition) {
       this.items.set([{ op: 'OR', conds: [toCond(expr)] }]);
     } else {

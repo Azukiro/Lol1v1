@@ -345,14 +345,15 @@ public static class Mapping
 
     public static RiotAccountDto ToDto(RiotAccount r) => new(r.Puuid, r.GameName, r.TagLine, r.Region, r.RiotId, r.ProfileIconId);
 
-    public static string ConfigLabel(SeriesConfig c) => $"BO{c.BestOf} · {Label(c.ChampionMode, c.SpellMode, c.WinExpression)}";
+    public static string ConfigLabel(SeriesConfig c) =>
+        $"BO{c.BestOf} · {Label(c.ChampionMode, c.SpellMode, c.Lab is { } lab ? lab.Label : WinExpression.Describe(c.WinExpression!))}";
 
-    public static string PresetLabel(PresetConfig c) => Label(c.ChampionMode, c.SpellMode, c.WinExpression);
+    public static string PresetLabel(PresetConfig c) => Label(c.ChampionMode, c.SpellMode, WinExpression.Describe(c.WinExpression));
 
-    private static string Label(ChampionMode championMode, SpellMode spellMode, WinNode expression)
+    private static string Label(ChampionMode championMode, SpellMode spellMode, string winLabel)
     {
         var mode = championMode switch { ChampionMode.MIRROR => "Miroir", ChampionMode.RANDOM => "Aléatoire", _ => "Deck" };
         var spells = spellMode switch { SpellMode.FREE => "Sorts libres", SpellMode.DECK_COMPOSED => "Deck de sorts composé", _ => "Deck de sorts aléatoire" };
-        return $"{mode} · {spells} · {WinExpression.Describe(expression)}";
+        return $"{mode} · {spells} · {winLabel}";
     }
 }

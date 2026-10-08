@@ -1,4 +1,5 @@
 import type { WinNode } from '../../shared/rules-engine';
+import type { LabConfig, LabState } from '../lab/lab.models';
 
 export type ChampionMode = 'MIRROR' | 'RANDOM' | 'DECK';
 export type SpellMode = 'FREE' | 'DECK_COMPOSED' | 'DECK_RANDOM';
@@ -38,11 +39,14 @@ export interface SeriesConfig {
   bestOf: number;
   championMode: ChampionMode;
   spellMode: SpellMode;
-  winExpression: WinNode;
+  /** Absente en mode labo « objectifs secrets ». */
+  winExpression?: WinNode;
+  lab?: LabConfig;
 }
 
 /** Config prête : tout sauf le format, choisi au lancement du défi. */
-export type PresetConfig = Omit<SeriesConfig, 'bestOf'>;
+/** Les pré-configurations ne couvrent que les séries standards : expression requise, pas de labo. */
+export type PresetConfig = Omit<SeriesConfig, 'bestOf' | 'winExpression' | 'lab'> & { winExpression: WinNode };
 
 export interface Preset {
   id: string;
@@ -198,7 +202,8 @@ export interface SeriesState {
   winsNeeded: number;
   championMode: ChampionMode;
   spellMode: SpellMode;
-  winExpression: WinNode;
+  /** Null en mode labo « objectifs secrets » (voir lab). */
+  winExpression: WinNode | null;
   winExpressionLabel: string;
   winnerSlot: SlotName | null;
   mySlot: SlotName;
@@ -212,6 +217,8 @@ export interface SeriesState {
   rounds: Round[];
   currentRoundId: string | null;
   live: LiveState | null;
+  /** Mode expérimental du labo, null pour une série standard. */
+  lab: LabState | null;
 }
 
 export interface ChampionRef {

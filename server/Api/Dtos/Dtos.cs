@@ -1,4 +1,5 @@
 using Api.Domain;
+using Api.Domain.Lab;
 
 namespace Api.Dtos;
 
@@ -54,7 +55,8 @@ public sealed record SeriesStateDto
     public int WinsNeeded { get; init; }
     public string ChampionMode { get; init; } = "";
     public string SpellMode { get; init; } = "";
-    public WinNode WinExpression { get; init; } = null!;
+    /// <summary>Null en mode labo « objectifs secrets » : voir <see cref="Lab"/>.</summary>
+    public WinNode? WinExpression { get; init; }
     public string WinExpressionLabel { get; init; } = "";
     public string? WinnerSlot { get; init; }
     public string MySlot { get; init; } = "";
@@ -68,6 +70,8 @@ public sealed record SeriesStateDto
     public List<RoundDto> Rounds { get; init; } = [];
     public Guid? CurrentRoundId { get; init; }
     public LiveDto? Live { get; init; }
+    /// <summary>Mode expérimental du labo, null pour une série standard.</summary>
+    public LabStateDto? Lab { get; init; }
 }
 
 public sealed record RulesDto(int MinDeckSize, int BansPerPlayer, int SpellBudget, int SpellCap, IReadOnlyList<int> AllowedSpellIds);
@@ -109,6 +113,20 @@ public sealed record LiveDto(
 
 public sealed record PlayerProgressDto(int Kills, bool FirstBlood, bool FirstTower, int Cs, double? SatisfiedAt);
 public sealed record ValidatedEventDto(string Type, string Slot, double EventTime, int? Value, bool SingleSource);
+
+// ---- Labo ----
+public sealed record LabStateDto(string Mode, string? Tier, LabRoundDto? Current, List<LabRevealDto> History);
+/// <summary>Manche en cours : Mine reste null tant que la partie n'a pas commencé.</summary>
+public sealed record LabRoundDto(Guid RoundId, string Tier, double TimeLimit, LabObjectiveDto? Mine, double? MyProgress, double GameClock);
+public sealed record LabObjectiveDto(string Id, string Label, WinNode Expression, string Tier, double EstimatedMinutes);
+public sealed record LabRevealDto(Guid RoundId, int Number, int Attempt, LabObjectiveDto Mine, LabObjectiveDto Opponent);
+public sealed record LabTierDto(string Tier, string Label, double TimeLimit, List<LabObjectiveDto> Objectives);
+public sealed record LabDrawDto(string Tier, LabObjectiveDto A, LabObjectiveDto B);
+
+public static class LabMapping
+{
+    public static LabObjectiveDto ToDto(SecretObjective o) => new(o.Id, o.Label, o.Expression, o.Tier.ToString(), o.EstimatedMinutes);
+}
 
 // ---- Hub ----
 public sealed record ObservationReport(string Type, string EventId, double EventTime, ObservationPayload? Payload);

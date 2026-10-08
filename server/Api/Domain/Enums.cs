@@ -10,7 +10,7 @@ public enum RoundStatus { ASSIGNMENT, LOBBY, CHAMP_SELECT, IN_GAME, VOIDED, DISP
 
 public enum InvitationStatus { PENDING, ACCEPTED, DECLINED, EXPIRED }
 
-public enum ObservationType { KILL, FIRST_BLOOD, TURRET, CS, CHAMP_LOCK, SPELLS }
+public enum ObservationType { KILL, FIRST_BLOOD, TURRET, CS, CHAMP_LOCK, SPELLS, CLOCK }
 
 public enum Slot { A, B }
 

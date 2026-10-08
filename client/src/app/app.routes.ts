@@ -9,6 +9,7 @@ import { SeriesPage } from './pages/series/series.page';
 import { HistoryPage } from './pages/history.page';
 import { FriendsPage } from './pages/friends.page';
 import { StatsPage } from './pages/stats.page';
+import { LabPage } from './lab/lab.page';
 
 const authGuard: CanActivateFn = () => (inject(AuthService).user() ? true : inject(Router).parseUrl('/login'));
 
@@ -25,6 +26,7 @@ export const routes: Routes = [
       { path: 'history', component: HistoryPage },
       { path: 'friends', component: FriendsPage },
       { path: 'stats', component: StatsPage },
+      { path: 'labo', component: LabPage },
     ],
   },
   { path: '**', redirectTo: '' },

@@ -5,7 +5,8 @@
  */
 import { csThresholds, emptyFacts, Facts, WinNode } from './rules-engine';
 
-export type ObservationType = 'KILL' | 'FIRST_BLOOD' | 'TURRET' | 'CS';
+/** CLOCK : temps de jeu, envoyé seulement en mode labo (temps limite). */
+export type ObservationType = 'KILL' | 'FIRST_BLOOD' | 'TURRET' | 'CS' | 'CLOCK';
 export type Subject = 'SELF' | 'OPPONENT';
 
 export interface Observation {
@@ -153,12 +154,13 @@ export function localFacts(data: LiveGameData): { self: Facts; opponent: Facts }
     } else if (e.EventName === 'FirstBlood') {
       if (nameMatches(e.Recipient, self)) result.self.firstBloodTime = e.EventTime;
       else if (nameMatches(e.Recipient, opponent)) result.opponent.firstBloodTime = e.EventTime;
-    } else if (e.EventName === 'TurretKilled' && !firstTowerDone) {
+    } else if (e.EventName === 'TurretKilled') {
       const owner = turretOwner(e.TurretKilled);
       if (owner && self.team) {
+        const by = owner === self.team ? result.opponent : result.self;
+        by.towerTimes.push(e.EventTime);
+        if (!firstTowerDone) by.firstTowerTime = e.EventTime;
         firstTowerDone = true;
-        if (owner === self.team) result.opponent.firstTowerTime = e.EventTime;
-        else result.self.firstTowerTime = e.EventTime;
       }
     }
   }

@@ -127,72 +127,47 @@ interface Suggestion {
           <section class="block">
             <div class="block-head">
               <h3>Pour gagner une manche</h3>
-              @if (!advanced()) {
-                <div class="seg small-seg">
-                  <button [class.on]="topOp() === 'OR'" (click)="edit(topOp, 'OR')">Une suffit</button>
-                  <button [class.on]="topOp() === 'AND'" (click)="edit(topOp, 'AND')">Toutes</button>
-                </div>
-              }
+              <span class="muted small">Clique sur OU / ET pour changer le lien entre deux conditions.</span>
             </div>
-
-            @if (!advanced()) {
-              <div class="objectives">
-                @for (c of conditions; track c.code) {
-                  @let on = isActive(c.code);
-                  <div class="objective" [class.on]="on">
-                    <button class="switch" role="switch" [attr.aria-checked]="on" [attr.aria-label]="c.label" (click)="toggleCondition(c.code)"><i></i></button>
-                    <div class="obj-label" (click)="toggleCondition(c.code)">
-                      <strong>{{ c.label }}</strong>
-                      <span class="muted small">{{ c.hint }}</span>
-                    </div>
-                    @if (range(c.code); as r) {
-                      @let value = on ? threshold(c.code) : defaultThreshold(c.code);
-                      <input class="slider" type="range" [min]="r.min" [max]="r.max" [step]="r.step" [value]="value"
-                             [style.--fill]="((value - r.min) / (r.max - r.min)) * 100 + '%'" [attr.aria-label]="c.label + ' à atteindre'"
-                             (input)="setValue(c.code, $any($event.target).valueAsNumber)" />
-                      <span class="value">{{ value }}</span>
-                    } @else {
-                      <span class="slider-spacer"></span>
-                      <span class="value">{{ on ? '✓' : '' }}</span>
-                    }
+            <div class="stack">
+              @for (item of items(); track $index; let i = $index) {
+                @if (i > 0) {
+                  <div class="op-switch" role="radiogroup" aria-label="Lien entre les conditions">
+                    <button role="radio" [attr.aria-checked]="topOp() === 'OR'" [class.on]="topOp() === 'OR'" (click)="setTopOp('OR')">OU</button>
+                    <button role="radio" [attr.aria-checked]="topOp() === 'AND'" [class.on]="topOp() === 'AND'" (click)="setTopOp('AND')">ET</button>
+                    <span class="muted small">{{ topOp() === 'OR' ? 'une seule suffit' : 'toutes sont requises' }}</span>
                   </div>
                 }
-              </div>
-              <button class="link" (click)="advanced.set(true)">Combinaisons avancées (ET / OU imbriqués)…</button>
-            } @else {
-              <div class="stack">
-                @for (item of items(); track $index; let i = $index) {
-                  @if (i > 0) {
-                    <button class="op" (click)="toggleTopOp()">{{ topOp() === 'OR' ? 'OU' : 'ET' }}</button>
-                  }
-                  <div class="cond-block" [class.group]="item.conds.length > 1">
-                    @for (c of item.conds; track $index; let j = $index) {
-                      @if (j > 0) {
-                        <button class="op inner" (click)="toggleGroupOp(i)">{{ item.op === 'OR' ? 'OU' : 'ET' }}</button>
-                      }
-                      <div class="row cond">
-                        <app-select [options]="condOptions(i, j)" [value]="c.condition" (valueChange)="setCond(i, j, $event)" />
-                        @if (needsThreshold(c.condition)) {
-                          <span class="muted">≥</span>
-                          <input class="input num" type="number" [min]="stepOf(c.condition)" [step]="stepOf(c.condition)" [ngModel]="c.threshold" (ngModelChange)="setThreshold(i, j, $event)" />
-                        }
-                        <span class="spacer"></span>
-                        <button class="btn ghost small" title="Retirer" (click)="remove(i, j)">✕</button>
+                <div class="cond-block" [class.group]="item.conds.length > 1">
+                  @for (c of item.conds; track $index; let j = $index) {
+                    @if (j > 0) {
+                      <div class="op-switch inner" role="radiogroup" aria-label="Lien dans le groupe">
+                        <button role="radio" [attr.aria-checked]="item.op === 'OR'" [class.on]="item.op === 'OR'" (click)="setGroupOp(i, 'OR')">OU</button>
+                        <button role="radio" [attr.aria-checked]="item.op === 'AND'" [class.on]="item.op === 'AND'" (click)="setGroupOp(i, 'AND')">ET</button>
                       </div>
                     }
-                    @if (freeCode(groupCodes(i))) {
-                      <button class="btn ghost small add-inner" (click)="addToGroup(i)">+ combiner avec…</button>
-                    }
-                  </div>
-                }
-                @if (freeCode(topCodes())) {
-                  <button class="btn ghost" (click)="addItem()">+ Ajouter une condition</button>
-                }
-                @if (simpleCompatible()) {
-                  <button class="link" (click)="advanced.set(false)">← Revenir au mode simple</button>
-                }
-              </div>
-            }
+                    <div class="row cond">
+                      <app-select [options]="condOptions(i, j)" [value]="c.condition" (valueChange)="setCond(i, j, $event)" />
+                      @if (needsThreshold(c.condition)) {
+                        <span class="muted">≥</span>
+                        <input class="input num" type="number" [min]="stepOf(c.condition)" [step]="stepOf(c.condition)" [ngModel]="c.threshold" (ngModelChange)="setThreshold(i, j, $event)" />
+                        @if (c.condition === 'CS') {
+                          <span class="muted small">par dizaines</span>
+                        }
+                      }
+                      <span class="spacer"></span>
+                      <button class="btn ghost small" title="Retirer" (click)="remove(i, j)">✕</button>
+                    </div>
+                  }
+                  @if (freeCode(groupCodes(i))) {
+                    <button class="btn ghost small add-inner" (click)="addToGroup(i)">+ combiner avec…</button>
+                  }
+                </div>
+              }
+              @if (freeCode(topCodes())) {
+                <button class="btn ghost" (click)="addItem()">+ Ajouter une condition</button>
+              }
+            </div>
           </section>
         </div>
 
@@ -270,43 +245,26 @@ interface Suggestion {
     .choice.on { border-color: var(--cyan); background: var(--cyan-dim); }
     .choice.on strong { color: var(--cyan); }
 
-    .small-seg button { padding: 6px 12px; font-size: 13px; }
 
-    .objectives { display: flex; flex-direction: column; gap: 6px; }
-    .objective { display: grid; grid-template-columns: 44px minmax(180px, 260px) minmax(0, 1fr) 56px; align-items: center; gap: 16px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: #0a0d13; transition: border-color 0.15s, background 0.15s; }
-    .objective.on { border-color: rgba(255, 201, 77, 0.45); background: rgba(255, 201, 77, 0.06); }
-    .obj-label { display: flex; flex-direction: column; gap: 2px; cursor: pointer; min-width: 0; }
-    .obj-label strong { font-family: var(--display); font-size: 16px; letter-spacing: 0.06em; text-transform: uppercase; }
-    .objective:not(.on) .obj-label strong { color: var(--muted); }
 
-    .switch { position: relative; width: 40px; height: 22px; padding: 0; border-radius: 11px; border: 1px solid var(--line); background: var(--panel-2); cursor: pointer; transition: background 0.15s, border-color 0.15s; }
-    .switch i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform 0.15s, background 0.15s; }
-    .objective.on .switch { background: var(--yellow); border-color: var(--yellow); }
-    .objective.on .switch i { transform: translateX(18px); background: #1a1300; }
-    .switch:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
-
-    .slider { --fill: 0%; width: 100%; height: 22px; margin: 0; background: transparent; cursor: pointer; -webkit-appearance: none; appearance: none; }
-    .slider::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--track-on, #3a465c) var(--fill), #232b3b var(--fill)); }
-    .slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; margin-top: -6px; border-radius: 50%; border: 3px solid #0a0d13; background: var(--muted); box-shadow: 0 0 0 1px var(--line); transition: transform 0.1s; }
-    .slider:hover::-webkit-slider-thumb { transform: scale(1.12); }
-    .objective.on .slider { --track-on: var(--yellow); }
-    .objective.on .slider::-webkit-slider-thumb { background: var(--yellow); box-shadow: 0 0 10px rgba(255, 201, 77, 0.5); }
-    .slider:focus-visible { outline: none; }
-    .slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--cyan); }
-    .value { font-family: var(--display); font-weight: 700; font-size: 20px; text-align: right; color: var(--muted); }
-    .objective.on .value { color: var(--yellow); }
-
-    .link { margin-top: 12px; padding: 0; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+    .link { padding: 0; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
     .link:hover { color: var(--cyan); }
     .center { align-self: center; text-align: center; }
 
     .cond-block { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #0a0d13; }
     .cond-block.group { border-color: rgba(255, 201, 77, 0.4); }
-    .op { align-self: flex-start; padding: 4px 14px; border-radius: 8px; border: 1px solid rgba(255, 201, 77, 0.5); background: transparent; color: var(--yellow); font-family: var(--display); font-weight: 700; letter-spacing: 0.1em; cursor: pointer; }
-    .op.inner { margin-left: 12px; }
+    .op-switch { display: inline-flex; align-items: center; align-self: flex-start; }
+    .op-switch button { padding: 5px 14px; border: 1px solid rgba(255, 201, 77, 0.35); background: transparent; color: var(--muted); font-family: var(--display); font-weight: 700; letter-spacing: 0.1em; cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s; }
+    .op-switch button:first-child { border-radius: 8px 0 0 8px; }
+    .op-switch button:nth-child(2) { border-radius: 0 8px 8px 0; border-left: none; }
+    .op-switch button:hover:not(.on) { color: var(--text); border-color: rgba(255, 201, 77, 0.6); }
+    .op-switch button.on { background: var(--yellow); border-color: var(--yellow); color: #1a1300; }
+    .op-switch span { margin-left: 10px; }
+    .op-switch.inner { margin-left: 12px; }
     .add-inner { align-self: flex-start; color: var(--muted); }
 
-    .recap { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 24px; }
+    aside { position: sticky; top: 24px; align-self: start; }
+    .recap { display: flex; flex-direction: column; gap: 14px; }
     .recap h3 { font-size: 22px; }
     .summary { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
     .summary li { display: grid; grid-template-columns: 90px auto 1fr; align-items: baseline; gap: 10px; }
@@ -317,14 +275,9 @@ interface Suggestion {
     .save { display: flex; gap: 8px; }
     .save .input { flex: 1; }
 
-    @media (max-width: 1250px) {
-      .objective { grid-template-columns: 44px minmax(0, 1fr) 56px; }
-      .objective .slider, .objective .slider-spacer { grid-column: 2 / 3; }
-      .objective .value { grid-row: 1; grid-column: 3; }
-    }
     @media (max-width: 1100px) {
       .layout { grid-template-columns: 1fr; }
-      .recap { position: static; }
+      aside { position: static; }
       .choices { grid-template-columns: 1fr; }
     }
   `,
@@ -364,8 +317,7 @@ export class NewChallengePage implements OnInit {
     { op: 'OR', conds: [{ condition: 'KILLS', threshold: 2 }] },
     { op: 'OR', conds: [{ condition: 'FIRST_TOWER', threshold: 1 }] },
   ]);
-  /** Éditeur avancé (groupes ET / OU imbriqués). */
-  protected readonly advanced = signal(false);
+
   protected readonly busy = signal(false);
   protected readonly error = signal('');
 
@@ -376,8 +328,7 @@ export class NewChallengePage implements OnInit {
     const seen = new Set<string>();
     return [...this.friends(), ...this.recent()].filter((s) => !seen.has(s.riotId) && !!seen.add(s.riotId)).slice(0, 8);
   });
-  /** L'éditeur simple ne sait représenter que des conditions à plat (une seule opération). */
-  protected readonly simpleCompatible = computed(() => this.items().every((it) => it.conds.length === 1));
+
 
   protected readonly expression = computed<WinNode | undefined>(() => {
     const nodes = this.items().map((item): WinNode => {
@@ -471,65 +422,21 @@ export class NewChallengePage implements OnInit {
         ),
       );
     }
-    this.advanced.set(!this.simpleCompatible());
+
   }
 
-  // ---------------------------------------------------------------------
-  // Éditeur simple : une carte par condition, toutes reliées par la même opération.
-  // ---------------------------------------------------------------------
-
-  protected isActive(code: ConditionCode) {
-    return this.items().some((it) => it.conds[0].condition === code);
-  }
-
-  protected threshold(code: ConditionCode) {
-    return this.items().find((it) => it.conds[0].condition === code)?.conds[0].threshold ?? 0;
-  }
 
   protected stepOf(code: ConditionCode) {
     return code === 'CS' ? CS_STEP : 1;
   }
 
-  /** Plage du curseur (null : condition sans seuil). */
-  protected range(code: ConditionCode) {
-    if (code === 'KILLS') return { min: 1, max: 10, step: 1 };
-    if (code === 'CS') return { min: CS_STEP, max: 300, step: CS_STEP };
-    return null;
+  protected setTopOp(op: 'AND' | 'OR') {
+    this.edit(this.topOp, op);
   }
 
-  protected defaultThreshold(code: ConditionCode) {
-    return this.cond(code).threshold;
-  }
-
-  /** Bouger le curseur d'un objectif inactif l'active avec cette valeur. */
-  protected setValue(code: ConditionCode, value: number) {
-    if (!this.isActive(code)) this.toggleCondition(code);
+  protected setGroupOp(i: number, op: 'AND' | 'OR') {
     this.appliedPreset.set(null);
-    this.items.update((list) => list.map((it) => (it.conds[0].condition === code ? { ...it, conds: [{ ...it.conds[0], threshold: value }] } : it)));
-  }
-
-  protected toggleCondition(code: ConditionCode) {
-    this.appliedPreset.set(null);
-    if (this.isActive(code)) {
-      this.items.update((list) => list.filter((it) => it.conds[0].condition !== code));
-      return;
-    }
-    // Garde l'ordre du catalogue pour un libellé stable.
-    const order = (c: ConditionCode) => CONDITIONS.findIndex((x) => x.code === c);
-    this.items.update((list) => [...list, { op: 'OR' as const, conds: [this.cond(code)] }].sort((a, b) => order(a.conds[0].condition) - order(b.conds[0].condition)));
-  }
-
-  // ---------------------------------------------------------------------
-  // Éditeur avancé
-  // ---------------------------------------------------------------------
-
-  protected toggleTopOp() {
-    this.edit(this.topOp, this.topOp() === 'OR' ? 'AND' : 'OR');
-  }
-
-  protected toggleGroupOp(i: number) {
-    this.appliedPreset.set(null);
-    this.items.update((list) => list.map((it, k) => (k === i ? { ...it, op: it.op === 'OR' ? 'AND' : 'OR' } : it)));
+    this.items.update((list) => list.map((it, k) => (k === i ? { ...it, op } : it)));
   }
 
   protected setCond(i: number, j: number, condition: ConditionCode) {

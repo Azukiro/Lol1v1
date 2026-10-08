@@ -61,19 +61,47 @@ public static class WinExpression
 
     public static string Serialize(WinNode node) => JsonSerializer.Serialize(node, Json);
 
-    private static IEnumerable<WinNode> Leaves(WinNode node) =>
-        node.IsLeaf ? [node] : (node.Children ?? []).SelectMany(Leaves);
+    /// <summary><paramref name="a"/> entraîne <paramref name="b"/> : même condition, seuil au moins aussi haut.</summary>
+    private static bool Implies(WinNode a, WinNode b) => a.Condition == b.Condition && (a.Threshold ?? 0) >= (b.Threshold ?? 0);
+
+    /// <summary>
+    /// Partie inutile de la règle (« Tour OU (Kills ≥ 2 ET Tour) »), même logique que redundancy() côté client :
+    /// termes reliés par l'opérateur racine, chacun absorbé si un autre terme l'entraîne déjà.
+    /// </summary>
+    public static string? Redundancy(WinNode node)
+    {
+        if (node.IsLeaf || node.Children is null) return null;
+        var terms = new List<List<WinNode>>();
+        foreach (var child in node.Children)
+        {
+            if (child.IsLeaf) terms.Add([child]);
+            else if (child.Op == node.Op) terms.AddRange((child.Children ?? []).Select(c => new List<WinNode> { c }));
+            else if ((child.Children ?? []).Any(c => !c.IsLeaf)) return null;
+            else terms.Add(child.Children ?? []);
+        }
+        foreach (var term in terms)
+        {
+            var dup = term.GroupBy(c => c.Condition).FirstOrDefault(g => g.Count() > 1);
+            if (dup is not null) return $"{dup.Key} apparaît deux fois dans un même groupe.";
+        }
+        var or = node.Op == "OR";
+        for (var a = 0; a < terms.Count; a++)
+            for (var b = 0; b < terms.Count; b++)
+            {
+                if (a == b) continue;
+                var absorbs = terms[a].All(x => terms[b].Any(y => or ? Implies(y, x) : Implies(x, y)));
+                var identical = absorbs && terms[b].All(y => terms[a].Any(x => or ? Implies(x, y) : Implies(y, x)));
+                if (absorbs && (!identical || a < b))
+                    return "Une partie de la règle ne sert à rien : une autre condition l'englobe déjà.";
+            }
+        return null;
+    }
 
     /// <summary>Valide l'expression : profondeur ≤ 3, conditions du catalogue, seuils > 0.</summary>
     public static void Validate(WinNode? node, int depth = 1)
     {
         if (node is null) throw new DomainException("Expression de victoire manquante.");
-        if (depth == 1)
-        {
-            // Une condition ne peut apparaître qu'une fois : sinon l'une englobe l'autre (« Tour OU (Kills ET Tour) »).
-            var reused = Leaves(node).Where(l => l.Condition is not null).GroupBy(l => l.Condition).FirstOrDefault(g => g.Count() > 1);
-            if (reused is not null) throw new DomainException($"Condition utilisée plusieurs fois : {reused.Key}.");
-        }
+        if (depth == 1 && Redundancy(node) is { } useless) throw new DomainException(useless);
         if (depth > MaxDepth) throw new DomainException($"Expression trop profonde (max {MaxDepth}).");
 
         if (node.IsLeaf)
@@ -97,8 +125,6 @@ public static class WinExpression
 
         if (node.Op is not ("AND" or "OR")) throw new DomainException("Opérateur attendu : AND ou OR.");
         if (node.Children is null || node.Children.Count < 2) throw new DomainException("Un opérateur demande au moins deux enfants.");
-        var duplicate = node.Children.Where(c => c.IsLeaf).GroupBy(c => c.Condition).FirstOrDefault(g => g.Count() > 1);
-        if (duplicate is not null) throw new DomainException($"Condition en double : {duplicate.Key}.");
         foreach (var child in node.Children) Validate(child, depth + 1);
     }
 

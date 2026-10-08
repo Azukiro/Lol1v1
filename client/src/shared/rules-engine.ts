@@ -88,10 +88,8 @@ export function describe(node: WinNode, root = true): string {
 export function validate(node: WinNode | undefined, depth = 1): string | null {
   if (!node) return 'Expression manquante.';
   if (depth === 1) {
-    // Une condition ne peut apparaître qu'une fois : sinon l'une englobe l'autre (« Tour OU (Kills ET Tour) »).
-    const codes = leaves(node).map((l) => l.condition!);
-    const reused = codes.find((code, i) => codes.indexOf(code) !== i);
-    if (reused) return `${CONDITION_LABELS[reused]} : déjà utilisée ailleurs dans la règle.`;
+    const useless = redundancy(node);
+    if (useless) return useless;
   }
   if (depth > MAX_DEPTH) return `Profondeur maximale : ${MAX_DEPTH}.`;
   if (node.condition) {
@@ -101,12 +99,50 @@ export function validate(node: WinNode | undefined, depth = 1): string | null {
   }
   if (node.op !== 'AND' && node.op !== 'OR') return 'Opérateur ET / OU attendu.';
   if (!node.children || node.children.length < 2) return 'Au moins deux conditions par opérateur.';
-  const codes = node.children.filter((c) => c.condition).map((c) => c.condition!);
-  const dup = codes.find((code, i) => codes.indexOf(code) !== i);
-  if (dup) return `${CONDITION_LABELS[dup]} : condition en double.`;
   for (const c of node.children) {
     const err = validate(c, depth + 1);
     if (err) return err;
+  }
+  return null;
+}
+
+/** `a` entraîne `b` : même condition, seuil au moins aussi haut (Kills ≥ 3 entraîne Kills ≥ 2). */
+function implies(a: WinNode, b: WinNode): boolean {
+  return a.condition === b.condition && (a.threshold ?? 0) >= (b.threshold ?? 0);
+}
+
+/**
+ * Cherche une partie inutile de la règle (« Tour OU (Kills ≥ 2 ET Tour) » : la parenthèse ne change rien).
+ * La règle est vue comme des termes reliés par l'opérateur racine, chaque terme étant un ensemble de
+ * conditions reliées par l'opérateur inverse. Un terme est inutile quand un autre l'absorbe :
+ *  - racine OU (termes en ET) : B est inutile si chaque condition de A est entraînée par une de B ;
+ *  - racine ET (termes en OU) : B est inutile si chaque condition de A entraîne une de B.
+ * Au-delà de deux niveaux (non produit par l'éditeur), seule la profondeur est contrôlée.
+ */
+export function redundancy(node: WinNode): string | null {
+  if (node.condition) return null;
+  const rootOp = node.op;
+  const terms: WinNode[][] = [];
+  for (const child of node.children ?? []) {
+    if (child.condition) terms.push([child]);
+    else if (child.op === rootOp) terms.push(...(child.children ?? []).map((c) => [c]));
+    else if ((child.children ?? []).some((c) => !c.condition)) return null;
+    else terms.push(child.children ?? []);
+  }
+  const label = (term: WinNode[]) => (term.length === 1 ? describe(term[0]) : `(${term.map((c) => describe(c)).join(rootOp === 'OR' ? ' ET ' : ' OU ')})`);
+  for (const term of terms) {
+    const codes = term.map((c) => c.condition);
+    const dup = codes.find((code, i) => codes.indexOf(code) !== i);
+    if (dup) return `${CONDITION_LABELS[dup]} apparaît deux fois dans ${label(term)}.`;
+  }
+  for (let a = 0; a < terms.length; a++) {
+    for (let b = 0; b < terms.length; b++) {
+      if (a === b) continue;
+      const absorbs = terms[a].every((x) => terms[b].some((y) => (rootOp === 'OR' ? implies(y, x) : implies(x, y))));
+      // Termes identiques : on ne signale que le second.
+      const identical = absorbs && terms[b].every((y) => terms[a].some((x) => (rootOp === 'OR' ? implies(x, y) : implies(y, x))));
+      if (absorbs && (!identical || a < b)) return `${label(terms[b])} ne sert à rien : ${label(terms[a])} ${rootOp === 'OR' ? 'suffit déjà' : 'l’impose déjà'}.`;
+    }
   }
   return null;
 }

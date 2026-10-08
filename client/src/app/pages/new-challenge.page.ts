@@ -158,13 +158,16 @@ interface Suggestion {
                       <button class="btn ghost small" title="Retirer" (click)="remove(i, j)">✕</button>
                     </div>
                   }
-                  @if (freeCode(usedCodes())) {
+                  @if (freeCode(groupCodes(i))) {
                     <button class="btn ghost small add-inner" (click)="addToGroup(i)">+ combiner avec…</button>
                   }
                 </div>
               }
-              @if (freeCode(usedCodes())) {
+              @if (freeCode(topCodes())) {
                 <button class="btn ghost" (click)="addItem()">+ Ajouter une condition</button>
+              }
+              @if (items().length && exprError(); as err) {
+                <div class="error-text">{{ err }}</div>
               }
             </div>
           </section>
@@ -446,15 +449,22 @@ export class NewChallengePage implements OnInit {
     this.patch(i, j, { threshold: Number(value) });
   }
 
-  /**
-   * Conditions déjà utilisées dans la règle : chacune n'apparaît qu'une fois,
-   * sinon l'une englobe l'autre (« Tour OU (Kills ET Tour) »).
-   */
-  protected readonly usedCodes = computed(() => new Set(this.items().flatMap((it) => it.conds.map((c) => c.condition))));
+  /** Conditions des blocs simples, frères directs dans l'expression racine. */
+  protected readonly topCodes = computed(() => new Set(this.items().filter((it) => it.conds.length === 1).map((it) => it.conds[0].condition)));
 
+  protected groupCodes(i: number): Set<ConditionCode> {
+    return new Set(this.items()[i]?.conds.map((c) => c.condition));
+  }
+
+  /**
+   * Conditions déjà prises au même niveau que (i, j) : deux fois la même côte à côte, l'une rend l'autre inutile.
+   * Les cas plus subtils (« Tour OU (Kills ET Tour) ») sont signalés par la validation de la règle.
+   */
   protected condOptions(i: number, j: number): SelectOption<ConditionCode>[] {
-    const own = this.items()[i].conds[j].condition;
-    const options = this.conditions.map((c) => ({ value: c.code, label: c.label, disabled: c.code !== own && this.usedCodes().has(c.code) }));
+    const item = this.items()[i];
+    const own = item.conds[j].condition;
+    const taken = item.conds.length === 1 ? this.topCodes() : this.groupCodes(i);
+    const options = this.conditions.map((c) => ({ value: c.code, label: c.label, disabled: c.code !== own && taken.has(c.code) }));
     // First blood n'est plus proposé (= Kills ≥ 1), mais reste lisible dans une ancienne config.
     return own === 'FIRST_BLOOD' ? [{ value: own, label: 'First blood' }, ...options] : options;
   }
@@ -468,14 +478,14 @@ export class NewChallengePage implements OnInit {
   }
 
   protected addItem() {
-    const code = this.freeCode(this.usedCodes());
+    const code = this.freeCode(this.topCodes());
     if (!code) return;
     this.appliedPreset.set(null);
     this.items.update((list) => [...list, { op: 'OR', conds: [this.cond(code)] }]);
   }
 
   protected addToGroup(i: number) {
-    const code = this.freeCode(this.usedCodes());
+    const code = this.freeCode(this.groupCodes(i));
     if (!code) return;
     this.appliedPreset.set(null);
     this.items.update((list) =>

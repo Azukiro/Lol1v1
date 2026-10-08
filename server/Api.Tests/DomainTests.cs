@@ -5,6 +5,15 @@ namespace Api.Tests;
 public class WinExpressionTests
 {
     [Fact]
+    public void Validate_accepts_same_condition_in_two_groups()
+    {
+        // (Kills ≥ 1 ET CS ≥ 50) OU (Tour ET CS ≥ 50) : rien d'inutile.
+        WinExpression.Validate(WinNode.Or(
+            WinNode.And(WinNode.Leaf(Conditions.Kills, 1), WinNode.Leaf(Conditions.Cs, 50)),
+            WinNode.And(WinNode.Leaf(Conditions.FirstTower), WinNode.Leaf(Conditions.Cs, 50))));
+    }
+
+    [Fact]
     public void Validate_accepts_spec_example()
     {
         var expr = WinExpression.Parse("""
@@ -27,6 +36,8 @@ public class WinExpressionTests
     [InlineData("""{ "op": "OR", "children": [ { "condition": "FIRST_BLOOD" } ] }""")]
     [InlineData("""{ "op": "OR", "children": [ { "condition": "FIRST_BLOOD" }, { "op": "AND", "children": [ { "condition": "FIRST_TOWER" }, { "op": "OR", "children": [ { "condition": "FIRST_BLOOD" }, { "condition": "FIRST_TOWER" } ] } ] } ] }""")]
     [InlineData("""{ "op": "OR", "children": [ { "condition": "FIRST_TOWER" }, { "op": "AND", "children": [ { "condition": "KILLS", "threshold": 2 }, { "condition": "FIRST_TOWER" } ] } ] }""")]
+    [InlineData("""{ "op": "OR", "children": [ { "condition": "KILLS", "threshold": 1 }, { "condition": "KILLS", "threshold": 3 } ] }""")]
+    [InlineData("""{ "op": "OR", "children": [ { "condition": "FIRST_TOWER" }, { "op": "AND", "children": [ { "condition": "KILLS", "threshold": 1 }, { "condition": "KILLS", "threshold": 2 } ] } ] }""")]
     public void Validate_rejects_invalid(string json)
     {
         Assert.Throws<DomainException>(() => WinExpression.Validate(WinExpression.Parse(json)));

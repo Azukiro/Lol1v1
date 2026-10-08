@@ -17,6 +17,23 @@ test('rules engine: OR = earliest, AND = latest', () => {
   assert.equal(validate(expr), null);
 });
 
+test('rules engine: redundant parts of a rule are rejected', () => {
+  const k = (n: number): WinNode => ({ condition: 'KILLS', threshold: n });
+  const tower: WinNode = { condition: 'FIRST_TOWER' };
+  const cs: WinNode = { condition: 'CS', threshold: 50 };
+  // Autorisé : une même condition dans deux groupes différents.
+  assert.equal(validate({ op: 'OR', children: [{ op: 'AND', children: [k(1), cs] }, { op: 'AND', children: [tower, cs] }] }), null);
+  // Absorbé : Tour suffit déjà.
+  assert.match(validate({ op: 'OR', children: [tower, { op: 'AND', children: [k(2), tower] }] })!, /ne sert à rien/);
+  // Seuil plus faible au même niveau.
+  assert.match(validate({ op: 'OR', children: [k(1), k(3)] })!, /Kills ≥ 3 ne sert à rien/);
+  assert.match(validate({ op: 'AND', children: [k(1), k(3)] })!, /Kills ≥ 1 ne sert à rien/);
+  // Doublon dans un groupe.
+  assert.match(validate({ op: 'OR', children: [tower, { op: 'AND', children: [k(1), k(2)] }] })!, /deux fois/);
+  // ET de OU : (Tour OU CS) est absorbé par Tour.
+  assert.match(validate({ op: 'AND', children: [tower, { op: 'OR', children: [tower, cs] }] })!, /l’impose déjà/);
+});
+
 const game = (events: LiveGameData['events'], selfCs = 0, oppCs = 0): LiveGameData => ({
   activePlayer: { riotId: 'Kaelis#EUW' },
   allPlayers: [

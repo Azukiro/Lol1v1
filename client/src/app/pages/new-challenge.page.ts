@@ -91,7 +91,7 @@ const CONDITIONS: { code: ConditionCode; label: string }[] = [
               <button [class.on]="spellMode() === 'DECK_COMPOSED'" (click)="spellMode.set('DECK_COMPOSED')">DECK COMPOSÉ</button>
               <button [class.on]="spellMode() === 'DECK_RANDOM'" (click)="spellMode.set('DECK_RANDOM')">DECK ALÉATOIRE</button>
             </div>
-            <p class="muted small">Sorts disponibles sur l'Abîme hurlant uniquement.</p>
+            <p class="muted small hint">Sorts disponibles sur l'Abîme hurlant uniquement.</p>
           </section>
 
           <section>
@@ -109,7 +109,7 @@ const CONDITIONS: { code: ConditionCode; label: string }[] = [
                     <div class="row cond">
                       <select class="input" [ngModel]="c.condition" (ngModelChange)="setCond(i, j, $event)">
                         @for (opt of conditions; track opt.code) {
-                          <option [value]="opt.code">{{ opt.label }}</option>
+                          <option [value]="opt.code" [disabled]="takenBySiblings(i, j).has(opt.code)">{{ opt.label }}</option>
                         }
                       </select>
                       @if (needsThreshold(c.condition)) {
@@ -123,10 +123,14 @@ const CONDITIONS: { code: ConditionCode; label: string }[] = [
                       <button class="btn ghost small" title="Retirer" (click)="remove(i, j)">✕</button>
                     </div>
                   }
-                  <button class="btn ghost small add-inner" (click)="addToGroup(i)">+ combiner avec…</button>
+                  @if (freeCode(groupCodes(i))) {
+                    <button class="btn ghost small add-inner" (click)="addToGroup(i)">+ combiner avec…</button>
+                  }
                 </div>
               }
-              <button class="btn ghost" (click)="addItem()">+ Ajouter une condition</button>
+              @if (freeCode(topCodes())) {
+                <button class="btn ghost" (click)="addItem()">+ Ajouter une condition</button>
+              }
               @if (exprError()) {
                 <div class="error-text">{{ exprError() }}</div>
               }
@@ -187,6 +191,7 @@ const CONDITIONS: { code: ConditionCode; label: string }[] = [
     .save .input { flex: 1; }
     .expr { margin: 0; padding: 12px; border-radius: 10px; background: #0a0d13; font-weight: 600; }
     p { margin: 0; }
+    .hint { margin-top: 10px; }
   `,
 })
 export class NewChallengePage implements OnInit {
@@ -320,20 +325,48 @@ export class NewChallengePage implements OnInit {
   }
 
   protected setCond(i: number, j: number, condition: ConditionCode) {
-    this.patch(i, j, { condition, threshold: condition === 'CS' ? 50 : condition === 'KILLS' ? 2 : 1 });
+    this.patch(i, j, this.cond(condition));
   }
 
   protected setThreshold(i: number, j: number, value: number) {
     this.patch(i, j, { threshold: Number(value) });
   }
 
+  /** Conditions des blocs simples, frères directs dans l'expression racine. */
+  protected readonly topCodes = computed(() => new Set(this.items().filter((it) => it.conds.length === 1).map((it) => it.conds[0].condition)));
+
+  protected groupCodes(i: number): Set<ConditionCode> {
+    return new Set(this.items()[i]?.conds.map((c) => c.condition));
+  }
+
+  /** Conditions déjà prises par les frères de (i, j) : une même condition deux fois au même niveau n'a pas de sens. */
+  protected takenBySiblings(i: number, j: number): Set<ConditionCode> {
+    const item = this.items()[i];
+    const own = item.conds[j].condition;
+    const taken = item.conds.length === 1 ? new Set(this.topCodes()) : new Set(item.conds.filter((_, m) => m !== j).map((c) => c.condition));
+    taken.delete(own);
+    return taken;
+  }
+
+  protected freeCode(taken: Set<ConditionCode>): ConditionCode | undefined {
+    return this.conditions.find((c) => !taken.has(c.code))?.code;
+  }
+
+  private cond(condition: ConditionCode): Cond {
+    return { condition, threshold: condition === 'CS' ? 50 : condition === 'KILLS' ? 2 : 1 };
+  }
+
   protected addItem() {
-    this.items.update((list) => [...list, { op: 'OR', conds: [{ condition: 'FIRST_BLOOD', threshold: 1 }] }]);
+    const code = this.freeCode(this.topCodes());
+    if (!code) return;
+    this.items.update((list) => [...list, { op: 'OR', conds: [this.cond(code)] }]);
   }
 
   protected addToGroup(i: number) {
+    const code = this.freeCode(this.groupCodes(i));
+    if (!code) return;
     this.items.update((list) =>
-      list.map((it, k) => (k === i ? { op: it.conds.length === 1 ? (this.topOp() === 'OR' ? 'AND' : 'OR') : it.op, conds: [...it.conds, { condition: 'CS', threshold: 50 }] } : it)),
+      list.map((it, k) => (k === i ? { op: it.conds.length === 1 ? (this.topOp() === 'OR' ? 'AND' : 'OR') : it.op, conds: [...it.conds, this.cond(code)] } : it)),
     );
   }
 

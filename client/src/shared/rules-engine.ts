@@ -95,6 +95,9 @@ export function validate(node: WinNode | undefined, depth = 1): string | null {
   }
   if (node.op !== 'AND' && node.op !== 'OR') return 'Opérateur ET / OU attendu.';
   if (!node.children || node.children.length < 2) return 'Au moins deux conditions par opérateur.';
+  const codes = node.children.filter((c) => c.condition).map((c) => c.condition!);
+  const dup = codes.find((code, i) => codes.indexOf(code) !== i);
+  if (dup) return `${CONDITION_LABELS[dup]} : condition en double.`;
   for (const c of node.children) {
     const err = validate(c, depth + 1);
     if (err) return err;

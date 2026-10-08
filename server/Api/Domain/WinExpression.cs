@@ -88,6 +88,8 @@ public static class WinExpression
 
         if (node.Op is not ("AND" or "OR")) throw new DomainException("Opérateur attendu : AND ou OR.");
         if (node.Children is null || node.Children.Count < 2) throw new DomainException("Un opérateur demande au moins deux enfants.");
+        var duplicate = node.Children.Where(c => c.IsLeaf).GroupBy(c => c.Condition).FirstOrDefault(g => g.Count() > 1);
+        if (duplicate is not null) throw new DomainException($"Condition en double : {duplicate.Key}.");
         foreach (var child in node.Children) Validate(child, depth + 1);
     }
 

@@ -51,21 +51,17 @@ import { AvatarComponent } from '../shared/avatar.component';
       }
 
       <section class="presets">
-        <div class="row">
-          <h2>Configs prêtes</h2>
-          <span class="spacer"></span>
-          <a class="btn ghost small" routerLink="/new">+ Config personnalisée</a>
-        </div>
+        <h2>Configs prêtes</h2>
         <div class="strip">
           @for (p of presets(); track p.id) {
             <article class="preset" [class.mine]="!p.builtIn" tabindex="0" (click)="usePreset(p)" (keydown.enter)="usePreset(p)">
-              <div class="row">
-                <span class="chip" [class.cyan]="p.builtIn" [class.yellow]="!p.builtIn">{{ p.builtIn ? 'Serveur' : 'Perso' }}</span>
-                <span class="spacer"></span>
-                @if (!p.builtIn) {
+              @if (!p.builtIn) {
+                <div class="row">
+                  <span class="chip yellow">Perso</span>
+                  <span class="spacer"></span>
                   <button class="del" title="Supprimer" (click)="deletePreset(p, $event)">✕</button>
-                }
-              </div>
+                </div>
+              }
               <h3>{{ p.name }}</h3>
               <div class="row wrap chips">
                 <span class="chip">BO{{ p.config.bestOf }}</span>

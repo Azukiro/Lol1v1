@@ -70,6 +70,9 @@ h3 { font-size: 16px; font-weight: 700; letter-spacing: 0.08em; }
 }
 .btn.primary { background: var(--cyan); color: #04141a; box-shadow: 0 0 24px rgba(25, 227, 255, 0.35); }
 .btn.danger-fill { background: var(--pink); color: #fff; box-shadow: 0 0 24px rgba(255, 51, 102, 0.35); }
+.btn.primary, .btn.danger-fill { transition: transform 0.08s, filter 0.15s, box-shadow 0.15s; }
+.btn.primary:hover:not(:disabled):not(.disabled) { filter: brightness(1.12); box-shadow: 0 0 36px rgba(25, 227, 255, 0.6); transform: translateY(-1px); }
+.btn.danger-fill:hover:not(:disabled) { filter: brightness(1.12); box-shadow: 0 0 36px rgba(255, 51, 102, 0.6); transform: translateY(-1px); }
 .btn.outline { background: transparent; border-color: var(--cyan); color: var(--cyan); font-family: var(--display); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
 .btn.ghost { background: transparent; }
 .btn.big { padding: 16px 24px; font-size: 17px; width: 100%; }

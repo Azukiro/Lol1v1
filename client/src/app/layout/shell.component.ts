@@ -15,11 +15,11 @@ import { AvatarComponent } from '../shared/avatar.component';
   template: `
     <div class="shell">
       <nav class="rail">
-        <a class="logo" routerLink="/" title="Accueil">
+        <span class="logo">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
             <path d="M5 4l14 16M19 4L5 20M8 4H4v4M16 4h4v4" />
           </svg>
-        </a>
+        </span>
         <a routerLink="/" routerLinkActive="on" [routerLinkActiveOptions]="{ exact: true }" title="Accueil">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z" /></svg>
         </a>
@@ -67,11 +67,10 @@ import { AvatarComponent } from '../shared/avatar.component';
   styles: `
     .shell { display: flex; height: 100vh; }
     .rail { width: 72px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px 0; background: #080a0f; border-right: 1px solid var(--line); }
-    .rail a, .rail .me { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--muted); }
+    .rail a, .rail .logo, .rail .me { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--muted); }
     .rail a:hover { color: var(--text); background: var(--panel); }
     .rail a.on { color: var(--cyan); background: var(--cyan-dim); }
     .rail .logo { background: var(--cyan); color: #04141a; margin-bottom: 14px; box-shadow: 0 0 18px rgba(25, 227, 255, 0.4); }
-    .rail .logo:hover { background: var(--cyan); color: #04141a; }
     .rail .me app-avatar { width: 100%; height: 100%; }
     .rail .me { overflow: hidden; padding: 0; border: 2px solid var(--cyan); background: transparent; color: var(--cyan); font-family: var(--display); font-weight: 700; cursor: pointer; border-radius: 50%; }
     .conn { width: 8px; height: 8px; border-radius: 50%; background: var(--pink); }

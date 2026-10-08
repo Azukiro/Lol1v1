@@ -291,6 +291,12 @@ public class SeriesFlowTests
         Assert.Equal("IN_PROGRESS", state.Status);
         Assert.Equal(new[] { 11, 12, 13 }, state.Opponent.BansOnMe!.Order().ToArray());
 
+        // Statistiques : bans révélés, vus de B.
+        var stats = await b.Http.GetFromJsonAsync<List<HistoryEntryDto>>("/api/v1/series/stats", ApiJson.Options);
+        var entry = Assert.Single(stats!);
+        Assert.Equal(new[] { 1, 2, 3 }, entry.MyBans.Order().ToArray());
+        Assert.Equal(new[] { 11, 12, 13 }, entry.OpponentBans.Order().ToArray());
+
         // Pick aveugle : banni refusé, puis choix masqué jusqu'à révélation.
         await Assert.ThrowsAsync<HubException>(() => b.Hub.InvokeAsync("SubmitPick", id, 11, new[] { 4, 7 }));
         await b.Hub.InvokeAsync("SubmitPick", id, 14, new[] { 4, 7 });

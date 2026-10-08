@@ -93,6 +93,7 @@ export interface HistoryRound {
   number: number;
   winnerSlot: SlotName | null;
   winningLabel: string | null;
+  winningCondition: string | null;
   /** Temps de jeu (s) auquel la condition de victoire a été remplie. */
   winningTime: number | null;
   startedAt: string | null;
@@ -104,6 +105,9 @@ export interface HistoryRound {
 export interface HistoryEntry {
   series: SeriesSummary;
   rounds: HistoryRound[];
+  /** Champions que j'ai bannis / que l'adversaire m'a bannis (mode deck). */
+  myBans: number[];
+  opponentBans: number[];
 }
 
 export interface Player {

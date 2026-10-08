@@ -60,18 +60,18 @@ public sealed class SeriesService(
         return list.Select(s => Summary(s, userId)).ToList();
     }
 
-    /// <summary>Séries terminées ou interrompues, avec champions, sorts et statistiques de chaque manche jouée.</summary>
-    public async Task<List<HistoryEntryDto>> HistoryAsync(Guid userId)
+    /// <summary>Séries du joueur avec champions, sorts, bans et statistiques de chaque manche jouée (tentatives annulées exclues).</summary>
+    public async Task<List<HistoryEntryDto>> HistoryAsync(Guid userId, bool finishedOnly, int take)
     {
-        var list = await db.Series
+        var query = db.Series
             .Include(s => s.Players).ThenInclude(p => p.User)
             .Include(s => s.Players).ThenInclude(p => p.RiotAccount)
             .Include(s => s.Rounds).ThenInclude(r => r.Assignments)
             .Include(s => s.Rounds).ThenInclude(r => r.Observations)
-            .Where(s => s.Players.Any(p => p.UserId == userId) && (s.Status == SeriesStatus.FINISHED || s.Status == SeriesStatus.ABORTED))
-            .OrderByDescending(s => s.CreatedAt).Take(50)
-            .AsSplitQuery()
-            .ToListAsync();
+            .Include(s => s.Bans)
+            .Where(s => s.Players.Any(p => p.UserId == userId));
+        if (finishedOnly) query = query.Where(s => s.Status == SeriesStatus.FINISHED || s.Status == SeriesStatus.ABORTED);
+        var list = await query.OrderByDescending(s => s.CreatedAt).Take(take).AsSplitQuery().ToListAsync();
         return list.Select(s =>
         {
             var me = s.Players.First(p => p.UserId == userId);
@@ -87,9 +87,12 @@ public sealed class SeriesService(
                     return new HistoryPlayerRoundDto(a?.ChampionId, a?.Spell1Id, a?.Spell2Id, f.Kills, f.Cs, f.FirstBloodTime is not null, f.FirstTowerTime is not null);
                 }
                 return new HistoryRoundDto(r.Number, r.WinnerPlayerId is null ? null : SlotName(s, r.WinnerPlayerId.Value),
-                    condition?.Label, condition?.EventTime, r.StartedAt, r.EndedAt, Player(me), Player(opp));
+                    condition?.Label, condition?.Condition, condition?.EventTime, r.StartedAt, r.EndedAt, Player(me), Player(opp));
             }).ToList();
-            return new HistoryEntryDto(Summary(s, userId), rounds);
+            // Bans à l'aveugle : visibles seulement une fois les deux joueurs passés.
+            var revealed = s.Bans.Select(b => b.ByPlayerId).Distinct().Count() == 2;
+            List<int> Bans(Guid by) => revealed ? s.Bans.Where(b => b.ByPlayerId == by).Select(b => b.ChampionId).ToList() : [];
+            return new HistoryEntryDto(Summary(s, userId), rounds, Bans(me.Id), Bans(opp.Id));
         }).ToList();
     }
 

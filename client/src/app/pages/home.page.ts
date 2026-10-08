@@ -1,19 +1,22 @@
 import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ApiService, AuthService, errorMessage } from '../core/api.service';
 import { GameTrackerService } from '../core/game-tracker.service';
 import { HubService } from '../core/hub.service';
 import { LolService } from '../core/lol.service';
-import { Invitation, MODE_LABELS, Preset, SeriesSummary, SPELL_MODE_LABELS } from '../core/models';
+import { HistoryEntry, Invitation, MODE_LABELS, Preset, SeriesSummary, SPELL_MODE_LABELS } from '../core/models';
 import { ToastService } from '../core/toast.service';
 import { ConfirmService } from '../core/confirm.service';
+import { ReferenceService } from '../core/reference.service';
+import { ChampIconComponent } from '../shared/champ-icon.component';
+import { championHighlights, championStats, MIN_SAMPLE, opponentHighlights, opponents, overview, WinLoss, winRate } from '../../shared/stats';
 import { AvatarComponent } from '../shared/avatar.component';
 
 @Component({
   selector: 'app-home',
-  imports: [RouterLink, DatePipe, AvatarComponent],
+  imports: [RouterLink, DatePipe, NgTemplateOutlet, AvatarComponent, ChampIconComponent],
   template: `
     <div class="page">
       <header class="page-head">
@@ -148,6 +151,64 @@ import { AvatarComponent } from '../shared/avatar.component';
           }
         </div>
       </div>
+
+      @if (statsEntries().length) {
+        <section class="stats">
+          <div class="row">
+            <h2>Stats</h2>
+            <span class="spacer"></span>
+            <a class="btn ghost small" routerLink="/stats">Toutes les stats →</a>
+          </div>
+          <div class="stat-tiles">
+            <a class="stat-tile" routerLink="/stats" [queryParams]="{ tab: 'modes' }">
+              <span class="label">Taux de victoire</span>
+              <strong class="big">{{ pct(statsOverview().series) }}</strong>
+              <span class="muted small">
+                {{ statsOverview().series.wins }}V {{ statsOverview().series.played - statsOverview().series.wins }}D en séries ·
+                {{ pct(statsOverview().rounds) }} des manches
+              </span>
+            </a>
+            <a class="stat-tile good" routerLink="/stats" [queryParams]="{ tab: 'champions' }">
+              <span class="label">{{ bestChampion()?.title ?? 'Meilleur champion' }}</span>
+              @if (bestChampion(); as b) {
+                <div class="row">
+                  <app-champ-icon class="xl" [id]="b.stats.championId" />
+                  <div>
+                    <strong class="name">{{ ref.championName(b.stats.championId) }}</strong>
+                    <div class="muted small">{{ winRate(b.stats) }} % · {{ b.stats.played }} manche(s)</div>
+                  </div>
+                </div>
+              }
+            </a>
+            <a class="stat-tile cyan" routerLink="/stats" [queryParams]="{ tab: 'players', player: favorite()?.riotId }">
+              <span class="label">Ta victime préférée</span>
+              @if (favorite(); as o) {
+                <ng-container *ngTemplateOutlet="opp; context: { $implicit: o }" />
+              } @else {
+                <span class="muted small">Affronte un joueur {{ minSample }} manches pour le classer.</span>
+              }
+            </a>
+            <a class="stat-tile bad" routerLink="/stats" [queryParams]="{ tab: 'players', player: nemesis()?.riotId }">
+              <span class="label">Ta némésis</span>
+              @if (nemesis(); as o) {
+                <ng-container *ngTemplateOutlet="opp; context: { $implicit: o }" />
+              } @else {
+                <span class="muted small">Personne ne te domine pour l’instant.</span>
+              }
+            </a>
+          </div>
+        </section>
+      }
+
+      <ng-template #opp let-o>
+        <div class="row">
+          <app-avatar class="avatar neutral xl" [iconId]="o.iconId" [name]="o.name" />
+          <div>
+            <strong class="name">{{ o.name }}</strong>
+            <div class="muted small">{{ o.rounds.wins }}:{{ o.rounds.played - o.rounds.wins }} en manches · {{ winRate(o.rounds) }} %</div>
+          </div>
+        </div>
+      </ng-template>
     </div>
   `,
   styles: `
@@ -181,6 +242,19 @@ import { AvatarComponent } from '../shared/avatar.component';
     .current:hover { border-color: #3a465c; }
     .between { justify-content: space-between; }
     a.disabled { pointer-events: none; opacity: 0.5; }
+    .stats { margin-top: 32px; }
+    .stats h2 { margin: 0; }
+    .stat-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+    .stat-tile { display: flex; flex-direction: column; gap: 10px; padding: 16px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel); transition: border-color 0.15s, transform 0.1s; }
+    .stat-tile:hover { border-color: #3a465c; transform: translateY(-2px); }
+    .stat-tile.good { border-color: rgba(61, 220, 132, 0.4); background: linear-gradient(180deg, rgba(61, 220, 132, 0.07), var(--panel)); }
+    .stat-tile.cyan { border-color: rgba(25, 227, 255, 0.4); background: linear-gradient(180deg, rgba(25, 227, 255, 0.06), var(--panel)); }
+    .stat-tile.bad { border-color: rgba(255, 51, 102, 0.4); background: linear-gradient(180deg, rgba(255, 51, 102, 0.07), var(--panel)); }
+    .label { font-family: var(--display); font-weight: 700; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+    .big { font-family: var(--display); font-size: 36px; line-height: 1.05; }
+    .name { font-family: var(--display); font-size: 18px; letter-spacing: 0.06em; text-transform: uppercase; }
+    .xl { width: 52px; height: 52px; border-radius: 11px; }
+    @media (max-width: 1100px) { .stat-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     @media (max-width: 1100px) { .two { grid-template-columns: 1fr; } }
   `,
 })
@@ -201,6 +275,19 @@ export class HomePage implements OnInit, OnDestroy {
   protected readonly series = signal<SeriesSummary[]>([]);
   protected readonly presets = signal<Preset[]>([]);
   protected readonly busy = signal(false);
+  protected readonly ref = inject(ReferenceService);
+  protected readonly winRate = winRate;
+  protected readonly minSample = MIN_SAMPLE;
+  protected readonly statsEntries = signal<HistoryEntry[]>([]);
+  protected readonly statsOverview = computed(() => overview(this.statsEntries()));
+  protected readonly bestChampion = computed(() => {
+    const h = championHighlights(championStats(this.statsEntries()));
+    if (h.best) return { title: 'Meilleur champion', stats: h.best };
+    return h.mostPlayed ? { title: 'Champion le plus joué', stats: h.mostPlayed } : null;
+  });
+  private readonly opponentHl = computed(() => opponentHighlights(opponents(this.statsEntries())));
+  protected readonly favorite = computed(() => this.opponentHl().favorite);
+  protected readonly nemesis = computed(() => this.opponentHl().nemesis);
 
   protected readonly riotLinked = computed(() => !!this.auth.user()?.riotAccount);
   protected readonly riotMismatch = computed(() => {
@@ -220,6 +307,8 @@ export class HomePage implements OnInit, OnDestroy {
 
   ngOnInit() {
     void this.refresh();
+    // Stats secondaires : un échec ne doit pas gêner l'accueil.
+    void this.api.stats().then((e) => this.statsEntries.set(e)).catch(() => undefined);
     void this.loadPresets();
     this.sub = this.hub.invitations$.subscribe(() => void this.refresh());
   }
@@ -230,6 +319,11 @@ export class HomePage implements OnInit, OnDestroy {
 
   protected pips(s: SeriesSummary) {
     return Array.from({ length: Math.ceil(s.bestOf / 2) });
+  }
+
+  protected pct(r: WinLoss) {
+    const v = winRate(r);
+    return v == null ? '—' : `${v} %`;
   }
 
   /** Libellé de config sans BO / mode / sorts (déjà affichés en puces) : ne garde que les conditions. */

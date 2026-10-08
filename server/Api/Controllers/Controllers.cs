@@ -280,7 +280,11 @@ public sealed class SeriesController(SeriesService series) : ControllerBase
     public Task<List<SeriesSummaryDto>> List([FromQuery] SeriesStatus? status) => series.ListAsync(User.UserId(), status);
 
     [HttpGet("history")]
-    public Task<List<HistoryEntryDto>> History() => series.HistoryAsync(User.UserId());
+    public Task<List<HistoryEntryDto>> History() => series.HistoryAsync(User.UserId(), finishedOnly: true, take: 50);
+
+    /// <summary>Données brutes des statistiques : toutes les séries du joueur, agrégées côté client.</summary>
+    [HttpGet("stats")]
+    public Task<List<HistoryEntryDto>> Stats() => series.HistoryAsync(User.UserId(), finishedOnly: false, take: 500);
 
     [HttpGet("{id:guid}")]
     public Task<SeriesStateDto> Get(Guid id) => series.GetStateAsync(id, User.UserId());

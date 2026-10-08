@@ -40,6 +40,9 @@ import { ConfirmService } from '../core/confirm.service';
         <a routerLink="/history" routerLinkActive="on" title="Historique">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>
         </a>
+        <a routerLink="/stats" routerLinkActive="on" title="Stats">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h16M7 16v-5M12 16V6M17 16v-8" /></svg>
+        </a>
         <span class="spacer"></span>
         <span class="conn" [class.ok]="hub.state() === 'connected'" [title]="'Serveur arbitre : ' + hub.state()"></span>
         <div class="profile">

@@ -36,11 +36,12 @@ public sealed record SeriesSummaryDto(
     string? WinnerSlot, DateTimeOffset CreatedAt, DateTimeOffset? FinishedAt);
 
 /// <summary>Série de l'historique, avec le récapitulatif de chaque manche jouée.</summary>
-public sealed record HistoryEntryDto(SeriesSummaryDto Series, List<HistoryRoundDto> Rounds);
+/// <summary>MyBans : champions que j'ai bannis ; OpponentBans : ceux que l'adversaire m'a bannis (visibles une fois révélés).</summary>
+public sealed record HistoryEntryDto(SeriesSummaryDto Series, List<HistoryRoundDto> Rounds, List<int> MyBans, List<int> OpponentBans);
 
 /// <summary>Manche jouée (tentatives annulées exclues), vue du joueur courant.</summary>
 public sealed record HistoryRoundDto(
-    int Number, string? WinnerSlot, string? WinningLabel, double? WinningTime,
+    int Number, string? WinnerSlot, string? WinningLabel, string? WinningCondition, double? WinningTime,
     DateTimeOffset? StartedAt, DateTimeOffset? EndedAt, HistoryPlayerRoundDto Me, HistoryPlayerRoundDto Opponent);
 
 public sealed record HistoryPlayerRoundDto(int? ChampionId, int? Spell1Id, int? Spell2Id, int Kills, int Cs, bool FirstBlood, bool FirstTower);

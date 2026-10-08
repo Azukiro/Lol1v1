@@ -76,7 +76,10 @@ import { AvatarComponent } from '../shared/avatar.component';
                 } @empty {
                   <div class="muted small">Aucune manche jouée.</div>
                 }
-                <a class="btn ghost small more" [routerLink]="['/series', e.series.id]">Voir la série →</a>
+                <div class="row more">
+                  <a class="btn ghost small" routerLink="/stats" [queryParams]="{ tab: 'players', player: e.series.opponentRiotId }">Face à face avec {{ e.series.opponentName }} →</a>
+                  <a class="btn ghost small" [routerLink]="['/series', e.series.id]">Voir la série →</a>
+                </div>
               </div>
             }
           </article>

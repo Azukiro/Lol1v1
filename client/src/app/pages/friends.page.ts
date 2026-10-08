@@ -1,6 +1,6 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { ApiService, errorMessage } from '../core/api.service';
 import { LolService } from '../core/lol.service';
 import type { LolFriend } from '../../shared/ipc';
@@ -30,7 +30,7 @@ const GAME_STATUS: Record<string, string> = {
 /** Amis lus dans le client LoL, croisés avec les comptes de l'app pour les défier en un clic. */
 @Component({
   selector: 'app-friends',
-  imports: [FormsModule, AvatarComponent],
+  imports: [FormsModule, RouterLink, AvatarComponent],
   template: `
     <div class="page">
       <header class="page-head">
@@ -56,6 +56,7 @@ const GAME_STATUS: Record<string, string> = {
                 <strong>{{ f.gameName }}</strong><span class="muted">#{{ f.tagLine }}</span>
                 <div class="muted small"><span class="dot" [class]="statusTone(f)"></span>{{ statusLabel(f) }} · {{ f.appName }} sur l'app</div>
               </div>
+              <a class="btn ghost small" routerLink="/stats" [queryParams]="{ tab: 'players', player: f.riotId }">Face à face</a>
               <button class="btn outline small" (click)="challenge(f)">Défier</button>
             </div>
           } @empty {

@@ -38,6 +38,15 @@
         ],
         "createdAt": "2026-10-08T22:31:27.067Z",
         "reason": "Claude: <img> src bound via [src] inside @if guards on Data Dragon URLs, never empty"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/shared/champ-icon.component.ts"
+        ],
+        "createdAt": "2026-10-08T22:37:18.160Z",
+        "reason": "Claude: [src] bound inside @if on a Data Dragon URL, never empty"
       }
     ]
   }

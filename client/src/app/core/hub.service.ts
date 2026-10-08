@@ -17,6 +17,7 @@ const SERIES_EVENTS = [
   'PicksRevealed',
   'LaunchLobby',
   'PickWarning',
+  'SecretObjectiveRevealed',
   'RoundVoided',
   'RoundResolved',
   'RoundDisputed',

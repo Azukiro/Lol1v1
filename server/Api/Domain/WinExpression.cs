@@ -29,9 +29,11 @@ public static class Conditions
     public const string Kills = "KILLS";
     public const string FirstTower = "FIRST_TOWER";
     public const string Cs = "CS";
+    /// <summary>Nombre de tours détruites : réservé au labo, absent du catalogue des séries standards.</summary>
+    public const string Towers = "TOWERS";
 
     public static readonly string[] Catalog = [FirstBlood, Kills, FirstTower, Cs];
-    public static bool NeedsThreshold(string condition) => condition is Kills or Cs;
+    public static bool NeedsThreshold(string condition) => condition is Kills or Cs or Towers;
 }
 
 /// <summary>Faits observés pour un joueur, chacun avec l'horodatage de jeu où il est devenu vrai.</summary>
@@ -41,6 +43,8 @@ public sealed class PlayerFacts
     public List<double> KillTimes { get; } = [];
     public double? FirstBloodTime { get; set; }
     public double? FirstTowerTime { get; set; }
+    /// <summary>Horodatages des tours détruites par le joueur, triés.</summary>
+    public List<double> TowerTimes { get; } = [];
     /// <summary>Paliers de CS confirmés : (valeur, EventTime).</summary>
     public List<(int Value, double Time)> CsSamples { get; } = [];
 
@@ -141,6 +145,7 @@ public static class WinExpression
                 Conditions.FirstBlood => facts.FirstBloodTime,
                 Conditions.FirstTower => facts.FirstTowerTime,
                 Conditions.Kills => facts.KillTimes.Count >= node.Threshold ? facts.KillTimes.Order().ElementAt(node.Threshold!.Value - 1) : null,
+                Conditions.Towers => facts.TowerTimes.Count >= node.Threshold ? facts.TowerTimes.Order().ElementAt(node.Threshold!.Value - 1) : null,
                 Conditions.Cs => facts.CsSamples.Where(s => s.Value >= node.Threshold).Select(s => (double?)s.Time).Min(),
                 _ => null,
             };
@@ -163,6 +168,7 @@ public static class WinExpression
                 Conditions.FirstBlood => "First blood",
                 Conditions.FirstTower => "Première tour",
                 Conditions.Kills => $"Kills ≥ {node.Threshold}",
+                Conditions.Towers => $"Tours ≥ {node.Threshold}",
                 Conditions.Cs => $"CS ≥ {node.Threshold}",
                 _ => node.Condition ?? "?",
             };

@@ -3,7 +3,8 @@
  * vus par ce client, pour un retour immédiat. Le serveur reste le seul arbitre.
  */
 
-export type ConditionCode = 'FIRST_BLOOD' | 'KILLS' | 'FIRST_TOWER' | 'CS';
+/** TOWERS (nombre de tours) est réservé au labo : absent du formulaire des séries standards. */
+export type ConditionCode = 'FIRST_BLOOD' | 'KILLS' | 'FIRST_TOWER' | 'CS' | 'TOWERS';
 
 export interface WinNode {
   op?: 'AND' | 'OR';
@@ -16,6 +17,7 @@ export interface Facts {
   killTimes: number[];
   firstBloodTime?: number;
   firstTowerTime?: number;
+  towerTimes: number[];
   csSamples: { value: number; time: number }[];
 }
 
@@ -24,6 +26,7 @@ export const CONDITION_LABELS: Record<ConditionCode, string> = {
   KILLS: 'Kills',
   FIRST_TOWER: 'Première tour',
   CS: 'CS',
+  TOWERS: 'Tours',
 };
 
 export const MAX_DEPTH = 3;
@@ -31,11 +34,11 @@ export const MAX_DEPTH = 3;
 export const CS_STEP = 10;
 
 export function needsThreshold(c: ConditionCode): boolean {
-  return c === 'KILLS' || c === 'CS';
+  return c === 'KILLS' || c === 'CS' || c === 'TOWERS';
 }
 
 export function emptyFacts(): Facts {
-  return { killTimes: [], csSamples: [] };
+  return { killTimes: [], towerTimes: [], csSamples: [] };
 }
 
 /** Horodatage de jeu auquel l'expression devient vraie (OR = min, AND = max), ou null. */
@@ -48,6 +51,11 @@ export function evaluate(node: WinNode, facts: Facts): number | null {
         return facts.firstTowerTime ?? null;
       case 'KILLS': {
         const sorted = [...facts.killTimes].sort((a, b) => a - b);
+        const n = node.threshold ?? 1;
+        return sorted.length >= n ? sorted[n - 1] : null;
+      }
+      case 'TOWERS': {
+        const sorted = [...facts.towerTimes].sort((a, b) => a - b);
         const n = node.threshold ?? 1;
         return sorted.length >= n ? sorted[n - 1] : null;
       }
@@ -77,6 +85,8 @@ export function describe(node: WinNode, root = true): string {
         return `Kills ≥ ${node.threshold}`;
       case 'CS':
         return `CS ≥ ${node.threshold}`;
+      case 'TOWERS':
+        return `Tours ≥ ${node.threshold}`;
     }
   }
   const sep = node.op === 'AND' ? ' ET ' : ' OU ';

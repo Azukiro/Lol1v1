@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Api.Domain.Lab;
 
 namespace Api.Domain;
 
@@ -8,14 +9,18 @@ public sealed class SeriesConfig
     [JsonPropertyName("bestOf")] public int BestOf { get; set; }
     [JsonPropertyName("championMode")] public ChampionMode ChampionMode { get; set; }
     [JsonPropertyName("spellMode")] public SpellMode SpellMode { get; set; }
-    [JsonPropertyName("winExpression")] public WinNode WinExpression { get; set; } = null!;
+    /// <summary>Ignorée en mode labo « objectifs secrets » (chaque joueur a la sienne).</summary>
+    [JsonPropertyName("winExpression")] public WinNode? WinExpression { get; set; }
+    /// <summary>Mode expérimental du labo, null pour une série standard.</summary>
+    [JsonPropertyName("lab")] public LabConfig? Lab { get; set; }
 
     public void Validate()
     {
         SeriesRules.ValidateBestOf(BestOf);
         if (!Enum.IsDefined(ChampionMode)) throw new DomainException("Mode de champion inconnu.");
         if (!Enum.IsDefined(SpellMode)) throw new DomainException("Mode de sorts inconnu.");
-        Api.Domain.WinExpression.Validate(WinExpression);
+        if (Lab is not null) Lab.Validate();
+        else Api.Domain.WinExpression.Validate(WinExpression);
     }
 }
 

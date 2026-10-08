@@ -76,7 +76,7 @@ public sealed class TestPlayer : IAsyncDisposable
             .Build();
         var player = new TestPlayer { Http = http, Hub = hub, RiotId = $"{name}#EUW" };
         foreach (var evt in new[] { "SeriesUpdated", "BansRevealed", "AssignmentReady", "PicksRevealed", "LaunchLobby", "PickWarning",
-                     "RoundVoided", "RoundResolved", "RoundDisputed", "SeriesFinished", "VoidRequested", "SeriesAborted" })
+                     "RoundVoided", "RoundResolved", "RoundDisputed", "SeriesFinished", "VoidRequested", "SeriesAborted", "SecretObjectiveRevealed" })
             hub.On<Guid, JsonElement?>(evt, (_, payload) => player.Events.Enqueue((evt, payload)));
         hub.On<JsonElement>("InvitationReceived", p => player.Events.Enqueue(("InvitationReceived", p)));
         hub.On<JsonElement>("InvitationUpdated", p => player.Events.Enqueue(("InvitationUpdated", p)));

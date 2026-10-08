@@ -5,10 +5,11 @@ import { HubService } from '../../core/hub.service';
 import { MODE_LABELS } from '../../core/models';
 import { BanPhaseComponent, SetupPhaseComponent } from './prep.components';
 import { LivePhaseComponent, LobbyPhaseComponent, PickPhaseComponent, SeriesRecapComponent } from './round.components';
+import { LabObjectiveComponent } from '../../lab/lab-objective.component';
 
 @Component({
   selector: 'app-series',
-  imports: [SetupPhaseComponent, BanPhaseComponent, PickPhaseComponent, LobbyPhaseComponent, LivePhaseComponent, SeriesRecapComponent],
+  imports: [SetupPhaseComponent, BanPhaseComponent, PickPhaseComponent, LobbyPhaseComponent, LivePhaseComponent, SeriesRecapComponent, LabObjectiveComponent],
   template: `
     <div class="page">
       @if (state(); as s) {
@@ -37,7 +38,11 @@ import { LivePhaseComponent, LobbyPhaseComponent, PickPhaseComponent, SeriesReca
           @case ('bans') { <app-ban-phase [state]="s" /> }
           @case ('pick') { <app-pick-phase [state]="s" [round]="round()!" /> }
           @case ('lobby') { <app-lobby-phase [state]="s" [round]="round()!" /> }
-          @case ('live') { <app-live-phase [state]="s" [round]="round()!" /> }
+          @case ('live') {
+            <app-live-phase [state]="s" [round]="round()!">
+              @if (s.lab) { <app-lab-objective [state]="s" /> }
+            </app-live-phase>
+          }
           @case ('done') { <app-series-recap [state]="s" /> }
         }
       } @else {
@@ -81,7 +86,7 @@ export class SeriesPage {
   protected readonly kicker = computed(() => {
     const s = this.state()!;
     const r = this.round();
-    const base = `BO${s.bestOf} · ${MODE_LABELS[s.championMode]}`;
+    const base = `${s.lab ? 'Labo · Objectifs secrets · ' : ''}BO${s.bestOf} · ${MODE_LABELS[s.championMode]}`;
     if (s.status === 'SETUP' || s.status === 'BANS') return `Contre ${this.opp()!.displayName} · ${base} · Étape ${s.status === 'SETUP' ? 1 : 2}/2`;
     return r ? `Manche ${r.number}${r.attempt > 1 ? ` (tentative ${r.attempt})` : ''} · ${base}` : base;
   });

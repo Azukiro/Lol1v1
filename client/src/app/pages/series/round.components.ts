@@ -307,26 +307,31 @@ export class LobbyPhaseComponent {
           </div>
         }
 
-        <div class="card">
-          <div class="row"><h2>Conditions de victoire</h2><span class="spacer"></span><span class="muted small">La première atteinte gagne</span></div>
-          <div class="conds">
-            @for (leaf of conditionLeaves(); track $index) {
-              <div class="cond">
-                <div class="row"><strong class="display">{{ label(leaf) }}</strong><span class="spacer"></span><span class="yellow small">{{ hint(leaf) }}</span></div>
-                <div class="bars">
-                  @for (p of progressRows(leaf); track p.slot) {
-                    <div class="bar-row">
-                      <span class="who" [class.accent]="p.mine" [class.danger]="!p.mine">{{ p.mine ? 'Toi' : opp().displayName }}</span>
-                      <div class="bar"><i [style.transform]="'scaleX(' + p.pct / 100 + ')'" [class.me]="p.mine"></i></div>
-                      <span class="val">{{ p.text }}</span>
-                    </div>
-                  }
+        @if (!s.winExpression) {
+          <!-- Mode labo : panneau projeté par la page série. -->
+          <ng-content />
+        } @else {
+          <div class="card">
+            <div class="row"><h2>Conditions de victoire</h2><span class="spacer"></span><span class="muted small">La première atteinte gagne</span></div>
+            <div class="conds">
+              @for (leaf of conditionLeaves(); track $index) {
+                <div class="cond">
+                  <div class="row"><strong class="display">{{ label(leaf) }}</strong><span class="spacer"></span><span class="yellow small">{{ hint(leaf) }}</span></div>
+                  <div class="bars">
+                    @for (p of progressRows(leaf); track p.slot) {
+                      <div class="bar-row">
+                        <span class="who" [class.accent]="p.mine" [class.danger]="!p.mine">{{ p.mine ? 'Toi' : opp().displayName }}</span>
+                        <div class="bar"><i [style.transform]="'scaleX(' + p.pct / 100 + ')'" [class.me]="p.mine"></i></div>
+                        <span class="val">{{ p.text }}</span>
+                      </div>
+                    }
+                  </div>
                 </div>
-              </div>
-            }
+              }
+            </div>
+            <p class="muted small expr">{{ s.winExpressionLabel }}</p>
           </div>
-          <p class="muted small expr">{{ s.winExpressionLabel }}</p>
-        </div>
+        }
       </section>
 
       <aside class="stack">
@@ -391,7 +396,10 @@ export class LivePhaseComponent {
 
   protected readonly opp = computed(() => players(this.state()).opp);
   protected readonly oppSlot = computed(() => this.opp().slot);
-  protected readonly conditionLeaves = computed(() => leaves(this.state().winExpression));
+  protected readonly conditionLeaves = computed(() => {
+    const expr = this.state().winExpression;
+    return expr ? leaves(expr) : [];
+  });
   protected readonly clock = computed(() => formatGameTime(this.tracker.localProgress()?.gameTime ?? 0));
   protected readonly liveOk = computed(() => !!this.lol.liveData());
   protected readonly fmt = formatGameTime;
@@ -570,7 +578,7 @@ export class SeriesRecapComponent implements OnInit {
   }
 
   rematch() {
-    void this.router.navigate(['/new'], { queryParams: { opponent: this.opp().riotId } });
+    void this.router.navigate([this.state().lab ? '/labo' : '/new'], { queryParams: { opponent: this.opp().riotId } });
   }
 
   faceToFace() {

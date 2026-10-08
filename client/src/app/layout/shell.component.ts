@@ -10,6 +10,7 @@ import { LolService } from '../core/lol.service';
 import { AvatarComponent } from '../shared/avatar.component';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { ConfirmService } from '../core/confirm.service';
+import { LabTrackerService } from '../lab/lab-tracker.service';
 
 @Component({
   selector: 'app-shell',
@@ -44,6 +45,9 @@ import { ConfirmService } from '../core/confirm.service';
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h16M7 16v-5M12 16V6M17 16v-8" /></svg>
         </a>
         <span class="spacer"></span>
+        <a routerLink="/labo" routerLinkActive="on" title="Labo (modes expérimentaux)">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M9 3h6M10 3v6l-5.5 9.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3" /><path d="M7.5 15h9" /></svg>
+        </a>
         <span class="conn" [class.ok]="hub.state() === 'connected'" [title]="'Serveur arbitre : ' + hub.state()"></span>
         <div class="profile">
           <button class="me" [class.open]="menuOpen()" (click)="menuOpen.set(!menuOpen())" title="Mon profil" aria-haspopup="menu" [attr.aria-expanded]="menuOpen()">
@@ -122,6 +126,8 @@ export class ShellComponent implements OnInit, OnDestroy {
   private readonly api = inject(ApiService);
   private readonly tracker = inject(GameTrackerService);
   private readonly reference = inject(ReferenceService);
+  // Annonce des objectifs secrets du labo (overlay en jeu).
+  private readonly labTracker = inject(LabTrackerService);
   private readonly router = inject(Router);
   private readonly confirm = inject(ConfirmService);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);

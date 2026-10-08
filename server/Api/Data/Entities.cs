@@ -64,6 +64,8 @@ public class Series
     public SpellMode SpellMode { get; set; }
     /// <summary>Arbre ET/OU (jsonb).</summary>
     public string WinExpression { get; set; } = "{}";
+    /// <summary>Mode expérimental du labo (jsonb), null pour une série standard.</summary>
+    public string? LabConfig { get; set; }
     public SeriesStatus Status { get; set; } = SeriesStatus.SETUP;
     public Guid? WinnerPlayerId { get; set; }
     public string DrawSeed { get; set; } = "";
@@ -135,6 +137,8 @@ public class Round
     public Guid? WinnerPlayerId { get; set; }
     /// <summary>{ condition, threshold, eventTime, singleSource, label } (jsonb).</summary>
     public string? WinningCondition { get; set; }
+    /// <summary>Labo : objectifs secrets tirés pour la manche (jsonb).</summary>
+    public string? LabState { get; set; }
     /// <summary>Joueur ayant demandé l'annulation, en attente de l'accord de l'autre.</summary>
     public Guid? VoidRequestedBy { get; set; }
     /// <summary>Votes de résolution de litige : slot du vainqueur désigné, ou "VOID".</summary>

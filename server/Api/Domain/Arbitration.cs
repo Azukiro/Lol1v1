@@ -57,7 +57,11 @@ public static class Arbitration
         }
     }
 
-    public static ArbitrationOutcome Evaluate(WinNode expression, IReadOnlyList<ObservedEvent> events, DateTimeOffset now)
+    public static ArbitrationOutcome Evaluate(WinNode expression, IReadOnlyList<ObservedEvent> events, DateTimeOffset now) =>
+        Evaluate(_ => expression, events, now);
+
+    /// <summary>Variante à expression propre à chaque joueur (mode labo « objectifs secrets »).</summary>
+    public static ArbitrationOutcome Evaluate(Func<Slot, WinNode> expressionOf, IReadOnlyList<ObservedEvent> events, DateTimeOffset now)
     {
         var outcome = new ArbitrationOutcome();
         var singleSourceTimes = new HashSet<double>();
@@ -116,6 +120,7 @@ public static class Arbitration
                 case ObservationType.KILL: facts.KillTimes.Add(e.EventTime); break;
                 case ObservationType.FIRST_BLOOD: facts.FirstBloodTime ??= e.EventTime; break;
                 case ObservationType.CS: facts.CsSamples.Add((e.Value!.Value, e.EventTime)); break;
+                case ObservationType.TURRET: facts.TowerTimes.Add(e.EventTime); break;
             }
         }
         var firstTower = outcome.Confirmed.Where(e => e.Type == ObservationType.TURRET).OrderBy(e => e.EventTime).FirstOrDefault();
@@ -131,7 +136,7 @@ public static class Arbitration
 
         // 4. Évaluation et départage.
         foreach (var slot in new[] { Slot.A, Slot.B })
-            outcome.Satisfactions[slot] = WinExpression.Evaluate(expression, outcome.Facts[slot]);
+            outcome.Satisfactions[slot] = WinExpression.Evaluate(expressionOf(slot), outcome.Facts[slot]);
 
         var candidates = outcome.Satisfactions.Where(kv => kv.Value is not null).OrderBy(kv => kv.Value!.Time).ToList();
         if (candidates.Count == 0) return outcome;

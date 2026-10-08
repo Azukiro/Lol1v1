@@ -64,6 +64,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.ToTable("series", t => t.HasCheckConstraint("ck_series_best_of", "best_of IN (1,3,5,7,9,11)"));
             e.Property(x => x.WinExpression).HasColumnType("jsonb");
+            e.Property(x => x.LabConfig).HasColumnType("jsonb");
             e.HasMany(x => x.Players).WithOne(p => p.Series).HasForeignKey(p => p.SeriesId);
             e.HasMany(x => x.Rounds).WithOne(r => r.Series).HasForeignKey(r => r.SeriesId);
             e.HasMany(x => x.Bans).WithOne().HasForeignKey(x => x.SeriesId);
@@ -103,6 +104,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.ToTable("round");
             e.Property(x => x.WinningCondition).HasColumnType("jsonb");
+            e.Property(x => x.LabState).HasColumnType("jsonb");
             e.HasIndex(x => new { x.SeriesId, x.Number, x.Attempt }).IsUnique();
             e.HasIndex(x => x.Status);
             e.HasMany(x => x.Assignments).WithOne().HasForeignKey(x => x.RoundId);

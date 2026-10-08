@@ -111,6 +111,9 @@ export class ApiService {
   history() {
     return this.get<HistoryEntry[]>('/series/history');
   }
+  seriesRecap(id: string) {
+    return this.get<HistoryEntry>(`/series/${id}/recap`);
+  }
   stats() {
     return this.get<HistoryEntry[]>('/series/stats');
   }

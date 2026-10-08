@@ -251,6 +251,10 @@ public class SeriesFlowTests
         Assert.Equal(0, round1.Me.Kills);
         Assert.Equal(r1.Assignments[0].ChampionId, round1.Me.ChampionId);
         Assert.True(entry.Rounds[1].Opponent.FirstTower);
+
+        var recap = await a.Http.GetFromJsonAsync<HistoryEntryDto>($"/api/v1/series/{id}/recap", ApiJson.Options);
+        Assert.Equal(2, recap!.Series.MyWins);
+        Assert.Equal(2, recap.Rounds[0].Me.Kills);
     }
 
     [Fact]

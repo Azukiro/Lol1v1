@@ -17,6 +17,7 @@ import { LivePhaseComponent, LobbyPhaseComponent, PickPhaseComponent, SeriesReca
             <div class="kicker">{{ kicker() }}</div>
             <h1>{{ title() }}</h1>
           </div>
+          @if (phase() !== 'done') {
           <div class="score">
             <div>
               <div class="name">{{ me()!.displayName }}</div>
@@ -28,6 +29,7 @@ import { LivePhaseComponent, LobbyPhaseComponent, PickPhaseComponent, SeriesReca
               <div class="pips opp">@for (i of pips(); track $index) { <i [class.on]="$index < opp()!.roundsWon"></i> }</div>
             </div>
           </div>
+          }
         </header>
 
         @switch (phase()) {

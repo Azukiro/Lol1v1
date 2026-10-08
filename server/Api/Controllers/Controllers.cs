@@ -286,6 +286,12 @@ public sealed class SeriesController(SeriesService series) : ControllerBase
     [HttpGet("stats")]
     public Task<List<HistoryEntryDto>> Stats() => series.HistoryAsync(User.UserId(), finishedOnly: false, take: 500);
 
+    /// <summary>Récapitulatif détaillé d'une série (même forme qu'une entrée d'historique).</summary>
+    [HttpGet("{id:guid}/recap")]
+    public async Task<HistoryEntryDto> Recap(Guid id) =>
+        (await series.HistoryAsync(User.UserId(), finishedOnly: false, take: 1, seriesId: id)).FirstOrDefault()
+        ?? throw new AppException("Série introuvable.", 404);
+
     [HttpGet("{id:guid}")]
     public Task<SeriesStateDto> Get(Guid id) => series.GetStateAsync(id, User.UserId());
 

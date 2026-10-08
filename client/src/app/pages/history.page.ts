@@ -1,14 +1,15 @@
 import { Component, inject, OnInit, signal } from '@angular/core';
-import { DatePipe, NgTemplateOutlet } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { ApiService, errorMessage } from '../core/api.service';
-import { HistoryEntry, HistoryPlayerRound, HistoryRound, MODE_LABELS, SeriesSummary, SPELL_MODE_LABELS } from '../core/models';
+import { HistoryEntry, HistoryRound, MODE_LABELS, SeriesSummary, SPELL_MODE_LABELS } from '../core/models';
 import { ReferenceService } from '../core/reference.service';
 import { AvatarComponent } from '../shared/avatar.component';
+import { RoundRecapComponent } from '../shared/round-recap.component';
 
 @Component({
   selector: 'app-history',
-  imports: [RouterLink, DatePipe, NgTemplateOutlet, AvatarComponent],
+  imports: [RouterLink, DatePipe, AvatarComponent, RoundRecapComponent],
   template: `
     <div class="page">
       <header class="page-head">
@@ -56,23 +57,7 @@ import { AvatarComponent } from '../shared/avatar.component';
             @if (expanded() === e.series.id) {
               <div class="recap">
                 @for (r of e.rounds; track r.number) {
-                  <div class="round" [class.win]="won(e.series, r)" [class.loss]="!won(e.series, r)">
-                    <div class="num">
-                      <span class="muted small">Manche</span>
-                      <strong>{{ r.number }}</strong>
-                    </div>
-                    <ng-container *ngTemplateOutlet="player; context: { $implicit: r.me, mine: true }" />
-                    <div class="verdict">
-                      <span class="chip" [class.green]="won(e.series, r)" [class.pink]="!won(e.series, r)">{{ won(e.series, r) ? 'Victoire' : 'Défaite' }}</span>
-                      @if (r.winningLabel) {
-                        <span class="small">{{ r.winningLabel }}</span>
-                      }
-                      @if (r.winningTime != null) {
-                        <span class="muted small">à {{ clock(r.winningTime) }}</span>
-                      }
-                    </div>
-                    <ng-container *ngTemplateOutlet="player; context: { $implicit: r.opponent, mine: false }" />
-                  </div>
+                  <app-round-recap [round]="r" [mySlot]="e.series.mySlot" />
                 } @empty {
                   <div class="muted small">Aucune manche jouée.</div>
                 }
@@ -90,40 +75,6 @@ import { AvatarComponent } from '../shared/avatar.component';
         }
       </div>
     </div>
-
-    <ng-template #player let-p let-mine="mine">
-      <div class="player" [class.mirror]="!mine">
-        <span class="portrait">
-          @if (ref.championImage(p.championId); as img) {
-            <img [src]="img" [alt]="ref.championName(p.championId)" />
-          } @else {
-            {{ ref.championInitials(p.championId) }}
-          }
-        </span>
-        <div class="spells">
-          @for (id of spells(p); track $index) {
-            @if (ref.spellImage(id); as img) {
-              <img [src]="img" [alt]="ref.spellName(id)" [title]="ref.spellName(id)" />
-            } @else {
-              <i></i>
-            }
-          }
-        </div>
-        <div class="info">
-          <strong>{{ ref.championName(p.championId) }}</strong>
-          <div class="badges">
-            <span class="badge" title="Kills">⚔ {{ p.kills }}</span>
-            <span class="badge" title="CS (par dizaines)">CS {{ p.cs }}</span>
-            @if (p.firstBlood) {
-              <span class="badge pink" title="First blood">First blood</span>
-            }
-            @if (p.firstTower) {
-              <span class="badge yellow" title="Première tour">1re tour</span>
-            }
-          </div>
-        </div>
-      </div>
-    </ng-template>
   `,
   styles: `
     .list { display: flex; flex-direction: column; gap: 12px; }
@@ -157,32 +108,11 @@ import { AvatarComponent } from '../shared/avatar.component';
     .open .chevron { transform: rotate(180deg); color: var(--tone); }
 
     .recap { display: flex; flex-direction: column; gap: 8px; padding: 4px 18px 16px; animation: unfold 0.18s ease-out; }
-    .round { display: grid; grid-template-columns: 56px minmax(0, 1fr) 180px minmax(0, 1fr); align-items: center; gap: 16px; padding: 10px 14px; border-radius: 10px; background: rgba(8, 10, 15, 0.55); border: 1px solid var(--line); }
-    .num { display: flex; flex-direction: column; align-items: center; }
-    .num strong { font-family: var(--display); font-size: 22px; line-height: 1; }
-    .verdict { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
 
-    .player { display: flex; align-items: center; gap: 10px; min-width: 0; }
-    .player.mirror { flex-direction: row-reverse; text-align: right; }
-    .player.mirror .badges { justify-content: flex-end; }
-    .portrait { width: 48px; height: 48px; flex-shrink: 0; border-radius: 10px; overflow: hidden; display: grid; place-items: center; background: var(--panel-2); font-family: var(--display); font-weight: 700; color: var(--muted); }
-    .portrait img { width: 100%; height: 100%; object-fit: cover; }
-    .spells { display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; }
-    .spells img, .spells i { width: 22px; height: 22px; border-radius: 5px; display: block; background: var(--panel-2); }
-    .info { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-    .info strong { font-family: var(--display); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .badges { display: flex; flex-wrap: wrap; gap: 5px; }
-    .badge { padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; background: #0a0d13; border: 1px solid var(--line); color: var(--text); }
-    .badge.pink { color: var(--pink); border-color: rgba(255, 51, 102, 0.45); }
-    .badge.yellow { color: var(--yellow); border-color: rgba(255, 201, 77, 0.45); }
     .more { align-self: flex-end; margin-top: 4px; }
     @keyframes unfold { from { opacity: 0; transform: translateY(-4px); } }
 
     @media (max-width: 1100px) {
-      .round { grid-template-columns: 44px 1fr; }
-      .verdict { grid-column: 2; flex-direction: row; justify-content: flex-start; }
-      .player.mirror { grid-column: 2; flex-direction: row; text-align: left; }
-      .player.mirror .badges { justify-content: flex-start; }
       .champs { display: none; }
     }
   `,
@@ -223,14 +153,5 @@ export class HistoryPage implements OnInit {
 
   protected won(s: SeriesSummary, r: HistoryRound) {
     return r.winnerSlot === s.mySlot;
-  }
-
-  protected spells(p: HistoryPlayerRound) {
-    return [p.spell1Id, p.spell2Id];
-  }
-
-  protected clock(seconds: number) {
-    const s = Math.floor(seconds);
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   }
 }

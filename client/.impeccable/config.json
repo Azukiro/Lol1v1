@@ -47,6 +47,15 @@
         ],
         "createdAt": "2026-10-08T22:37:18.160Z",
         "reason": "Claude: [src] bound inside @if on a Data Dragon URL, never empty"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/app/shared/round-recap.component.ts"
+        ],
+        "createdAt": "2026-10-08T22:49:34.100Z",
+        "reason": "Claude: [src] bound inside @if on a Data Dragon URL, never empty"
       }
     ]
   }

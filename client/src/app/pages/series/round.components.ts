@@ -1,13 +1,16 @@
-import { Component, computed, inject, input, signal } from '@angular/core';
+import { Component, computed, inject, input, OnInit, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { errorMessage } from '../../core/api.service';
+import { ApiService, errorMessage } from '../../core/api.service';
 import { GameTrackerService } from '../../core/game-tracker.service';
 import { HubService } from '../../core/hub.service';
 import { LolService } from '../../core/lol.service';
-import { formatGameTime, Round, SeriesState, SlotName } from '../../core/models';
+import { formatGameTime, HistoryEntry, MODE_LABELS, Round, SeriesState, SlotName, SPELL_MODE_LABELS } from '../../core/models';
 import { ReferenceService } from '../../core/reference.service';
 import { ToastService } from '../../core/toast.service';
 import { ChampionCardComponent, SpellIconComponent } from '../../shared/champion-card.component';
+import { AvatarComponent } from '../../shared/avatar.component';
+import { ChampIconComponent } from '../../shared/champ-icon.component';
+import { RoundRecapComponent } from '../../shared/round-recap.component';
 import { describe, leaves, WinNode } from '../../../shared/rules-engine';
 
 function players(s: SeriesState) {
@@ -463,69 +466,115 @@ export class LivePhaseComponent {
 /** Récapitulatif de fin de série (US-4.5) et détail par manche (US-5.1). */
 @Component({
   selector: 'app-series-recap',
+  imports: [AvatarComponent, ChampIconComponent, RoundRecapComponent],
   template: `
     @let s = state();
-    <div class="hero" [class.win]="won()" [class.loss]="!won()">
-      <div class="kicker">Série terminée · BO{{ s.bestOf }}</div>
-      <h1 class="big">{{ s.status === 'ABORTED' ? 'Interrompue' : won() ? 'Victoire' : 'Défaite' }}</h1>
-      <p class="muted">Contre {{ opp().riotId }} · {{ validated() }} manches jouées{{ voided() ? ', ' + voided() + ' annulée(s)' : '' }}</p>
-      <div class="score">
-        <span class="name">{{ me().displayName }}</span>
-        <span class="num me">{{ me().roundsWon }}</span><span class="sep">:</span><span class="num opp">{{ opp().roundsWon }}</span>
-        <span class="name">{{ opp().displayName }}</span>
+    <div class="hero" [class.win]="outcome() === 'win'" [class.loss]="outcome() === 'loss'">
+      <app-avatar class="avatar neutral opp" [iconId]="opp().profileIconId" [name]="opp().displayName" />
+      <div class="grow">
+        <div class="kicker">Série terminée · contre {{ opp().displayName }} <span class="muted">{{ opp().riotId }}</span></div>
+        <h1 class="big">{{ outcome() === 'aborted' ? 'Interrompue' : outcome() === 'win' ? 'Victoire' : 'Défaite' }}</h1>
+        <div class="row wrap chips">
+          <span class="chip">BO{{ s.bestOf }}</span>
+          <span class="chip">{{ modeLabel[s.championMode] }}</span>
+          <span class="chip">{{ spellLabel[s.spellMode] }}</span>
+          <span class="muted small">{{ s.winExpressionLabel }}</span>
+        </div>
+      </div>
+      <div class="tally">
+        <strong class="score">{{ me().roundsWon }}<span class="sep">:</span>{{ opp().roundsWon }}</strong>
+        <span class="muted small">{{ validated() }} manche(s){{ voided() ? ' · ' + voided() + ' annulée(s)' : '' }}</span>
       </div>
     </div>
+
     <h2>Détail des manches</h2>
-    <div class="card">
-      @for (r of s.rounds; track r.id) {
-        <div class="list-item round">
-          <span class="chip" [class.cyan]="r.winnerSlot === s.mySlot" [class.pink]="r.winnerSlot && r.winnerSlot !== s.mySlot">
-            {{ r.status === 'VOIDED' ? 'Annulée' : r.winnerSlot === s.mySlot ? 'Victoire' : r.winnerSlot ? 'Défaite' : r.status }}
-          </span>
-          <strong class="m">M{{ r.number }}</strong>
-          <span class="grow">{{ champ(r, s.mySlot) }} <span class="muted">vs</span> {{ champ(r, oppSlot()) }}</span>
-          <span class="muted">{{ r.status === 'VOIDED' ? r.voidReason : r.winningCondition?.label }}</span>
-          <span class="time">{{ fmt(r.winningCondition?.eventTime) }}</span>
+    @if (recap(); as r) {
+      <div class="rounds">
+        @for (round of r.rounds; track round.number) {
+          <app-round-recap [round]="round" [mySlot]="s.mySlot" />
+        } @empty {
+          <div class="empty">Aucune manche jouée.</div>
+        }
+      </div>
+      @if (r.myBans.length || r.opponentBans.length) {
+        <div class="bans">
+          <div class="ban-side">
+            <span class="label">Tes bans</span>
+            <div class="row">@for (id of r.myBans; track id) { <app-champ-icon [id]="id" /> }</div>
+          </div>
+          <div class="ban-side right">
+            <span class="label">Bans de {{ opp().displayName }}</span>
+            <div class="row">@for (id of r.opponentBans; track id) { <app-champ-icon [id]="id" /> }</div>
+          </div>
         </div>
       }
-    </div>
+    } @else {
+      <div class="empty">{{ error() || 'Chargement du récapitulatif…' }}</div>
+    }
+
     <div class="row actions">
-      <button class="btn outline" (click)="rematch()">Revanche</button>
-      <button class="btn" (click)="home()">Accueil</button>
+      <button class="btn primary" (click)="rematch()">Revanche</button>
+      <button class="btn" (click)="faceToFace()">Face à face</button>
+      <button class="btn ghost" (click)="home()">Accueil</button>
     </div>
   `,
   styles: `
-    :host { display: flex; flex-direction: column; gap: 20px; }
-    .hero { padding: 28px; border-radius: 16px; border: 1px solid var(--line); }
-    .hero.win { background: linear-gradient(120deg, rgba(25, 227, 255, 0.14), var(--panel)); border-color: rgba(25, 227, 255, 0.5); }
-    .hero.loss { background: linear-gradient(120deg, rgba(255, 51, 102, 0.14), var(--panel)); border-color: rgba(255, 51, 102, 0.5); }
-    .big { font-size: 64px; margin: 6px 0; }
-    .hero p { margin: 0 0 16px; }
-    .round { gap: 16px; }
-    .m { font-family: var(--display); font-size: 18px; width: 40px; }
-    .grow { flex: 1; font-weight: 600; }
-    .time { font-family: var(--display); font-weight: 700; width: 60px; text-align: right; }
-    h2 { margin: 0; }
+    :host { display: flex; flex-direction: column; gap: 16px; }
+    .hero { --tone: var(--muted); --tint: transparent; display: flex; align-items: center; gap: 22px; padding: 22px 26px; border-radius: var(--radius); border: 1px solid var(--line); border-left: 4px solid var(--tone); background: linear-gradient(90deg, var(--tint), var(--panel) 55%); }
+    .hero.win { --tone: var(--green); --tint: rgba(61, 220, 132, 0.16); }
+    .hero.loss { --tone: var(--pink); --tint: rgba(255, 51, 102, 0.16); }
+    .opp { width: 64px; height: 64px; border-radius: 14px; font-size: 24px; }
+    .grow { flex: 1; min-width: 0; }
+    .kicker .muted { text-transform: none; letter-spacing: 0; font-family: var(--body); font-weight: 500; }
+    .big { font-size: 52px; margin: 4px 0 10px; color: var(--tone); }
+    .hero:not(.win):not(.loss) .big { color: var(--text); }
+    .chips { gap: 6px; }
+    .small { font-size: 12px; }
+    .tally { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+    .score { font-family: var(--display); font-size: 56px; line-height: 1; }
+    .score .sep { color: var(--muted); margin: 0 4px; }
+    h2 { margin: 8px 0 0; }
+    .rounds { display: flex; flex-direction: column; gap: 8px; }
+    .bans { display: flex; justify-content: space-between; gap: 20px; padding: 14px 18px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel); }
+    .ban-side { display: flex; flex-direction: column; gap: 10px; }
+    .ban-side.right { align-items: flex-end; }
+    .ban-side .row { gap: 8px; }
+    .label { font-family: var(--display); font-weight: 700; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+    .actions { gap: 10px; }
   `,
 })
-export class SeriesRecapComponent {
-  private readonly ref = inject(ReferenceService);
+export class SeriesRecapComponent implements OnInit {
+  private readonly api = inject(ApiService);
   private readonly router = inject(Router);
   readonly state = input.required<SeriesState>();
+  protected readonly modeLabel = MODE_LABELS;
+  protected readonly spellLabel = SPELL_MODE_LABELS;
+  protected readonly recap = signal<HistoryEntry | null>(null);
+  protected readonly error = signal('');
   protected readonly me = computed(() => players(this.state()).me);
   protected readonly opp = computed(() => players(this.state()).opp);
-  protected readonly oppSlot = computed(() => this.opp().slot);
-  protected readonly won = computed(() => this.state().winnerSlot === this.state().mySlot);
+  protected readonly outcome = computed(() => {
+    const s = this.state();
+    if (s.status !== 'FINISHED' || !s.winnerSlot) return 'aborted';
+    return s.winnerSlot === s.mySlot ? 'win' : 'loss';
+  });
   protected readonly validated = computed(() => this.state().rounds.filter((r) => r.status === 'VALIDATED').length);
   protected readonly voided = computed(() => this.state().rounds.filter((r) => r.status === 'VOIDED').length);
-  protected readonly fmt = formatGameTime;
 
-  protected champ(r: Round, slot: SlotName) {
-    return this.ref.championName(r.assignments.find((a) => a.slot === slot)?.championId);
+  async ngOnInit() {
+    try {
+      this.recap.set(await this.api.seriesRecap(this.state().id));
+    } catch (e) {
+      this.error.set(errorMessage(e));
+    }
   }
 
   rematch() {
     void this.router.navigate(['/new'], { queryParams: { opponent: this.opp().riotId } });
+  }
+
+  faceToFace() {
+    void this.router.navigate(['/stats'], { queryParams: { tab: 'players', player: this.opp().riotId } });
   }
 
   home() {

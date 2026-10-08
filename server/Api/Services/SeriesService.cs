@@ -61,7 +61,7 @@ public sealed class SeriesService(
     }
 
     /// <summary>Séries du joueur avec champions, sorts, bans et statistiques de chaque manche jouée (tentatives annulées exclues).</summary>
-    public async Task<List<HistoryEntryDto>> HistoryAsync(Guid userId, bool finishedOnly, int take)
+    public async Task<List<HistoryEntryDto>> HistoryAsync(Guid userId, bool finishedOnly, int take, Guid? seriesId = null)
     {
         var query = db.Series
             .Include(s => s.Players).ThenInclude(p => p.User)
@@ -71,6 +71,7 @@ public sealed class SeriesService(
             .Include(s => s.Bans)
             .Where(s => s.Players.Any(p => p.UserId == userId));
         if (finishedOnly) query = query.Where(s => s.Status == SeriesStatus.FINISHED || s.Status == SeriesStatus.ABORTED);
+        if (seriesId is not null) query = query.Where(s => s.Id == seriesId);
         var list = await query.OrderByDescending(s => s.CreatedAt).Take(take).AsSplitQuery().ToListAsync();
         return list.Select(s =>
         {

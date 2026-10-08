@@ -41,11 +41,14 @@ export interface SeriesConfig {
   winExpression: WinNode;
 }
 
+/** Config prête : tout sauf le format, choisi au lancement du défi. */
+export type PresetConfig = Omit<SeriesConfig, 'bestOf'>;
+
 export interface Preset {
   id: string;
   name: string;
   description: string;
-  config: SeriesConfig;
+  config: PresetConfig;
   builtIn: boolean;
 }
 

@@ -19,6 +19,21 @@ public sealed class SeriesConfig
     }
 }
 
+/// <summary>Configuration enregistrée (config prête) : tout sauf le format, choisi au lancement du défi.</summary>
+public sealed class PresetConfig
+{
+    [JsonPropertyName("championMode")] public ChampionMode ChampionMode { get; set; }
+    [JsonPropertyName("spellMode")] public SpellMode SpellMode { get; set; }
+    [JsonPropertyName("winExpression")] public WinNode WinExpression { get; set; } = null!;
+
+    public void Validate()
+    {
+        if (!Enum.IsDefined(ChampionMode)) throw new DomainException("Mode de champion inconnu.");
+        if (!Enum.IsDefined(SpellMode)) throw new DomainException("Mode de sorts inconnu.");
+        Api.Domain.WinExpression.Validate(WinExpression);
+    }
+}
+
 public static class SeriesRules
 {
     public const int BansPerPlayer = 3;

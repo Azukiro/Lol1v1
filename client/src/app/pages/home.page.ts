@@ -13,10 +13,12 @@ import { ReferenceService } from '../core/reference.service';
 import { ChampIconComponent } from '../shared/champ-icon.component';
 import { championHighlights, championStats, MIN_SAMPLE, opponentHighlights, opponents, overview, WinLoss, winRate } from '../../shared/stats';
 import { AvatarComponent } from '../shared/avatar.component';
+import { QuickChallengeComponent } from '../shared/quick-challenge.component';
+import { describe } from '../../shared/rules-engine';
 
 @Component({
   selector: 'app-home',
-  imports: [RouterLink, DatePipe, NgTemplateOutlet, AvatarComponent, ChampIconComponent],
+  imports: [RouterLink, DatePipe, NgTemplateOutlet, AvatarComponent, ChampIconComponent, QuickChallengeComponent],
   template: `
     <div class="page">
       <header class="page-head">
@@ -68,10 +70,10 @@ import { AvatarComponent } from '../shared/avatar.component';
               }
               <h3>{{ p.name }}</h3>
               <div class="row wrap chips">
-                <span class="chip">BO{{ p.config.bestOf }}</span>
                 <span class="chip">{{ modeLabel[p.config.championMode] }}</span>
+                <span class="chip">{{ spellLabel[p.config.spellMode] }}</span>
               </div>
-              <p class="muted small">{{ p.builtIn ? p.description : condLabel(p.description) }}</p>
+              <p class="muted small">{{ p.builtIn ? p.description : rule(p) }}</p>
             </article>
           } @empty {
             <div class="muted">Chargement des configs…</div>
@@ -200,6 +202,10 @@ import { AvatarComponent } from '../shared/avatar.component';
         </section>
       }
 
+      @if (launching(); as p) {
+        <app-quick-challenge [preset]="p" (closed)="launching.set(null)" (sent)="refresh()" />
+      }
+
       <ng-template #opp let-o>
         <div class="row">
           <app-avatar class="avatar neutral xl" [iconId]="o.iconId" [name]="o.name" />
@@ -275,6 +281,7 @@ export class HomePage implements OnInit, OnDestroy {
   protected readonly series = signal<SeriesSummary[]>([]);
   protected readonly presets = signal<Preset[]>([]);
   protected readonly busy = signal(false);
+  protected readonly launching = signal<Preset | null>(null);
   protected readonly ref = inject(ReferenceService);
   protected readonly winRate = winRate;
   protected readonly minSample = MIN_SAMPLE;
@@ -350,8 +357,17 @@ export class HomePage implements OnInit, OnDestroy {
     }
   }
 
+  /** Config prête : ouvre le lancement rapide (adversaire + format). */
   protected usePreset(p: Preset) {
-    void this.router.navigate(['/new'], { queryParams: { preset: p.id } });
+    if (!this.riotLinked()) {
+      this.toast.info('Lie d’abord ton compte Riot pour défier un ami.');
+      return;
+    }
+    this.launching.set(p);
+  }
+
+  protected rule(p: Preset) {
+    return describe(p.config.winExpression);
   }
 
   async deletePreset(p: Preset, event: Event) {

@@ -159,8 +159,9 @@ public sealed class PresetsController(AppDbContext db) : ControllerBase
 
     private static PresetDto ToDto(UserPreset p)
     {
-        var config = JsonSerializer.Deserialize<SeriesConfig>(p.Config, Mapping.Json)!;
-        return new PresetDto(p.Id.ToString(), p.Name, Mapping.ConfigLabel(config), config, false);
+        // Les anciennes configs contiennent encore bestOf : ignoré, le format se choisit au lancement.
+        var config = JsonSerializer.Deserialize<PresetConfig>(p.Config, Mapping.Json)!;
+        return new PresetDto(p.Id.ToString(), p.Name, Mapping.PresetLabel(config), config, false);
     }
 }
 
@@ -344,10 +345,14 @@ public static class Mapping
 
     public static RiotAccountDto ToDto(RiotAccount r) => new(r.Puuid, r.GameName, r.TagLine, r.Region, r.RiotId, r.ProfileIconId);
 
-    public static string ConfigLabel(SeriesConfig c)
+    public static string ConfigLabel(SeriesConfig c) => $"BO{c.BestOf} · {Label(c.ChampionMode, c.SpellMode, c.WinExpression)}";
+
+    public static string PresetLabel(PresetConfig c) => Label(c.ChampionMode, c.SpellMode, c.WinExpression);
+
+    private static string Label(ChampionMode championMode, SpellMode spellMode, WinNode expression)
     {
-        var mode = c.ChampionMode switch { ChampionMode.MIRROR => "Miroir", ChampionMode.RANDOM => "Aléatoire", _ => "Deck" };
-        var spells = c.SpellMode switch { SpellMode.FREE => "Sorts libres", SpellMode.DECK_COMPOSED => "Deck de sorts composé", _ => "Deck de sorts aléatoire" };
-        return $"BO{c.BestOf} · {mode} · {spells} · {WinExpression.Describe(c.WinExpression)}";
+        var mode = championMode switch { ChampionMode.MIRROR => "Miroir", ChampionMode.RANDOM => "Aléatoire", _ => "Deck" };
+        var spells = spellMode switch { SpellMode.FREE => "Sorts libres", SpellMode.DECK_COMPOSED => "Deck de sorts composé", _ => "Deck de sorts aléatoire" };
+        return $"{mode} · {spells} · {WinExpression.Describe(expression)}";
     }
 }

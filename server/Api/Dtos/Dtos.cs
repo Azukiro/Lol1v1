@@ -14,9 +14,9 @@ public sealed record LookupRequest(string[] Puuids);
 public sealed record RegisteredPlayer(string Puuid, Guid UserId, string DisplayName, string RiotId, int? ProfileIconId);
 
 // ---- Pré-configurations ----
-public sealed record PresetDto(string Id, string Name, string Description, SeriesConfig Config, bool BuiltIn);
+public sealed record PresetDto(string Id, string Name, string Description, PresetConfig Config, bool BuiltIn);
 public sealed record PresetsResponse(List<PresetDto> Server, List<PresetDto> Mine);
-public sealed record CreatePresetRequest(string Name, SeriesConfig Config);
+public sealed record CreatePresetRequest(string Name, PresetConfig Config);
 
 // ---- Invitations ----
 public sealed record CreateInvitationRequest(string ToRiotId, SeriesConfig Config);

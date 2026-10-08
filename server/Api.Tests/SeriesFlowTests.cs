@@ -158,9 +158,10 @@ public class SeriesFlowTests
     {
         await using var factory = new ApiFactory();
         await using var a = await TestPlayer.CreateAsync(factory, "Kaelis");
-        var bad = await a.Http.PostAsJsonAsync("/api/v1/presets", new { name = "Pair", config = Config(4, "MIRROR", "FREE", KillsOrTower) });
+        var bad = await a.Http.PostAsJsonAsync("/api/v1/presets", new { name = "Doublon", config = new { championMode = "MIRROR", spellMode = "FREE", winExpression = new { op = "OR", children = new object[] { new { condition = "KILLS", threshold = 1 }, new { condition = "KILLS", threshold = 2 } } } } });
         Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
-        var created = await (await a.Http.PostAsJsonAsync("/api/v1/presets", new { name = "Mon BO5", config = Config(5, "DECK", "FREE", KillsOrTower) }))
+        // Format absent : il se choisit au lancement du défi.
+        var created = await (await a.Http.PostAsJsonAsync("/api/v1/presets", new { name = "Mon BO5", config = new { championMode = "DECK", spellMode = "FREE", winExpression = KillsOrTower } }))
             .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<JsonObject>();
         var list = await a.Http.GetFromJsonAsync<PresetsResponse>("/api/v1/presets", ApiJson.Options);
         Assert.True(list!.Server.Count >= 3);

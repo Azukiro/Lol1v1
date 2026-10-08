@@ -2,8 +2,8 @@ import { Component, computed, inject, input, OnInit, signal } from '@angular/cor
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ApiService, AuthService, errorMessage } from '../core/api.service';
-import { LolService } from '../core/lol.service';
-import { ChampionMode, MODE_LABELS, Preset, SeriesConfig, SpellMode, SPELL_MODE_LABELS } from '../core/models';
+import { OpponentsService, OpponentSuggestion } from '../core/opponents.service';
+import { ChampionMode, MODE_LABELS, Preset, PresetConfig, SpellMode, SPELL_MODE_LABELS } from '../core/models';
 import { ToastService } from '../core/toast.service';
 import { AvatarComponent } from '../shared/avatar.component';
 import { SelectComponent, SelectOption } from '../shared/select.component';
@@ -36,12 +36,6 @@ const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
   { id: 'DECK_RANDOM', label: 'Deck aléatoire', hint: 'Les jetons de sorts sont tirés au sort.' },
 ];
 
-interface Suggestion {
-  riotId: string;
-  iconId: number | null;
-  source: 'Ami' | 'Récent';
-}
-
 @Component({
   selector: 'app-new-challenge',
   imports: [FormsModule, SelectComponent, AvatarComponent],
@@ -66,7 +60,7 @@ interface Suggestion {
                 @for (p of presets(); track p.id) {
                   <button class="preset" [class.on]="appliedPreset() === p.id" [class.mine]="!p.builtIn" (click)="usePreset(p)">
                     <strong>{{ p.name }}</strong>
-                    <span class="muted small">BO{{ p.config.bestOf }} · {{ modeLabel[p.config.championMode] }}</span>
+                    <span class="muted small">{{ modeLabel[p.config.championMode] }} · {{ spellLabel[p.config.spellMode] }}</span>
                   </button>
                 }
               </div>
@@ -289,7 +283,7 @@ export class NewChallengePage implements OnInit {
   private readonly api = inject(ApiService);
   private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
-  private readonly lol = inject(LolService);
+  private readonly opponents = inject(OpponentsService);
 
   protected readonly bestOfs = [1, 3, 5, 7, 9, 11];
   protected readonly conditions = CONDITIONS;
@@ -303,11 +297,13 @@ export class NewChallengePage implements OnInit {
   readonly opponentParam = input<string | undefined>(undefined, { alias: 'opponent' });
   /** Pré-configuration choisie sur l'accueil (?preset=id). */
   readonly presetParam = input<string | undefined>(undefined, { alias: 'preset' });
+  /** Format choisi au lancement rapide (?bo=5). */
+  readonly bestOfParam = input<string | undefined>(undefined, { alias: 'bo' });
 
   protected readonly presets = signal<Preset[]>([]);
   protected readonly appliedPreset = signal<string | null>(null);
-  protected readonly friends = signal<Suggestion[]>([]);
-  protected readonly recent = signal<Suggestion[]>([]);
+  /** Amis puis adversaires récents, sans doublon. */
+  protected readonly suggestions = signal<OpponentSuggestion[]>([]);
   protected readonly opponent = signal('');
   protected presetName = '';
   protected readonly saving = signal(false);
@@ -325,11 +321,6 @@ export class NewChallengePage implements OnInit {
 
   protected readonly winsNeeded = computed(() => Math.ceil(this.bestOf() / 2));
   protected readonly spellHint = computed(() => SPELL_MODES.find((m) => m.id === this.spellMode())?.hint ?? '');
-  /** Amis puis adversaires récents, sans doublon. */
-  protected readonly suggestions = computed(() => {
-    const seen = new Set<string>();
-    return [...this.friends(), ...this.recent()].filter((s) => !seen.has(s.riotId) && !!seen.add(s.riotId)).slice(0, 8);
-  });
 
 
   protected readonly expression = computed<WinNode | undefined>(() => {
@@ -365,6 +356,8 @@ export class NewChallengePage implements OnInit {
 
   async ngOnInit() {
     this.opponent.set(this.opponentParam() ?? '');
+    const bo = Number(this.bestOfParam());
+    if (this.bestOfs.includes(bo)) this.bestOf.set(bo);
     try {
       const { server, mine } = await this.api.presets();
       this.presets.set([...server, ...mine]);
@@ -373,25 +366,7 @@ export class NewChallengePage implements OnInit {
     } catch (e) {
       this.error.set(errorMessage(e));
     }
-    try {
-      const recent = await this.api.recentOpponents();
-      this.recent.set(recent.map((r) => ({ riotId: r.riotId, iconId: null, source: 'Récent' })));
-    } catch {
-      /* facultatif */
-    }
-    void this.loadFriends();
-  }
-
-  /** Amis LoL ayant un compte sur l'app (nécessite le client LoL lancé). */
-  private async loadFriends() {
-    if (!this.lol.status().connected) return;
-    try {
-      const friends = await this.lol.friends();
-      const registered = await this.api.lookupPlayers(friends.map((f) => f.puuid));
-      this.friends.set(registered.map((r) => ({ riotId: r.riotId, iconId: r.profileIconId, source: 'Ami' })));
-    } catch {
-      /* facultatif */
-    }
+    this.suggestions.set(await this.opponents.suggestions());
   }
 
   protected usePreset(p: Preset) {
@@ -405,9 +380,8 @@ export class NewChallengePage implements OnInit {
     this.appliedPreset.set(null);
   }
 
-  /** Remplit le formulaire depuis une configuration (pré-config serveur ou perso). */
-  private apply(config: SeriesConfig) {
-    this.bestOf.set(config.bestOf);
+  /** Remplit le formulaire depuis une config prête (le format reste celui choisi). */
+  private apply(config: PresetConfig) {
     this.mode.set(config.championMode);
     this.spellMode.set(config.spellMode);
     const toCond = (n: WinNode): Cond => ({ condition: n.condition!, threshold: n.threshold ?? 1 });
@@ -514,7 +488,7 @@ export class NewChallengePage implements OnInit {
     if (!expr || !name || this.busy()) return;
     this.busy.set(true);
     try {
-      const preset = await this.api.createPreset(name, { bestOf: this.bestOf(), championMode: this.mode(), spellMode: this.spellMode(), winExpression: expr });
+      const preset = await this.api.createPreset(name, { championMode: this.mode(), spellMode: this.spellMode(), winExpression: expr });
       this.toast.success(`Config « ${name} » enregistrée : elle apparaît sur l'accueil.`);
       this.presets.update((list) => [...list, preset]);
       this.appliedPreset.set(preset.id);

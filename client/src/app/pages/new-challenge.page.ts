@@ -20,7 +20,6 @@ interface Item {
 
 const CONDITIONS: { code: ConditionCode; label: string; hint: string }[] = [
   { code: 'KILLS', label: 'Kills', hint: 'Le premier à atteindre ce nombre de kills.' },
-  { code: 'FIRST_BLOOD', label: 'First blood', hint: 'Le premier kill de la partie.' },
   { code: 'FIRST_TOWER', label: 'Première tour', hint: 'Le premier à détruire une tour.' },
   { code: 'CS', label: 'CS', hint: 'Le premier à atteindre ce nombre de minions.' },
 ];
@@ -159,12 +158,12 @@ interface Suggestion {
                       <button class="btn ghost small" title="Retirer" (click)="remove(i, j)">✕</button>
                     </div>
                   }
-                  @if (freeCode(groupCodes(i))) {
+                  @if (freeCode(usedCodes())) {
                     <button class="btn ghost small add-inner" (click)="addToGroup(i)">+ combiner avec…</button>
                   }
                 </div>
               }
-              @if (freeCode(topCodes())) {
+              @if (freeCode(usedCodes())) {
                 <button class="btn ghost" (click)="addItem()">+ Ajouter une condition</button>
               }
             </div>
@@ -314,7 +313,7 @@ export class NewChallengePage implements OnInit {
   protected readonly spellMode = signal<SpellMode>('FREE');
   protected readonly topOp = signal<'AND' | 'OR'>('OR');
   protected readonly items = signal<Item[]>([
-    { op: 'OR', conds: [{ condition: 'KILLS', threshold: 2 }] },
+    { op: 'OR', conds: [{ condition: 'KILLS', threshold: 1 }] },
     { op: 'OR', conds: [{ condition: 'FIRST_TOWER', threshold: 1 }] },
   ]);
 
@@ -447,25 +446,17 @@ export class NewChallengePage implements OnInit {
     this.patch(i, j, { threshold: Number(value) });
   }
 
-  /** Conditions des blocs simples, frères directs dans l'expression racine. */
-  protected readonly topCodes = computed(() => new Set(this.items().filter((it) => it.conds.length === 1).map((it) => it.conds[0].condition)));
-
-  protected groupCodes(i: number): Set<ConditionCode> {
-    return new Set(this.items()[i]?.conds.map((c) => c.condition));
-  }
-
-  /** Conditions déjà prises par les frères de (i, j) : une même condition deux fois au même niveau n'a pas de sens. */
-  protected takenBySiblings(i: number, j: number): Set<ConditionCode> {
-    const item = this.items()[i];
-    const own = item.conds[j].condition;
-    const taken = item.conds.length === 1 ? new Set(this.topCodes()) : new Set(item.conds.filter((_, m) => m !== j).map((c) => c.condition));
-    taken.delete(own);
-    return taken;
-  }
+  /**
+   * Conditions déjà utilisées dans la règle : chacune n'apparaît qu'une fois,
+   * sinon l'une englobe l'autre (« Tour OU (Kills ET Tour) »).
+   */
+  protected readonly usedCodes = computed(() => new Set(this.items().flatMap((it) => it.conds.map((c) => c.condition))));
 
   protected condOptions(i: number, j: number): SelectOption<ConditionCode>[] {
-    const taken = this.takenBySiblings(i, j);
-    return this.conditions.map((c) => ({ value: c.code, label: c.label, disabled: taken.has(c.code) }));
+    const own = this.items()[i].conds[j].condition;
+    const options = this.conditions.map((c) => ({ value: c.code, label: c.label, disabled: c.code !== own && this.usedCodes().has(c.code) }));
+    // First blood n'est plus proposé (= Kills ≥ 1), mais reste lisible dans une ancienne config.
+    return own === 'FIRST_BLOOD' ? [{ value: own, label: 'First blood' }, ...options] : options;
   }
 
   protected freeCode(taken: Set<ConditionCode>): ConditionCode | undefined {
@@ -473,18 +464,18 @@ export class NewChallengePage implements OnInit {
   }
 
   private cond(condition: ConditionCode): Cond {
-    return { condition, threshold: condition === 'CS' ? 50 : condition === 'KILLS' ? 2 : 1 };
+    return { condition, threshold: condition === 'CS' ? 50 : 1 };
   }
 
   protected addItem() {
-    const code = this.freeCode(this.topCodes());
+    const code = this.freeCode(this.usedCodes());
     if (!code) return;
     this.appliedPreset.set(null);
     this.items.update((list) => [...list, { op: 'OR', conds: [this.cond(code)] }]);
   }
 
   protected addToGroup(i: number) {
-    const code = this.freeCode(this.groupCodes(i));
+    const code = this.freeCode(this.usedCodes());
     if (!code) return;
     this.appliedPreset.set(null);
     this.items.update((list) =>

@@ -87,6 +87,12 @@ export function describe(node: WinNode, root = true): string {
 /** Même validation que le serveur, pour un retour immédiat dans le formulaire. */
 export function validate(node: WinNode | undefined, depth = 1): string | null {
   if (!node) return 'Expression manquante.';
+  if (depth === 1) {
+    // Une condition ne peut apparaître qu'une fois : sinon l'une englobe l'autre (« Tour OU (Kills ET Tour) »).
+    const codes = leaves(node).map((l) => l.condition!);
+    const reused = codes.find((code, i) => codes.indexOf(code) !== i);
+    if (reused) return `${CONDITION_LABELS[reused]} : déjà utilisée ailleurs dans la règle.`;
+  }
   if (depth > MAX_DEPTH) return `Profondeur maximale : ${MAX_DEPTH}.`;
   if (node.condition) {
     if (needsThreshold(node.condition) && (!node.threshold || node.threshold <= 0)) return `${CONDITION_LABELS[node.condition]} : seuil > 0 requis.`;

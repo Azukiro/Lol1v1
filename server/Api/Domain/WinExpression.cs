@@ -61,10 +61,19 @@ public static class WinExpression
 
     public static string Serialize(WinNode node) => JsonSerializer.Serialize(node, Json);
 
+    private static IEnumerable<WinNode> Leaves(WinNode node) =>
+        node.IsLeaf ? [node] : (node.Children ?? []).SelectMany(Leaves);
+
     /// <summary>Valide l'expression : profondeur ≤ 3, conditions du catalogue, seuils > 0.</summary>
     public static void Validate(WinNode? node, int depth = 1)
     {
         if (node is null) throw new DomainException("Expression de victoire manquante.");
+        if (depth == 1)
+        {
+            // Une condition ne peut apparaître qu'une fois : sinon l'une englobe l'autre (« Tour OU (Kills ET Tour) »).
+            var reused = Leaves(node).Where(l => l.Condition is not null).GroupBy(l => l.Condition).FirstOrDefault(g => g.Count() > 1);
+            if (reused is not null) throw new DomainException($"Condition utilisée plusieurs fois : {reused.Key}.");
+        }
         if (depth > MaxDepth) throw new DomainException($"Expression trop profonde (max {MaxDepth}).");
 
         if (node.IsLeaf)

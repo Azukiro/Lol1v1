@@ -26,6 +26,7 @@ public class WinExpressionTests
     [InlineData("""{ "op": "XOR", "children": [ { "condition": "FIRST_BLOOD" }, { "condition": "FIRST_TOWER" } ] }""")]
     [InlineData("""{ "op": "OR", "children": [ { "condition": "FIRST_BLOOD" } ] }""")]
     [InlineData("""{ "op": "OR", "children": [ { "condition": "FIRST_BLOOD" }, { "op": "AND", "children": [ { "condition": "FIRST_TOWER" }, { "op": "OR", "children": [ { "condition": "FIRST_BLOOD" }, { "condition": "FIRST_TOWER" } ] } ] } ] }""")]
+    [InlineData("""{ "op": "OR", "children": [ { "condition": "FIRST_TOWER" }, { "op": "AND", "children": [ { "condition": "KILLS", "threshold": 2 }, { "condition": "FIRST_TOWER" } ] } ] }""")]
     public void Validate_rejects_invalid(string json)
     {
         Assert.Throws<DomainException>(() => WinExpression.Validate(WinExpression.Parse(json)));

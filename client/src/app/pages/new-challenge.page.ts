@@ -28,6 +28,7 @@ const MODES: { id: ChampionMode; label: string; hint: string }[] = [
   { id: 'MIRROR', label: 'Miroir', hint: 'Le même champion pour les deux, tiré au sort.' },
   { id: 'RANDOM', label: 'Aléatoire', hint: 'Un champion différent chacun, tiré au sort.' },
   { id: 'DECK', label: 'Deck', hint: 'Chacun compose son deck, 3 bans, pick à l’aveugle.' },
+  { id: 'MIRROR_DECK', label: 'Deck miroir', hint: 'Chacun met quelques champions dans le pot, chaque manche en tire un pour les deux.' },
 ];
 
 const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
@@ -183,6 +184,9 @@ const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
             @if (mode() === 'DECK') {
               <p class="muted small">Deck de {{ bestOf() + 3 }} champions minimum, puis 3 bans à l'aveugle.</p>
             }
+            @if (mode() === 'MIRROR_DECK') {
+              <p class="muted small">{{ winsNeeded() }} champion{{ winsNeeded() > 1 ? 's' : '' }} chacun, tirés au sort à chaque manche et joués par les deux.</p>
+            }
             @if (spellMode() !== 'FREE') {
               <p class="muted small">{{ bestOf() * 2 }} jetons de sorts, 2 par manche.</p>
             }
@@ -233,7 +237,7 @@ const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
     .person .grow { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .tag { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 
-    .choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .choice { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: #0a0d13; cursor: pointer; text-align: left; transition: border-color 0.15s; }
     .choice strong { font-family: var(--display); font-size: 17px; letter-spacing: 0.08em; text-transform: uppercase; }
     .choice span { color: var(--muted); font-size: 12px; line-height: 1.4; }

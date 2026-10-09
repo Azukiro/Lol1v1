@@ -38,7 +38,7 @@ function players(s: SeriesState) {
           <h2>Ton champion</h2>
           <div class="assigned">
             <app-champion-card [championId]="mine()!.championId!" [selected]="true" />
-            <p class="muted">Tiré par le serveur ({{ s.championMode === 'MIRROR' ? 'miroir : ' + opp().displayName + ' joue le même' : 'aléatoire' }}).</p>
+            <p class="muted">Tiré par le serveur ({{ s.championMode === 'RANDOM' ? 'aléatoire' : 'miroir : ' + opp().displayName + ' joue le même' }}).</p>
           </div>
         }
 

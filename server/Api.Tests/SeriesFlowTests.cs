@@ -259,6 +259,49 @@ public class SeriesFlowTests
     }
 
     [Fact]
+    public async Task Mirror_deck_draws_from_both_decks_without_bans()
+    {
+        await using var factory = new ApiFactory();
+        await using var a = await TestPlayer.CreateAsync(factory, "Kaelis");
+        await using var b = await TestPlayer.CreateAsync(factory, "Vorn");
+        var id = await StartSeries(a, b, Config(3, "MIRROR_DECK", "FREE", KillsOrTower));
+
+        await a.PutPool(id, [1, 2, 3, 4, 5]);
+        // Pool adverse inconnu : impossible de savoir quels champions sont communs.
+        var early = await a.Http.PutAsJsonAsync($"/api/v1/series/{id}/deck", new { championIds = new[] { 1, 2 } });
+        Assert.Equal(HttpStatusCode.BadRequest, early.StatusCode);
+        await b.PutPool(id, [2, 3, 4, 5, 6]);
+        Assert.Equal(new[] { 2, 3, 4, 5 }, (await a.State(id)).Me.CommonPool);
+
+        // BO3 → 2 champions exactement, possédés par les deux.
+        var notCommon = await a.Http.PutAsJsonAsync($"/api/v1/series/{id}/deck", new { championIds = new[] { 1, 2 } });
+        Assert.Equal(HttpStatusCode.BadRequest, notCommon.StatusCode);
+        var tooMany = await a.Http.PutAsJsonAsync($"/api/v1/series/{id}/deck", new { championIds = new[] { 2, 3, 4 } });
+        Assert.Equal(HttpStatusCode.BadRequest, tooMany.StatusCode);
+        (await a.Http.PutAsJsonAsync($"/api/v1/series/{id}/deck", new { championIds = new[] { 2, 3 } })).EnsureSuccessStatusCode();
+        (await b.Http.PutAsJsonAsync($"/api/v1/series/{id}/deck", new { championIds = new[] { 3, 5 } })).EnsureSuccessStatusCode();
+
+        var state = await a.State(id);
+        Assert.Equal("IN_PROGRESS", state.Status);
+        Assert.Equal(2, state.Opponent.Deck!.Count);
+        var r1 = state.Rounds.Single();
+        Assert.Equal("LOBBY", r1.Status);
+        var first = r1.Assignments[0].ChampionId!.Value;
+        Assert.Contains(first, new[] { 2, 3, 5 });
+        Assert.Equal(first, r1.Assignments[1].ChampionId);
+
+        // Manche 1 gagnée : une seule entrée consommée sur les 4.
+        await a.Hub.InvokeAsync("ReportGameStarted", id, 4242L, first, (int[]?)null);
+        await a.Hub.InvokeAsync("ReportObservation", id, new ObservationReport("TURRET", "40", 500, new ObservationPayload("SELF", null, null)));
+        await b.Hub.InvokeAsync("ReportObservation", id, new ObservationReport("TURRET", "40", 500, new ObservationPayload("OPPONENT", null, null)));
+        await Eventually(() => a.Received("RoundResolved"));
+        state = await a.State(id);
+        Assert.Equal(1, state.Me.Deck.Count(d => d.Consumed) + state.Opponent.Deck!.Count(d => d.Consumed));
+        Assert.Equal("LOBBY", state.Rounds[1].Status);
+        Assert.Equal(state.Rounds[1].Assignments[0].ChampionId, state.Rounds[1].Assignments[1].ChampionId);
+    }
+
+    [Fact]
     public async Task Deck_mode_with_bans_blind_picks_spells_and_voided_round()
     {
         await using var factory = new ApiFactory();

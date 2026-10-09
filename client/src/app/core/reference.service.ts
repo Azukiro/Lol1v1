@@ -61,6 +61,12 @@ export class ReferenceService {
     return c && this.version() ? `${DDRAGON}/${this.version()}/img/champion/${c.key}.png` : null;
   }
 
+  /** Splash art du skin de base (non versionné chez Data Dragon). */
+  championSplash(id: number | null | undefined): string | null {
+    const c = this.champion(id);
+    return c ? `${DDRAGON}/img/champion/splash/${c.key}_0.jpg` : null;
+  }
+
   profileIcon(id: number | null | undefined): string | null {
     return id != null && id >= 0 && this.version() ? `${DDRAGON}/${this.version()}/img/profileicon/${id}.png` : null;
   }

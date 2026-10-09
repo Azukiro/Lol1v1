@@ -1,7 +1,7 @@
 import type { WinNode } from '../../shared/rules-engine';
 import type { LabConfig, LabState } from '../lab/lab.models';
 
-export type ChampionMode = 'MIRROR' | 'RANDOM' | 'DECK';
+export type ChampionMode = 'MIRROR' | 'RANDOM' | 'DECK' | 'MIRROR_DECK';
 export type SpellMode = 'FREE' | 'DECK_COMPOSED' | 'DECK_RANDOM';
 export type SeriesStatus = 'SETUP' | 'BANS' | 'IN_PROGRESS' | 'FINISHED' | 'ABORTED';
 export type RoundStatus = 'ASSIGNMENT' | 'LOBBY' | 'CHAMP_SELECT' | 'IN_GAME' | 'VOIDED' | 'DISPUTED' | 'VALIDATED';
@@ -212,7 +212,7 @@ export interface SeriesState {
   finishedAt: string | null;
   rules: { minDeckSize: number; bansPerPlayer: number; spellBudget: number; spellCap: number; allowedSpellIds: number[] };
   players: Player[];
-  me: { pool: number[]; free: number[]; deck: DeckEntry[]; spellTokens: SpellTokenState[]; myBans: number[]; deckChampionsNotInPool: number[] };
+  me: { pool: number[]; free: number[]; deck: DeckEntry[]; spellTokens: SpellTokenState[]; myBans: number[]; deckChampionsNotInPool: number[]; commonPool: number[] | null };
   opponent: { deck: DeckEntry[] | null; bansOnMe: number[] | null; spellTokens: SpellTokenState[] | null };
   rounds: Round[];
   currentRoundId: string | null;
@@ -234,7 +234,12 @@ export interface SpellRef {
   name: string;
 }
 
-export const MODE_LABELS: Record<ChampionMode, string> = { MIRROR: 'Miroir', RANDOM: 'Aléatoire', DECK: 'Deck' };
+export const MODE_LABELS: Record<ChampionMode, string> = { MIRROR: 'Miroir', RANDOM: 'Aléatoire', DECK: 'Deck', MIRROR_DECK: 'Deck miroir' };
+
+/** Modes où chaque joueur compose un deck avant la série. */
+export function usesDeck(mode: ChampionMode) {
+  return mode === 'DECK' || mode === 'MIRROR_DECK';
+}
 export const SPELL_MODE_LABELS: Record<SpellMode, string> = {
   FREE: 'Sorts libres',
   DECK_COMPOSED: 'Deck composé',

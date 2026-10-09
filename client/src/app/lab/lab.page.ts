@@ -293,7 +293,7 @@ export class LabPage implements OnInit {
   readonly opponentParam = input<string | undefined>(undefined, { alias: 'opponent' });
 
   protected readonly bestOfs = [1, 3, 5, 7];
-  protected readonly championModes: ChampionMode[] = ['MIRROR', 'RANDOM', 'DECK'];
+  protected readonly championModes: ChampionMode[] = ['MIRROR', 'RANDOM', 'DECK', 'MIRROR_DECK'];
   protected readonly spellModes: SpellMode[] = ['FREE', 'DECK_COMPOSED', 'DECK_RANDOM'];
   protected readonly tierChoices: { value: ObjectiveTier | null; label: string }[] = [
     { value: 'SHORT', label: 'Court' },

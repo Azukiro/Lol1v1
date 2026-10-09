@@ -165,11 +165,19 @@ public sealed class SeriesService(
 
     public Task SetDeckAsync(Guid seriesId, Guid userId, int[] championIds) => MutateAsync(seriesId, userId, (series, me) =>
     {
-        if (series.ChampionMode != ChampionMode.DECK) throw new AppException("Cette série n'est pas en mode deck.");
+        if (!SeriesRules.UsesDeck(series.ChampionMode)) throw new AppException("Cette série n'est pas en mode deck.");
         if (series.Status != SeriesStatus.SETUP) throw new AppException("La phase de composition est terminée.");
         if (me.DeckLockedAt is not null) throw new AppException("Ton deck est déjà validé.");
         var pool = Pool(me) ?? throw new AppException("Ton pool n'a pas encore été remonté.");
-        try { SeriesRules.ValidateDeck(series.BestOf, championIds, pool.All); }
+        try
+        {
+            if (series.ChampionMode == ChampionMode.MIRROR_DECK)
+            {
+                var common = CommonPool(series) ?? throw new AppException("Attends que ton adversaire ait remonté son pool.");
+                SeriesRules.ValidateMirrorDeck(series.BestOf, championIds, common);
+            }
+            else SeriesRules.ValidateDeck(series.BestOf, championIds, pool.All);
+        }
         catch (DomainException e) { throw new AppException(e.Message); }
         me.Deck = championIds.Select(c => new DeckChampion { SeriesPlayerId = me.Id, ChampionId = c }).ToList();
         db.DeckChampions.AddRange(me.Deck);
@@ -549,7 +557,7 @@ public sealed class SeriesService(
         if (series.Status != SeriesStatus.SETUP) return;
         var ready = series.Players.All(p =>
             p.PoolSnapshot is not null
-            && (series.ChampionMode != ChampionMode.DECK || p.DeckLockedAt is not null)
+            && (!SeriesRules.UsesDeck(series.ChampionMode) || p.DeckLockedAt is not null)
             && (series.SpellMode == SpellMode.FREE || p.SpellBudgetLockedAt is not null));
         if (!ready) return;
 
@@ -598,6 +606,10 @@ public sealed class SeriesService(
                             validated.Where(x => x.PlayerId == b.Id).Select(x => x.ChampionId ?? 0));
                         assignA.ChampionId = ca;
                         assignB.ChampionId = cb;
+                        break;
+                    case ChampionMode.MIRROR_DECK:
+                        var remaining = series.Players.SelectMany(p => p.Deck).Where(d => d.ConsumedInRoundId is null).Select(d => d.ChampionId);
+                        assignA.ChampionId = assignB.ChampionId = DrawService.DrawMirrorDeck(series.DrawSeed, number, remaining);
                         break;
                 }
             }
@@ -676,6 +688,14 @@ public sealed class SeriesService(
         round.WinnerPlayerId = winner.Id;
         round.WinningCondition = JsonSerializer.Serialize(condition, Json);
         round.EndedAt = clock.GetUtcNow();
+
+        // Deck miroir : le champion tiré consomme une seule entrée (celle de A si les deux l'avaient).
+        if (series.ChampionMode == ChampionMode.MIRROR_DECK)
+        {
+            var champion = round.Assignments[0].ChampionId;
+            var entry = series.Players.OrderBy(p => p.Slot).SelectMany(p => p.Deck).FirstOrDefault(d => d.ChampionId == champion && d.ConsumedInRoundId is null);
+            if (entry is not null) entry.ConsumedInRoundId = round.Id;
+        }
 
         foreach (var a in round.Assignments)
         {
@@ -763,6 +783,14 @@ public sealed class SeriesService(
     private static PoolSnapshot? Pool(SeriesPlayer p) =>
         p.PoolSnapshot is null ? null : JsonSerializer.Deserialize<PoolSnapshot>(p.PoolSnapshot, Json);
 
+    /// <summary>Champions jouables par les deux joueurs, null tant qu'un pool manque.</summary>
+    private static IReadOnlySet<int>? CommonPool(Series series)
+    {
+        var pools = series.Players.Select(Pool).ToList();
+        if (pools.Any(p => p is null)) return null;
+        return pools[0]!.All.Intersect(pools[1]!.All).ToHashSet();
+    }
+
     private static bool SpellsConform(Series series, RoundAssignment a)
     {
         if (series.SpellMode == SpellMode.FREE || a.ReportedSpell1Id is null) return true;
@@ -838,7 +866,7 @@ public sealed class SeriesService(
             MySlot = me.Slot.ToString(),
             CreatedAt = series.CreatedAt,
             FinishedAt = series.FinishedAt,
-            Rules = new RulesDto(SeriesRules.MinDeckSize(series.BestOf), SeriesRules.BansPerPlayer, SeriesRules.SpellBudget(series.BestOf),
+            Rules = new RulesDto(SeriesRules.DeckSize(series.ChampionMode, series.BestOf), SeriesRules.BansPerPlayer, SeriesRules.SpellBudget(series.BestOf),
                 SeriesRules.SpellCap(series.BestOf), reference.AllowedSpellIds),
             Players = series.Players.OrderBy(p => p.Slot).Select(p =>
             {
@@ -848,7 +876,8 @@ public sealed class SeriesService(
                     p.SpellBudgetLockedAt is not null, series.Bans.Any(b => b.ByPlayerId == p.Id));
             }).ToList(),
             Me = new MyDataDto(myPool?.Owned ?? [], myPool?.Free ?? [], Deck(me, bansRevealed), Tokens(me),
-                series.Bans.Where(b => b.ByPlayerId == me.Id).Select(b => b.ChampionId).ToArray(), deckNotInPool),
+                series.Bans.Where(b => b.ByPlayerId == me.Id).Select(b => b.ChampionId).ToArray(), deckNotInPool,
+                series.ChampionMode == ChampionMode.MIRROR_DECK && series.Status == SeriesStatus.SETUP ? CommonPool(series)?.Order().ToArray() : null),
             Opponent = new OpponentDataDto(
                 bothDecks ? Deck(opp, bansRevealed) : null,
                 bansRevealed ? series.Bans.Where(b => b.ByPlayerId == opp.Id).Select(b => b.ChampionId).ToArray() : null,

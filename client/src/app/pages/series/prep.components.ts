@@ -4,7 +4,7 @@ import { ApiService, errorMessage } from '../../core/api.service';
 import { GameTrackerService } from '../../core/game-tracker.service';
 import { HubService } from '../../core/hub.service';
 import { LolService } from '../../core/lol.service';
-import { SeriesState } from '../../core/models';
+import { SeriesState, usesDeck } from '../../core/models';
 import { ReferenceService } from '../../core/reference.service';
 import { ToastService } from '../../core/toast.service';
 import { ChampionCardComponent } from '../../shared/champion-card.component';
@@ -25,14 +25,19 @@ import { ChampionCardComponent } from '../../shared/champion-card.component';
       </div>
     }
 
-    @if (s.championMode === 'DECK' && !me().deckLocked && me().poolUpdatedAt) {
+    @if (mirrorDeck() && !me().deckLocked && me().poolUpdatedAt && !s.me.commonPool) {
+      <div class="card">
+        <h3>En attente du pool de {{ opponent().displayName }}</h3>
+        <p class="muted">Ton deck ne peut contenir que des champions que vous possédez tous les deux.</p>
+      </div>
+    } @else if (usesDeck(s.championMode) && !me().deckLocked && me().poolUpdatedAt) {
       <div class="grid deck-layout">
         <section>
           <div class="row toolbar">
             <input class="input grow" placeholder="Rechercher un champion" [ngModel]="query()" (ngModelChange)="query.set($event)" />
             <div class="seg">
               <button [class.on]="filter() === 'all'" (click)="filter.set('all')">TOUS · {{ pool().length }}</button>
-              <button [class.on]="filter() === 'free'" (click)="filter.set('free')">GRATUITS · {{ s.me.free.length }}</button>
+              <button [class.on]="filter() === 'free'" (click)="filter.set('free')">GRATUITS · {{ freeInPool().length }}</button>
             </div>
           </div>
           <div class="champ-grid">
@@ -49,7 +54,11 @@ import { ChampionCardComponent } from '../../shared/champion-card.component';
               <button class="chip cyan" (click)="toggle(id)" title="Retirer">{{ ref.championName(id) }} ✕</button>
             }
           </div>
-          <p class="muted small">{{ s.bestOf }} manches max + 3 bans subis = {{ s.rules.minDeckSize }} champions minimum. Varie les rôles pour encaisser les bans.</p>
+          @if (mirrorDeck()) {
+            <p class="muted small">Champions que vous possédez tous les deux. Avec ceux de {{ opponent().displayName }}, ils forment le pot : chaque manche en tire un, joué par vous deux.</p>
+          } @else {
+            <p class="muted small">{{ s.bestOf }} manches max + 3 bans subis = {{ s.rules.minDeckSize }} champions minimum. Varie les rôles pour encaisser les bans.</p>
+          }
           <button class="btn primary big" (click)="lockDeck()" [disabled]="busy() || picked().size < s.rules.minDeckSize">
             {{ picked().size < s.rules.minDeckSize ? 'Encore ' + (s.rules.minDeckSize - picked().size) + ' à choisir' : 'Valider mon deck' }}
           </button>
@@ -87,7 +96,7 @@ import { ChampionCardComponent } from '../../shared/champion-card.component';
         <h3>En attente de {{ opponent().displayName }}</h3>
         <ul class="muted">
           <li><span class="dot" [class.ok]="opponent().poolUpdatedAt" [class.wait]="!opponent().poolUpdatedAt"></span>Pool</li>
-          @if (s.championMode === 'DECK') {
+          @if (usesDeck(s.championMode)) {
             <li><span class="dot" [class.ok]="opponent().deckLocked" [class.wait]="!opponent().deckLocked"></span>Deck</li>
           }
           @if (s.spellMode === 'DECK_COMPOSED') {
@@ -127,7 +136,11 @@ export class SetupPhaseComponent {
   readonly state = input.required<SeriesState>();
   protected readonly me = computed(() => this.state().players.find((p) => p.slot === this.state().mySlot)!);
   protected readonly opponent = computed(() => this.state().players.find((p) => p.slot !== this.state().mySlot)!);
-  protected readonly pool = computed(() => [...this.state().me.pool, ...this.state().me.free]);
+  protected readonly usesDeck = usesDeck;
+  protected readonly mirrorDeck = computed(() => this.state().championMode === 'MIRROR_DECK');
+  /** Champions proposés pour le deck : tout mon pool, ou seulement les communs en deck miroir. */
+  protected readonly pool = computed(() => (this.mirrorDeck() ? (this.state().me.commonPool ?? []) : [...this.state().me.pool, ...this.state().me.free]));
+  protected readonly freeInPool = computed(() => this.state().me.free.filter((id) => this.pool().includes(id)));
   protected readonly query = signal('');
   protected readonly filter = signal<'all' | 'free'>('all');
   protected readonly picked = signal(new Set<number>());
@@ -139,14 +152,14 @@ export class SetupPhaseComponent {
 
   protected readonly visible = computed(() => {
     this.ref.version();
-    const ids = this.filter() === 'free' ? this.state().me.free : this.pool();
+    const ids = this.filter() === 'free' ? this.freeInPool() : this.pool();
     return this.ref.search(ids, this.query());
   });
 
   protected readonly waiting = computed(() => {
     const s = this.state();
     const me = this.me();
-    const meDone = !!me.poolUpdatedAt && (s.championMode !== 'DECK' || me.deckLocked) && (s.spellMode !== 'DECK_COMPOSED' || me.spellBudgetLocked);
+    const meDone = !!me.poolUpdatedAt && (!usesDeck(s.championMode) || me.deckLocked) && (s.spellMode !== 'DECK_COMPOSED' || me.spellBudgetLocked);
     return meDone;
   });
 
@@ -158,7 +171,8 @@ export class SetupPhaseComponent {
     this.picked.update((set) => {
       const next = new Set(set);
       if (next.has(id)) next.delete(id);
-      else next.add(id);
+      // Deck miroir : taille exacte, pas un minimum.
+      else if (!this.mirrorDeck() || next.size < this.state().rules.minDeckSize) next.add(id);
       return next;
     });
   }

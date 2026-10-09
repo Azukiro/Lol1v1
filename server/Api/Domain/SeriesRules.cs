@@ -54,6 +54,17 @@ public static class SeriesRules
     /// <summary>Taille minimale d'un deck : BO + 3 (une manche par champion + 3 bans subis).</summary>
     public static int MinDeckSize(int bestOf) => bestOf + BansPerPlayer;
 
+    /// <summary>
+    /// Deck miroir : ⌈BO/2⌉ champions chacun. Les deux decks réunis (BO + 1 entrées) couvrent
+    /// toutes les manches possibles, chaque manche validée consommant une entrée.
+    /// </summary>
+    public static int MirrorDeckSize(int bestOf) => WinsNeeded(bestOf);
+
+    /// <summary>Taille de deck attendue dans l'interface (minimum en mode deck, exacte en deck miroir).</summary>
+    public static int DeckSize(ChampionMode mode, int bestOf) => mode == ChampionMode.MIRROR_DECK ? MirrorDeckSize(bestOf) : MinDeckSize(bestOf);
+
+    public static bool UsesDeck(ChampionMode mode) => mode is ChampionMode.DECK or ChampionMode.MIRROR_DECK;
+
     public static int SpellBudget(int bestOf) => 2 * bestOf;
 
     /// <summary>
@@ -69,6 +80,15 @@ public static class SeriesRules
         if (deck.Count < min) throw new DomainException($"Le deck doit contenir au moins {min} champions (BO + 3).");
         var missing = deck.Where(c => !pool.Contains(c)).ToList();
         if (missing.Count > 0) throw new DomainException($"Champions absents de ton pool : {string.Join(", ", missing)}.");
+    }
+
+    /// <summary>Deck miroir : taille exacte, champions possédés par les deux joueurs (ils joueront le même).</summary>
+    public static void ValidateMirrorDeck(int bestOf, IReadOnlyCollection<int> deck, IReadOnlySet<int> commonPool)
+    {
+        if (deck.Distinct().Count() != deck.Count) throw new DomainException("Le deck contient des doublons.");
+        var size = MirrorDeckSize(bestOf);
+        if (deck.Count != size) throw new DomainException($"Le deck doit contenir exactement {size} champions.");
+        if (deck.Any(c => !commonPool.Contains(c))) throw new DomainException("Chaque champion doit être disponible pour vous deux.");
     }
 
     public static void ValidateSpellBudget(int bestOf, IReadOnlyDictionary<int, int> budget, IReadOnlyCollection<int> allowedSpells)

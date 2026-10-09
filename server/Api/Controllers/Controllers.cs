@@ -352,7 +352,7 @@ public static class Mapping
 
     private static string Label(ChampionMode championMode, SpellMode spellMode, string winLabel)
     {
-        var mode = championMode switch { ChampionMode.MIRROR => "Miroir", ChampionMode.RANDOM => "Aléatoire", _ => "Deck" };
+        var mode = championMode switch { ChampionMode.MIRROR => "Miroir", ChampionMode.RANDOM => "Aléatoire", ChampionMode.MIRROR_DECK => "Deck miroir", _ => "Deck" };
         var spells = spellMode switch { SpellMode.FREE => "Sorts libres", SpellMode.DECK_COMPOSED => "Deck de sorts composé", _ => "Deck de sorts aléatoire" };
         return $"{mode} · {spells} · {winLabel}";
     }

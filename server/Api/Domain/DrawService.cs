@@ -26,6 +26,17 @@ public static class DrawService
         return candidates[Rng(seed, $"round:{roundNumber}:mirror").Next(candidates.Count)];
     }
 
+    /// <summary>
+    /// Deck miroir : un champion parmi les entrées non consommées des deux decks.
+    /// Un champion présent dans les deux decks a deux chances d'être tiré (et peut être joué deux fois).
+    /// </summary>
+    public static int DrawMirrorDeck(string seed, int roundNumber, IEnumerable<int> remainingEntries)
+    {
+        var candidates = remainingEntries.Order().ToList();
+        if (candidates.Count == 0) throw new DomainException("Plus aucun champion dans les decks pour le tirage.");
+        return candidates[Rng(seed, $"round:{roundNumber}:mirror-deck").Next(candidates.Count)];
+    }
+
     /// <summary>Aléatoire : un champion par joueur dans son pool, différents entre eux, sans répétition pour un même joueur.</summary>
     public static (int A, int B) DrawRandom(string seed, int roundNumber,
         IEnumerable<int> poolA, IEnumerable<int> poolB, IEnumerable<int> playedByA, IEnumerable<int> playedByB)

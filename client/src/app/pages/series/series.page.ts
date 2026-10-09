@@ -2,14 +2,15 @@ import { Component, computed, effect, inject, input, signal } from '@angular/cor
 import { errorMessage } from '../../core/api.service';
 import { GameTrackerService } from '../../core/game-tracker.service';
 import { HubService } from '../../core/hub.service';
-import { MODE_LABELS } from '../../core/models';
+import { MODE_LABELS, usesDeck } from '../../core/models';
 import { BanPhaseComponent, SetupPhaseComponent } from './prep.components';
 import { LivePhaseComponent, LobbyPhaseComponent, PickPhaseComponent, SeriesRecapComponent } from './round.components';
 import { LabObjectiveComponent } from '../../lab/lab-objective.component';
+import { DeckDrawComponent } from './deck-draw.component';
 
 @Component({
   selector: 'app-series',
-  imports: [SetupPhaseComponent, BanPhaseComponent, PickPhaseComponent, LobbyPhaseComponent, LivePhaseComponent, SeriesRecapComponent, LabObjectiveComponent],
+  imports: [DeckDrawComponent,SetupPhaseComponent, BanPhaseComponent, PickPhaseComponent, LobbyPhaseComponent, LivePhaseComponent, SeriesRecapComponent, LabObjectiveComponent],
   template: `
     <div class="page">
       @if (state(); as s) {
@@ -32,6 +33,11 @@ import { LabObjectiveComponent } from '../../lab/lab-objective.component';
           </div>
           }
         </header>
+
+        <!-- Recréé à chaque manche : une animation de tirage par manche. -->
+        @for (r of drawRound(); track r.id) {
+          <app-deck-draw [state]="s" [round]="r" />
+        }
 
         @switch (phase()) {
           @case ('setup') { <app-setup-phase [state]="s" /> }
@@ -64,6 +70,12 @@ export class SeriesPage {
     const s = this.state();
     return s?.rounds.find((r) => r.id === s.currentRoundId) ?? null;
   });
+  /** Deck miroir : manche dont le tirage est à montrer (avant la partie). */
+  protected readonly drawRound = computed(() => {
+    const r = this.round();
+    const pick = this.phase() === 'pick' || this.phase() === 'lobby';
+    return this.state()?.championMode === 'MIRROR_DECK' && r && pick ? [r] : [];
+  });
   protected readonly pips = computed(() => Array.from({ length: this.state()?.winsNeeded ?? 0 }));
 
   protected readonly phase = computed(() => {
@@ -95,7 +107,7 @@ export class SeriesPage {
     const s = this.state()!;
     switch (this.phase()) {
       case 'setup':
-        return s.championMode === 'DECK' ? 'Compose ton deck' : 'Préparation';
+        return usesDeck(s.championMode) ? 'Compose ton deck' : 'Préparation';
       case 'bans':
         return 'Bannis 3 champions';
       case 'pick':

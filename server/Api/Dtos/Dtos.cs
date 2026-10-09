@@ -86,7 +86,9 @@ public sealed record SpellTokenDto(int SpellId, int Initial, int Left);
 
 public sealed record MyDataDto(
     int[] Pool, int[] Free, List<DeckEntryDto> Deck, List<SpellTokenDto> SpellTokens,
-    int[] MyBans, int[] DeckChampionsNotInPool);
+    int[] MyBans, int[] DeckChampionsNotInPool,
+    /// <summary>Deck miroir, en préparation : champions jouables par les deux (null tant qu'un pool manque).</summary>
+    int[]? CommonPool);
 
 public sealed record OpponentDataDto(
     /// <summary>Visible quand les deux decks sont validés (phase de bans).</summary>

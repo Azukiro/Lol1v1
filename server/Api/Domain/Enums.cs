@@ -1,6 +1,7 @@
 namespace Api.Domain;
 
-public enum ChampionMode { MIRROR, RANDOM, DECK }
+/// <summary>MIRROR_DECK : chacun compose un petit deck, chaque manche tire un champion du deck commun, joué par les deux.</summary>
+public enum ChampionMode { MIRROR, RANDOM, DECK, MIRROR_DECK }
 
 public enum SpellMode { FREE, DECK_COMPOSED, DECK_RANDOM }
 

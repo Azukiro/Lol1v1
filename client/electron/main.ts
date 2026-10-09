@@ -179,12 +179,19 @@ function startAutoUpdate() {
 }
 
 app.setAppUserModelId('fr.lol1v1.app');
-app.whenReady().then(() => {
-  registerIpc();
-  createMainWindow();
-  lcu.start();
-  if (!isDev) startAutoUpdate();
-});
+
+// Une seule instance : un second lancement ramène la fenêtre existante puis se ferme.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => bringToFront());
+  app.whenReady().then(() => {
+    registerIpc();
+    createMainWindow();
+    lcu.start();
+    if (!isDev) startAutoUpdate();
+  });
+}
 
 app.on('window-all-closed', () => {
   lcu.stop();

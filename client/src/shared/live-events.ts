@@ -3,7 +3,7 @@
  * en observations brutes pour le serveur. Les bénéficiaires sont relatifs au joueur local (SELF / OPPONENT) :
  * le serveur les convertit en joueur absolu et croise les remontées des deux clients.
  */
-import { csThresholds, emptyFacts, Facts, WinNode } from './rules-engine';
+import { CS_STEP, emptyFacts, Facts } from './rules-engine';
 
 /** CLOCK : temps de jeu, envoyé seulement en mode labo (temps limite). */
 export type ObservationType = 'KILL' | 'FIRST_BLOOD' | 'TURRET' | 'CS' | 'CLOCK';
@@ -83,7 +83,7 @@ export function turretOwner(turret: string | undefined): 'ORDER' | 'CHAOS' | nul
  * Convertit les données de jeu en observations nouvelles. Déduplication par EventID (et par palier de CS)
  * via l'ensemble `seen`, conservé par l'appelant pendant toute la manche.
  */
-export function extractObservations(data: LiveGameData, expression: WinNode, seen: Set<string>): Observation[] {
+export function extractObservations(data: LiveGameData, seen: Set<string>): Observation[] {
   const out: Observation[] = [];
   const { self, opponent } = findPlayers(data);
   if (!self) return out;
@@ -124,20 +124,18 @@ export function extractObservations(data: LiveGameData, expression: WinNode, see
     }
   }
 
-  // CS : uniquement si l'expression contient une condition CS.
-  const thresholds = csThresholds(expression);
-  if (thresholds.length) {
-    const time = data.gameData?.gameTime ?? 0;
-    const selfCs = self.scores?.creepScore ?? 0;
-    // Auto-déclaration : un palier par seuil atteint.
-    for (const t of thresholds) {
-      if (selfCs >= t) push({ type: 'CS', eventId: `self-${t}`, eventTime: time, payload: { subject: 'SELF', value: selfCs } });
-    }
-    // Vue de l'adversaire, par paliers de 10, pour le contrôle de plausibilité côté serveur.
-    const oppCs = opponent?.scores?.creepScore ?? 0;
-    const step = Math.floor(oppCs / 10) * 10;
-    if (opponent && step > 0) push({ type: 'CS', eventId: `view-${step}`, eventTime: time, payload: { subject: 'OPPONENT', value: oppCs } });
+  // CS : toujours remontés (conditions de victoire et récapitulatif), par paliers de 10.
+  // Les seuils de CS d'une règle sont des multiples du palier : chacun tombe sur un palier déclaré.
+  const time = data.gameData?.gameTime ?? 0;
+  const selfCs = self.scores?.creepScore ?? 0;
+  // Auto-déclaration : tous les paliers atteints, même si un relevé en a sauté.
+  for (let t = CS_STEP; t <= selfCs; t += CS_STEP) {
+    push({ type: 'CS', eventId: `self-${t}`, eventTime: time, payload: { subject: 'SELF', value: selfCs } });
   }
+  // Vue de l'adversaire, pour le contrôle de plausibilité côté serveur.
+  const oppCs = opponent?.scores?.creepScore ?? 0;
+  const step = Math.floor(oppCs / CS_STEP) * CS_STEP;
+  if (opponent && step > 0) push({ type: 'CS', eventId: `view-${step}`, eventTime: time, payload: { subject: 'OPPONENT', value: oppCs } });
   return out;
 }
 

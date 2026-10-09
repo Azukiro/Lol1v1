@@ -4,6 +4,32 @@ import { HistoryRound } from '../core/models';
 import { ReferenceService } from '../core/reference.service';
 import { ChampIconComponent } from './champ-icon.component';
 
+/** Pseudo LoL sans le tag (« Pseudo#TAG » → « Pseudo »). */
+export function gameName(riotId: string) {
+  return riotId.split('#')[0];
+}
+
+/** En-tête des lignes de manche : qui est à gauche, qui est à droite. Mêmes colonnes que la ligne. */
+@Component({
+  selector: 'app-round-recap-head',
+  template: `
+    <span></span>
+    <span class="side">Toi</span>
+    <span></span>
+    <span class="side right">{{ opponent() }}</span>
+  `,
+  styles: `
+    :host { display: grid; grid-template-columns: 56px minmax(0, 1fr) 180px minmax(0, 1fr); gap: 16px; padding: 0 15px 0 17px; }
+    .side { font-family: var(--display); font-weight: 700; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .right { text-align: right; }
+    @media (max-width: 1100px) { :host { display: none; } }
+  `,
+})
+export class RoundRecapHeadComponent {
+  /** Pseudo LoL de l'adversaire. */
+  readonly opponent = input.required<string>();
+}
+
 /** Ligne de récapitulatif d'une manche : mes champion / sorts / stats, verdict, puis l'adversaire en miroir. */
 @Component({
   selector: 'app-round-recap',

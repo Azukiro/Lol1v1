@@ -10,7 +10,7 @@ import { ToastService } from '../../core/toast.service';
 import { ChampionCardComponent, SpellIconComponent } from '../../shared/champion-card.component';
 import { AvatarComponent } from '../../shared/avatar.component';
 import { ChampIconComponent } from '../../shared/champ-icon.component';
-import { RoundRecapComponent } from '../../shared/round-recap.component';
+import { gameName, RoundRecapComponent, RoundRecapHeadComponent } from '../../shared/round-recap.component';
 import { describe, leaves, WinNode } from '../../../shared/rules-engine';
 
 function players(s: SeriesState) {
@@ -474,13 +474,13 @@ export class LivePhaseComponent {
 /** Récapitulatif de fin de série (US-4.5) et détail par manche (US-5.1). */
 @Component({
   selector: 'app-series-recap',
-  imports: [AvatarComponent, ChampIconComponent, RoundRecapComponent],
+  imports: [AvatarComponent, ChampIconComponent, RoundRecapComponent, RoundRecapHeadComponent],
   template: `
     @let s = state();
     <div class="hero" [class.win]="outcome() === 'win'" [class.loss]="outcome() === 'loss'">
-      <app-avatar class="avatar neutral opp" [iconId]="opp().profileIconId" [name]="opp().displayName" />
+      <app-avatar class="avatar neutral opp" [iconId]="opp().profileIconId" [name]="oppName()" />
       <div class="grow">
-        <div class="kicker">Série terminée · contre {{ opp().displayName }} <span class="muted">{{ opp().riotId }}</span></div>
+        <div class="kicker">Série terminée · contre {{ oppName() }}</div>
         <h1 class="big">{{ outcome() === 'aborted' ? 'Interrompue' : outcome() === 'win' ? 'Victoire' : 'Défaite' }}</h1>
         <div class="row wrap chips">
           <span class="chip">BO{{ s.bestOf }}</span>
@@ -498,6 +498,9 @@ export class LivePhaseComponent {
     <h2>Détail des manches</h2>
     @if (recap(); as r) {
       <div class="rounds">
+        @if (r.rounds.length) {
+          <app-round-recap-head [opponent]="oppName()" />
+        }
         @for (round of r.rounds; track round.number) {
           <app-round-recap [round]="round" [mySlot]="s.mySlot" />
         } @empty {
@@ -511,7 +514,7 @@ export class LivePhaseComponent {
             <div class="row">@for (id of r.myBans; track id) { <app-champ-icon [id]="id" /> }</div>
           </div>
           <div class="ban-side right">
-            <span class="label">Bans de {{ opp().displayName }}</span>
+            <span class="label">Bans de {{ oppName() }}</span>
             <div class="row">@for (id of r.opponentBans; track id) { <app-champ-icon [id]="id" /> }</div>
           </div>
         </div>
@@ -561,6 +564,7 @@ export class SeriesRecapComponent implements OnInit {
   protected readonly error = signal('');
   protected readonly me = computed(() => players(this.state()).me);
   protected readonly opp = computed(() => players(this.state()).opp);
+  protected readonly oppName = computed(() => gameName(this.opp().riotId));
   protected readonly outcome = computed(() => {
     const s = this.state();
     if (s.status !== 'FINISHED' || !s.winnerSlot) return 'aborted';

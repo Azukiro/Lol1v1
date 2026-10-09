@@ -5,11 +5,11 @@ import { ApiService, errorMessage } from '../core/api.service';
 import { HistoryEntry, HistoryRound, MODE_LABELS, SeriesSummary, SPELL_MODE_LABELS } from '../core/models';
 import { ReferenceService } from '../core/reference.service';
 import { AvatarComponent } from '../shared/avatar.component';
-import { RoundRecapComponent } from '../shared/round-recap.component';
+import { gameName, RoundRecapComponent, RoundRecapHeadComponent } from '../shared/round-recap.component';
 
 @Component({
   selector: 'app-history',
-  imports: [RouterLink, DatePipe, AvatarComponent, RoundRecapComponent],
+  imports: [RouterLink, DatePipe, AvatarComponent, RoundRecapComponent, RoundRecapHeadComponent],
   template: `
     <div class="page">
       <header class="page-head">
@@ -25,9 +25,9 @@ import { RoundRecapComponent } from '../shared/round-recap.component';
         @for (e of entries(); track e.series.id) {
           <article class="tile" [class]="outcome(e.series)" [class.open]="expanded() === e.series.id">
             <button class="head" (click)="toggle(e.series.id)" [attr.aria-expanded]="expanded() === e.series.id">
-              <app-avatar class="avatar neutral opp" [iconId]="e.series.opponentProfileIconId" [name]="e.series.opponentName" />
+              <app-avatar class="avatar neutral opp" [iconId]="e.series.opponentProfileIconId" [name]="gameName(e.series.opponentRiotId)" />
               <div class="who">
-                <div><strong>{{ e.series.opponentName }}</strong> <span class="muted">{{ e.series.opponentRiotId }}</span></div>
+                <div><strong>{{ gameName(e.series.opponentRiotId) }}</strong></div>
                 <div class="row wrap chips">
                   <span class="chip">BO{{ e.series.bestOf }}</span>
                   <span class="chip">{{ modeLabel[e.series.championMode] }}</span>
@@ -56,13 +56,16 @@ import { RoundRecapComponent } from '../shared/round-recap.component';
 
             @if (expanded() === e.series.id) {
               <div class="recap">
+                @if (e.rounds.length) {
+                  <app-round-recap-head [opponent]="gameName(e.series.opponentRiotId)" />
+                }
                 @for (r of e.rounds; track r.number) {
                   <app-round-recap [round]="r" [mySlot]="e.series.mySlot" />
                 } @empty {
                   <div class="muted small">Aucune manche jouée.</div>
                 }
                 <div class="row more">
-                  <a class="btn ghost small" routerLink="/stats" [queryParams]="{ tab: 'players', player: e.series.opponentRiotId }">Face à face avec {{ e.series.opponentName }} →</a>
+                  <a class="btn ghost small" routerLink="/stats" [queryParams]="{ tab: 'players', player: e.series.opponentRiotId }">Face à face avec {{ gameName(e.series.opponentRiotId) }} →</a>
                   <a class="btn ghost small" [routerLink]="['/series', e.series.id]">Voir la série →</a>
                 </div>
               </div>
@@ -120,6 +123,7 @@ import { RoundRecapComponent } from '../shared/round-recap.component';
 export class HistoryPage implements OnInit {
   private readonly api = inject(ApiService);
   protected readonly ref = inject(ReferenceService);
+  protected readonly gameName = gameName;
   protected readonly modeLabel = MODE_LABELS;
   protected readonly spellLabel = SPELL_MODE_LABELS;
   protected readonly entries = signal<HistoryEntry[]>([]);

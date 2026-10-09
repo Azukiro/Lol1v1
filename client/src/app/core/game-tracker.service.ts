@@ -163,7 +163,7 @@ export class GameTrackerService {
         gameTime: data.gameData?.gameTime ?? 0,
       });
       if (round.status !== 'IN_GAME') return;
-      const observations = s.winExpression ? extractObservations(data, s.winExpression, this.seen) : labObservations(data, this.seen);
+      const observations = s.winExpression ? extractObservations(data, this.seen) : labObservations(data, this.seen);
       for (const o of observations) this.hub.reportObservation(s.id, o);
     });
 

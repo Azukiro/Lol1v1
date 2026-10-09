@@ -161,7 +161,3 @@ export function redundancy(node: WinNode): string | null {
 export function leaves(node: WinNode): WinNode[] {
   return node.condition ? [node] : (node.children ?? []).flatMap(leaves);
 }
-
-export function csThresholds(node: WinNode): number[] {
-  return leaves(node).filter((l) => l.condition === 'CS').map((l) => l.threshold ?? 0);
-}

@@ -7,20 +7,9 @@ import { extractObservations, LiveGameData, Observation } from './live-events';
 import { Facts, WinNode } from './rules-engine';
 
 export const CLOCK_INTERVAL = 30;
-const CS_STEP = 10;
-const CS_MAX = 400;
-
-/** Expression factice dont seuls les paliers de CS servent : identique pour tous les joueurs. */
-const GENERIC_CS: WinNode = {
-  op: 'OR',
-  children: Array.from({ length: CS_MAX / CS_STEP }, (_, i) => ({
-    condition: 'CS' as const,
-    threshold: (i + 1) * CS_STEP,
-  })),
-};
 
 export function labObservations(data: LiveGameData, seen: Set<string>): Observation[] {
-  const out = extractObservations(data, GENERIC_CS, seen);
+  const out = extractObservations(data, seen);
   const time = data.gameData?.gameTime ?? 0;
   const bucket = Math.floor(time / CLOCK_INTERVAL);
   const key = `CLOCK:t-${bucket}`;

@@ -56,7 +56,7 @@ test('live events: kills, first blood, turrets mapped to SELF / OPPONENT and ded
     ],
   });
   const seen = new Set<string>();
-  const obs = extractObservations(data, expr, seen);
+  const obs = extractObservations(data, seen);
   assert.deepEqual(
     obs.map((o) => [o.type, o.eventId, o.payload.subject]),
     [
@@ -65,7 +65,7 @@ test('live events: kills, first blood, turrets mapped to SELF / OPPONENT and ded
       ['TURRET', 't300000', 'OPPONENT'],
     ],
   );
-  assert.equal(extractObservations(data, expr, seen).length, 0);
+  assert.equal(extractObservations(data, seen).length, 0);
 
   const facts = localFacts(data);
   assert.equal(facts.self.killTimes.length, 1);
@@ -85,7 +85,7 @@ test('live events: current turret naming (Turret_TOrder_…) counts for the dest
     events: { Events: [{ EventID: 8, EventName: 'TurretKilled', EventTime: 183.3, KillerName: 'Azuki', TurretKilled: 'Turret_TOrder_L1_P3_2250400266_0' }] },
     gameData: { gameTime: 200 },
   };
-  const obs = extractObservations(data, expr, new Set());
+  const obs = extractObservations(data, new Set()).filter((o) => o.type !== 'CS');
   assert.deepEqual(obs.map((o) => [o.type, o.payload.subject]), [['TURRET', 'SELF']]);
   assert.equal(localFacts(data).self.firstTowerTime, 183.3);
 });
@@ -93,17 +93,18 @@ test('live events: current turret naming (Turret_TOrder_…) counts for the dest
 test('live events: renumbered EventIDs after a reconnection are not mistaken for duplicates', () => {
   const seen = new Set<string>();
   const kill = (id: number, t: number, killer: string) => ({ EventID: id, EventName: 'ChampionKill', EventTime: t, KillerName: killer, VictimName: 'x' });
-  extractObservations(game({ Events: [kill(1, 35.5, 'Kaelis')] }), expr, seen);
+  extractObservations(game({ Events: [kill(1, 35.5, 'Kaelis')] }), seen);
   // Après reconnexion le client repart à EventID 1 : ce nouveau kill doit être remonté.
-  const obs = extractObservations(game({ Events: [kill(1, 430.9, 'Kaelis')] }), expr, seen);
+  const obs = extractObservations(game({ Events: [kill(1, 430.9, 'Kaelis')] }), seen);
   assert.deepEqual(obs.map((o) => [o.type, o.eventTime]), [['KILL', 430.9]]);
 });
 
-test('live events: CS thresholds and opponent view', () => {
-  const csExpr: WinNode = { condition: 'CS', threshold: 50 };
+test('live events: CS steps reported whatever the rule, with opponent view', () => {
   const seen = new Set<string>();
-  assert.deepEqual(extractObservations(game({ Events: [] }, 49, 38), csExpr, seen).map((o) => o.eventId), ['view-30']);
-  assert.deepEqual(extractObservations(game({ Events: [] }, 52, 41), csExpr, seen).map((o) => [o.eventId, o.payload.value]), [
+  assert.deepEqual(extractObservations(game({ Events: [] }, 29, 38), seen).map((o) => o.eventId), ['self-10', 'self-20', 'view-30']);
+  assert.deepEqual(extractObservations(game({ Events: [] }, 52, 41), seen).map((o) => [o.eventId, o.payload.value]), [
+    ['self-30', 52],
+    ['self-40', 52],
     ['self-50', 52],
     ['view-40', 41],
   ]);

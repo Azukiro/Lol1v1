@@ -86,7 +86,9 @@ public sealed class SeriesService(
                 {
                     var a = r.Assignments.FirstOrDefault(x => x.PlayerId == p.Id);
                     var f = facts[p.Slot];
-                    return new HistoryPlayerRoundDto(a?.ChampionId, a?.Spell1Id, a?.Spell2Id, f.Kills, f.Cs, f.FirstBloodTime is not null, f.FirstTowerTime is not null);
+                    // Sorts libres : rien n'est imposé, on affiche ceux remontés depuis la sélection.
+                    var spells = a?.Spell1Id is not null ? (a.Spell1Id, a.Spell2Id) : (a?.ReportedSpell1Id, a?.ReportedSpell2Id);
+                    return new HistoryPlayerRoundDto(a?.ChampionId, spells.Item1, spells.Item2, f.Kills, f.Cs, f.FirstBloodTime is not null, f.FirstTowerTime is not null);
                 }
                 return new HistoryRoundDto(r.Number, r.WinnerPlayerId is null ? null : SlotName(s, r.WinnerPlayerId.Value),
                     condition?.Label, condition?.Condition, condition?.EventTime, r.StartedAt, r.EndedAt, Player(me), Player(opp));

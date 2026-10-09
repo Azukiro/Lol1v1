@@ -531,7 +531,7 @@ export class LivePhaseComponent {
   `,
   styles: `
     :host { display: flex; flex-direction: column; gap: 16px; }
-    .hero { --tone: var(--muted); --tint: transparent; display: flex; align-items: center; gap: 22px; padding: 22px 26px; border-radius: var(--radius); border: 1px solid var(--line); border-left: 4px solid var(--tone); background: linear-gradient(90deg, var(--tint), var(--panel) 55%); }
+    .hero { --tone: var(--muted); --tint: transparent; display: flex; align-items: center; gap: 22px; padding: 22px 26px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--tone) 35%, var(--line)); background: linear-gradient(90deg, var(--tint), var(--panel) 55%); }
     .hero.win { --tone: var(--green); --tint: rgba(61, 220, 132, 0.16); }
     .hero.loss { --tone: var(--pink); --tint: rgba(255, 51, 102, 0.16); }
     .opp { width: 64px; height: 64px; border-radius: 14px; font-size: 24px; }

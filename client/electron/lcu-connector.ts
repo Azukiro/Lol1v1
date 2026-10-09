@@ -237,23 +237,34 @@ export class LcuConnector extends EventEmitter {
   /** Partie personnalisée Abîme hurlant (map 12), 1 joueur par équipe, blind pick. */
   async createLobby(opponentPuuid: string, lobbyName: string): Promise<void> {
     const queue = await this.customAramBlindQueue();
-    await this.request('POST', '/lol-lobby/v2/lobby', {
-      queueId: queue.id,
-      customGameLobby: {
-        configuration: {
-          gameMode: 'ARAM',
-          mapId: 12,
-          mutators: { id: queue.gameTypeConfigId },
-          gameTypeConfig: { id: queue.gameTypeConfigId },
-          spectatorPolicy: 'AllAllowed',
-          teamSize: 1,
-          maxPlayerCount: 2,
+    const create = (name: string) =>
+      this.request('POST', '/lol-lobby/v2/lobby', {
+        queueId: queue.id,
+        customGameLobby: {
+          configuration: {
+            gameMode: 'ARAM',
+            mapId: 12,
+            mutators: { id: queue.gameTypeConfigId },
+            gameTypeConfig: { id: queue.gameTypeConfigId },
+            spectatorPolicy: 'AllAllowed',
+            teamSize: 1,
+            maxPlayerCount: 2,
+          },
+          lobbyName: name,
+          lobbyPassword: '',
         },
-        lobbyName,
-        lobbyPassword: '',
-      },
-      isCustom: true,
-    });
+        isCustom: true,
+      });
+    // Le filtre de noms de Riot refuse parfois un nom (INVALID_LOBBY_NAME) : on retombe sur des noms neutres.
+    const names = [lobbyName, 'Duel ARAM', 'Duel'];
+    for (const [i, name] of names.entries()) {
+      try {
+        await create(name);
+        break;
+      } catch (e) {
+        if (i === names.length - 1 || !String(e).includes('INVALID_LOBBY_NAME')) throw e;
+      }
+    }
     const opponent = await this.request<{ summonerId: number }>('GET', `/lol-summoner/v2/summoners/puuid/${encodeURIComponent(opponentPuuid)}`);
     await this.request('POST', '/lol-lobby/v2/lobby/invitations', [{ toSummonerId: opponent.summonerId }]);
   }

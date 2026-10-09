@@ -198,7 +198,7 @@ export class GameTrackerService {
     if (!order) throw new Error('Le serveur n’a pas donné l’ordre de lancement.');
     const s = this.hub.series()[order.seriesId];
     const round = s?.rounds.find((r) => r.id === order.roundId);
-    await this.lol.createLobby(order.opponentPuuid, `1v1 M${round?.number ?? ''} ${order.seriesId.slice(0, 4)}`);
+    await this.lol.createLobby(order.opponentPuuid, `Duel 1v1 manche ${round?.number ?? 1}`);
     this.toast.info(`Lobby créé, invitation envoyée à ${order.opponentRiotId}. Lance la sélection quand il a rejoint.`);
   }
 

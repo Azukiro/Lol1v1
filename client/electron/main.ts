@@ -127,7 +127,11 @@ function registerIpc() {
   ipcMain.handle('lcu:createLobby', (_e, puuid: string, name: string) => lcu.createLobby(puuid, name));
   ipcMain.handle('lcu:startChampSelect', () => lcu.startChampSelect());
   ipcMain.handle('lcu:setSummonerSpells', (_e, spells: [number, number]) => lcu.setSummonerSpells(spells));
-  ipcMain.handle('lcu:prepareChampSelect', (_e, championId: number, spells: [number, number] | null) => lcu.prepareChampSelect(championId, spells));
+  ipcMain.handle('lcu:prepareChampSelect', (_e, championId: number, spells: [number, number] | null, lock: boolean) =>
+    lcu.prepareChampSelect(championId, spells, lock),
+  );
+  ipcMain.handle('lcu:acceptInvitationFrom', (_e, puuid: string) => lcu.acceptInvitationFrom(puuid));
+  ipcMain.handle('lcu:lobby', () => lcu.lobby());
   ipcMain.handle('overlay:show', (_e, data: OverlayData) => showOverlay(data));
   ipcMain.handle('overlay:hide', () => hideOverlay());
   ipcMain.handle('window:attention', () => bringToFront());
@@ -141,6 +145,8 @@ function registerIpc() {
 
   lcu.on('status', (s) => send('lcu:status', s));
   lcu.on('champSelect', (c) => send('lcu:champSelect', c));
+  lcu.on('lobby', (l) => send('lcu:lobby', l));
+  lcu.on('invitationsChanged', () => send('lcu:invitationsChanged', null));
   // Les changements de statut d'amis arrivent en rafale : un seul signal par seconde.
   let friendsTimer: NodeJS.Timeout | null = null;
   lcu.on('friendsChanged', () => {

@@ -160,15 +160,15 @@ export class PickPhaseComponent {
       <aside class="stack">
         @if (isCreator()) {
           <div class="card cyan stack">
-            <h3>Lancer la manche</h3>
-            <p class="muted small">Crée une partie personnalisée Abîme hurlant 1v1 en blind pick et invite {{ opp().displayName }}.</p>
-            <button class="btn primary big" (click)="launch()" [disabled]="busy() || !lol.status().connected" [title]="lol.status().connected ? '' : 'Lance le client LoL'">Lancer la manche</button>
+            <h3>Lancement automatique</h3>
+            <p class="muted small">Partie personnalisée Abîme hurlant 1v1 en blind pick : lobby créé, {{ opp().displayName }} invité, sélection démarrée dès qu'il rejoint, champion verrouillé.</p>
+            <button class="btn" (click)="launch()" [disabled]="busy() || !lol.status().connected" [title]="lol.status().connected ? '' : 'Lance le client LoL'">Relancer le lobby</button>
             <button class="btn" (click)="startSelect()" [disabled]="busy() || lol.gameflow().phase !== 'Lobby'">Démarrer la sélection</button>
           </div>
         } @else {
           <div class="card cyan">
-            <h3>Rejoins la partie</h3>
-            <p class="muted small">{{ opp().displayName }} crée le lobby : accepte son invitation dans le client LoL.</p>
+            <h3>Lancement automatique</h3>
+            <p class="muted small">{{ opp().displayName }} crée le lobby : son invitation est acceptée et ton champion verrouillé automatiquement.</p>
           </div>
         }
 
@@ -242,15 +242,7 @@ export class LobbyPhaseComponent {
   }
 
   async launch() {
-    await this.run(async () => {
-      // Ordre manqué (app relancée après la révélation) ou d'une manche précédente : on le redemande au serveur.
-      const order = this.tracker.launchOrder();
-      if (!order || order.seriesId !== this.state().id || order.roundId !== this.round().id) {
-        this.tracker.launchOrder.set(null);
-        await this.hub.invoke('RequestLaunch', this.state().id);
-      }
-      await this.tracker.launchLobby();
-    });
+    await this.run(() => this.tracker.launchRound(this.state().id, this.round().id));
   }
 
   async startSelect() {

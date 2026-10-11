@@ -46,6 +46,9 @@ export class GameTrackerService {
   private startedRoundId: string | null = null;
   private champSelectRoundId: string | null = null;
   private preparedRoundId: string | null = null;
+  /** Tentative de manche (id:attempt) déjà traitée par chaque automatisme, pour ne le déclencher qu'une fois. */
+  private autoLobbyKey: string | null = null;
+  private autoSelectKey: string | null = null;
   private readonly spellFixes = new Map<string, number>();
   private spellFixTimer: ReturnType<typeof setTimeout> | null = null;
   private lastChampSelectKey = '';
@@ -87,7 +90,51 @@ export class GameTrackerService {
       }
     });
 
-    // Sélection LoL : survole le champion attribué et règle les sorts (une fois par tentative de manche).
+    // Créateur : lobby créé et adversaire invité dès que les champions sont révélés, une fois sorti de la partie précédente.
+    effect(() => {
+      const s = this.activeSeries();
+      const round = this.currentRound();
+      const phase = this.lol.gameflow().phase;
+      if (!s || !round || round.status !== 'LOBBY' || s.mySlot !== s.creatorSlot || !this.lol.status().connected) return;
+      if (!['None', 'Lobby'].includes(phase)) return;
+      const key = `${round.id}:${round.attempt}`;
+      if (this.autoLobbyKey === key) return;
+      // Adversaire déjà dans mon lobby (ex. « Rejouer » après la manche précédente) : pas besoin d'en recréer un.
+      const opp = s.players.find((p) => p.slot !== s.mySlot);
+      if (phase === 'Lobby' && opp && this.lol.lobby()?.puuids.includes(opp.puuid)) return;
+      this.autoLobbyKey = key;
+      untracked(() => void this.launchRound(s.id, round.id).catch((e) => this.toast.error(`Lobby non créé : ${errorMessage(e)}. Utilise « Lancer la manche ».`)));
+    });
+
+    // Créateur : sélection démarrée dès que l'adversaire a rejoint le lobby.
+    effect(() => {
+      const s = this.activeSeries();
+      const round = this.currentRound();
+      const lobby = this.lol.lobby();
+      if (!s || !round || round.status !== 'LOBBY' || s.mySlot !== s.creatorSlot) return;
+      if (this.lol.gameflow().phase !== 'Lobby') return;
+      const opp = s.players.find((p) => p.slot !== s.mySlot);
+      if (!opp || !lobby?.puuids.includes(opp.puuid)) return;
+      const key = `${round.id}:${round.attempt}`;
+      if (this.autoSelectKey === key) return;
+      this.autoSelectKey = key;
+      // Court délai : le client LoL refuse le démarrage tant que l'arrivée du joueur n'est pas finalisée.
+      setTimeout(() => void this.lol.startChampSelect().catch((e) => this.toast.error(`Sélection non démarrée : ${errorMessage(e)}. Utilise « Démarrer la sélection ».`)), 1500);
+    });
+
+    // Invité : accepte l'invitation de l'adversaire pour la manche en cours.
+    effect(() => {
+      this.lol.invitationsVersion();
+      const s = this.activeSeries();
+      const round = this.currentRound();
+      if (!s || !round || round.status !== 'LOBBY' || s.mySlot === s.creatorSlot || !this.lol.status().connected) return;
+      if (!['None', 'Lobby'].includes(this.lol.gameflow().phase)) return;
+      const opp = s.players.find((p) => p.slot !== s.mySlot);
+      if (!opp || this.lol.lobby()?.puuids.includes(opp.puuid)) return;
+      untracked(() => void this.lol.acceptInvitationFrom(opp.puuid).catch(() => undefined));
+    });
+
+    // Sélection LoL : règle les sorts, survole puis verrouille le champion attribué (une fois par tentative de manche).
     effect(() => {
       const cs = this.lol.champSelect();
       const s = this.activeSeries();
@@ -99,7 +146,7 @@ export class GameTrackerService {
       const spells: [number, number] | null = s.spellMode !== 'FREE' && mine.spell1Id && mine.spell2Id ? [mine.spell1Id, mine.spell2Id] : null;
       this.preparedRoundId = round.id;
       this.lol
-        .prepareChampSelect(mine.championId, spells)
+        .prepareChampSelect(mine.championId, spells, true)
         .then((done) => {
           if (!done) this.preparedRoundId = null; // phase de pick pas encore ouverte : on réessaiera au prochain événement
         })
@@ -190,6 +237,16 @@ export class GameTrackerService {
     }
   }
 
+  /** Lance la manche : redemande l'ordre au serveur s'il manque ou date d'une autre manche, puis crée le lobby. */
+  async launchRound(seriesId: string, roundId: string) {
+    const order = this.launchOrder();
+    if (!order || order.seriesId !== seriesId || order.roundId !== roundId) {
+      this.launchOrder.set(null);
+      await this.hub.invoke('RequestLaunch', seriesId);
+    }
+    await this.launchLobby();
+  }
+
   /** US-4.2 : le créateur crée le lobby Abîme hurlant 1v1 blind pick et invite l'adversaire. */
   async launchLobby() {
     // L'événement LaunchLobby peut arriver juste après la réponse à RequestLaunch.
@@ -199,7 +256,7 @@ export class GameTrackerService {
     const s = this.hub.series()[order.seriesId];
     const round = s?.rounds.find((r) => r.id === order.roundId);
     await this.lol.createLobby(order.opponentPuuid, `Duel 1v1 manche ${round?.number ?? 1}`);
-    this.toast.info(`Lobby créé, invitation envoyée à ${order.opponentRiotId}. Lance la sélection quand il a rejoint.`);
+    this.toast.info(`Lobby créé, invitation envoyée à ${order.opponentRiotId}. La sélection démarre dès qu'il rejoint.`);
   }
 
   /** Événements qui demandent une action du joueur (ou qui concluent une manche) : app au premier plan. */
@@ -236,6 +293,10 @@ export class GameTrackerService {
       case 'RoundVoided':
         this.toast.error(`Manche annulée : ${payload.reason}. Elle est rejouée avec les mêmes attributions.`);
         this.startedRoundId = null;
+        // La manche rejouée relance lobby, sélection et verrouillage automatiques.
+        this.autoLobbyKey = null;
+        this.autoSelectKey = null;
+        this.preparedRoundId = null;
         break;
       case 'RoundDisputed':
         this.toast.error('Observations contradictoires : manche en litige. Votez pour la résoudre.');

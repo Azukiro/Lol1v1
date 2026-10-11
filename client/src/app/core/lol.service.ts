@@ -1,5 +1,5 @@
 import { effect, Injectable, signal } from '@angular/core';
-import type { ChampSelectState, GameflowState, LcuPool, LcuStatus, DuelystBridge, LolFriend, OverlayData, UpdateStatus } from '../../shared/ipc';
+import type { ChampSelectState, GameflowState, LcuPool, LcuStatus, DuelystBridge, LobbyState, LolFriend, OverlayData, UpdateStatus } from '../../shared/ipc';
 
 type Bridge = DuelystBridge & { loadConfig(): Promise<{ apiUrl: string; version: string }> };
 
@@ -18,6 +18,10 @@ export class LolService {
   readonly status = signal<LcuStatus>({ connected: false, error: this.bridge ? 'Recherche du client LoL…' : 'Hors Electron : client LoL indisponible.' });
   readonly gameflow = signal<GameflowState>({ phase: 'None' });
   readonly champSelect = signal<ChampSelectState | null>(null);
+  /** Lobby LoL courant (null hors lobby). */
+  readonly lobby = signal<LobbyState | null>(null);
+  /** Incrémenté à chaque changement des invitations reçues. */
+  readonly invitationsVersion = signal(0);
   /** Dernières données brutes de la Live Client Data API. */
   readonly liveData = signal<unknown>(null);
   /** Incrémenté à chaque changement de la liste d'amis LoL. */
@@ -43,6 +47,9 @@ export class LolService {
       if (['None', 'Lobby', 'EndOfGame', 'PreEndOfGame', 'WaitingForStats'].includes(g.phase)) this.champSelect.set(null);
     });
     this.bridge.lcu.onChampSelect((c) => this.champSelect.set(c));
+    void this.bridge.lcu.lobby().then((l) => this.lobby.set(l));
+    this.bridge.lcu.onLobby((l) => this.lobby.set(l));
+    this.bridge.lcu.onInvitationsChanged(() => this.invitationsVersion.update((v) => v + 1));
     this.bridge.live.onData((d) => this.liveData.set(d));
     // Sortie de partie / de sélection : demande en attente, ou simplement fin de partie pendant une série.
     let previous = 'None';
@@ -78,8 +85,12 @@ export class LolService {
     return this.require().lcu.createLobby(opponentPuuid, lobbyName);
   }
 
-  prepareChampSelect(championId: number, spells: [number, number] | null): Promise<boolean> {
-    return this.require().lcu.prepareChampSelect(championId, spells);
+  prepareChampSelect(championId: number, spells: [number, number] | null, lock: boolean): Promise<boolean> {
+    return this.require().lcu.prepareChampSelect(championId, spells, lock);
+  }
+
+  acceptInvitationFrom(puuid: string): Promise<boolean> {
+    return this.require().lcu.acceptInvitationFrom(puuid);
   }
 
   setSummonerSpells(spells: [number, number]): Promise<void> {

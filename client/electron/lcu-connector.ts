@@ -9,7 +9,7 @@ import * as fs from 'node:fs';
 import * as https from 'node:https';
 import * as path from 'node:path';
 import WebSocket from 'ws';
-import type { ChampSelectState, GameflowState, LcuIdentity, LcuPool, LcuStatus, LolFriend } from '../src/shared/ipc';
+import type { ChampSelectState, GameflowState, LcuIdentity, LcuPool, LcuStatus, LobbyState, LolFriend } from '../src/shared/ipc';
 
 interface Credentials {
   port: number;
@@ -72,6 +72,7 @@ export class LcuConnector extends EventEmitter {
   private identity: LcuIdentity | undefined;
   private timer: NodeJS.Timeout | null = null;
   private lastError: string | undefined;
+  private lobbyState: LobbyState | null = null;
 
   start(): void {
     void this.tick();
@@ -85,6 +86,11 @@ export class LcuConnector extends EventEmitter {
 
   status(): LcuStatus {
     return { connected: !!this.creds && !!this.identity, identity: this.identity, error: this.lastError };
+  }
+
+  /** Dernier lobby connu (null hors lobby). */
+  lobby(): LobbyState | null {
+    return this.lobbyState;
   }
 
   private async tick(): Promise<void> {
@@ -109,6 +115,7 @@ export class LcuConnector extends EventEmitter {
       this.openSocket();
       this.emit('status', this.status());
       void this.refreshGameflow();
+      void this.refreshLobby();
     } catch (e) {
       this.creds = null;
       this.setError(`Client LoL en cours de démarrage (${(e as Error).message})`);
@@ -273,14 +280,25 @@ export class LcuConnector extends EventEmitter {
     await this.request('POST', '/lol-lobby/v1/lobby/custom/start-champ-select');
   }
 
+  /** Accepte l'invitation en attente envoyée par ce joueur. Retourne false s'il n'y en a pas. */
+  async acceptInvitationFrom(puuid: string): Promise<boolean> {
+    const invitations = await this.request<{ invitationId: string; fromSummonerId: number; state: string }[]>('GET', '/lol-lobby/v2/received-invitations');
+    const pending = invitations.filter((i) => i.state === 'Pending');
+    if (!pending.length) return false;
+    const from = await this.request<{ summonerId: number }>('GET', `/lol-summoner/v2/summoners/puuid/${encodeURIComponent(puuid)}`);
+    const invitation = pending.find((i) => i.fromSummonerId === from.summonerId);
+    if (!invitation) return false;
+    await this.request('POST', `/lol-lobby/v2/received-invitations/${encodeURIComponent(invitation.invitationId)}/accept`);
+    return true;
+  }
+
   // ---------------------------------------------------------------- Sélection des champions
 
   /**
-   * Prépare la sélection : survole le champion attribué et règle les sorts.
-   * Le verrouillage reste au joueur (pas d'automatisation du choix final).
+   * Prépare la sélection : règle les sorts, survole le champion attribué puis le verrouille si lock.
    * Retourne false si la phase de pick du joueur n'est pas encore ouverte.
    */
-  async prepareChampSelect(championId: number, spells: [number, number] | null): Promise<boolean> {
+  async prepareChampSelect(championId: number, spells: [number, number] | null, lock = false): Promise<boolean> {
     const session = await this.request<ChampSelectSession>('GET', '/lol-champ-select/v1/session');
     const pick = (session.actions ?? [])
       .flat()
@@ -288,6 +306,7 @@ export class LcuConnector extends EventEmitter {
     if (!pick) return false;
     if (spells) await this.request('PATCH', '/lol-champ-select/v1/session/my-selection', { spell1Id: spells[0], spell2Id: spells[1] });
     if (pick.championId !== championId) await this.request('PATCH', `/lol-champ-select/v1/session/actions/${pick.id}`, { championId });
+    if (lock) await this.request('POST', `/lol-champ-select/v1/session/actions/${pick.id}/complete`);
     return true;
   }
 
@@ -306,7 +325,13 @@ export class LcuConnector extends EventEmitter {
     });
     this.ws = ws;
     ws.on('open', () => {
-      for (const evt of ['OnJsonApiEvent_lol-gameflow_v1_gameflow-phase', 'OnJsonApiEvent_lol-champ-select_v1_session', 'OnJsonApiEvent_lol-chat_v1_friends']) {
+      for (const evt of [
+        'OnJsonApiEvent_lol-gameflow_v1_gameflow-phase',
+        'OnJsonApiEvent_lol-champ-select_v1_session',
+        'OnJsonApiEvent_lol-chat_v1_friends',
+        'OnJsonApiEvent_lol-lobby_v2_lobby',
+        'OnJsonApiEvent_lol-lobby_v2_received-invitations',
+      ]) {
         ws.send(JSON.stringify([5, evt]));
       }
     });
@@ -317,6 +342,8 @@ export class LcuConnector extends EventEmitter {
         const { uri, data, eventType } = msg[2] as { uri: string; data: unknown; eventType: string };
         if (uri === '/lol-gameflow/v1/gameflow-phase') void this.refreshGameflow(data as string);
         else if (uri.startsWith('/lol-chat/v1/friends')) this.emit('friendsChanged');
+        else if (uri === '/lol-lobby/v2/lobby') this.setLobby(eventType === 'Delete' ? null : normalizeLobby(data as LobbySession));
+        else if (uri === '/lol-lobby/v2/received-invitations') this.emit('invitationsChanged');
         else if (uri === '/lol-champ-select/v1/session') {
           this.emit('champSelect', eventType === 'Delete' ? null : normalizeChampSelect(data as ChampSelectSession));
         }
@@ -328,6 +355,19 @@ export class LcuConnector extends EventEmitter {
       if (this.ws === ws) this.ws = null;
     });
     ws.on('error', () => ws.close());
+  }
+
+  private async refreshLobby(): Promise<void> {
+    try {
+      this.setLobby(normalizeLobby(await this.request<LobbySession>('GET', '/lol-lobby/v2/lobby')));
+    } catch {
+      this.setLobby(null); // 404 hors lobby
+    }
+  }
+
+  private setLobby(lobby: LobbyState | null) {
+    this.lobbyState = lobby;
+    this.emit('lobby', lobby);
   }
 
   private async refreshGameflow(phase?: string): Promise<void> {
@@ -357,4 +397,24 @@ export function normalizeChampSelect(session: ChampSelectSession): ChampSelectSt
   const pick = (session.actions ?? []).flat().find((a) => a.actorCellId === session.localPlayerCellId && a.type === 'pick');
   const championId = me.championId || pick?.championId || me.championPickIntent || 0;
   return { championId, locked: !!pick?.completed && championId > 0, spells: [me.spell1Id, me.spell2Id] };
+}
+
+interface LobbyMember {
+  puuid?: string;
+}
+
+export interface LobbySession {
+  members?: LobbyMember[];
+  gameConfig?: { customTeam100?: LobbyMember[]; customTeam200?: LobbyMember[]; customSpectators?: LobbyMember[] };
+}
+
+/** Joueurs présents dans le lobby, toutes équipes confondues (partie perso : équipes 100 / 200). */
+export function normalizeLobby(session: LobbySession): LobbyState {
+  const all = [
+    ...(session.members ?? []),
+    ...(session.gameConfig?.customTeam100 ?? []),
+    ...(session.gameConfig?.customTeam200 ?? []),
+    ...(session.gameConfig?.customSpectators ?? []),
+  ];
+  return { puuids: [...new Set(all.map((m) => m.puuid).filter((p): p is string => !!p))] };
 }

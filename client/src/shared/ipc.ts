@@ -58,6 +58,11 @@ export interface ChampSelectState {
   spells: [number, number];
 }
 
+/** Lobby LoL courant : joueurs présents (toutes équipes). */
+export interface LobbyState {
+  puuids: string[];
+}
+
 export interface OverlayData {
   title: string;
   subtitle: string;
@@ -79,11 +84,15 @@ export interface DuelystBridge {
     friends(): Promise<LolFriend[]>;
     createLobby(opponentPuuid: string, lobbyName: string): Promise<void>;
     startChampSelect(): Promise<void>;
-    prepareChampSelect(championId: number, spells: [number, number] | null): Promise<boolean>;
+    acceptInvitationFrom(puuid: string): Promise<boolean>;
+    prepareChampSelect(championId: number, spells: [number, number] | null, lock: boolean): Promise<boolean>;
     setSummonerSpells(spells: [number, number]): Promise<void>;
+    lobby(): Promise<LobbyState | null>;
     onStatus(cb: (s: LcuStatus) => void): () => void;
     onGameflow(cb: (g: GameflowState) => void): () => void;
     onChampSelect(cb: (c: ChampSelectState | null) => void): () => void;
+    onLobby(cb: (l: LobbyState | null) => void): () => void;
+    onInvitationsChanged(cb: () => void): () => void;
     onFriendsChanged(cb: () => void): () => void;
   };
   live: {

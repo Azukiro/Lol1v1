@@ -2,6 +2,7 @@ appId: fr.duelyst.app
 productName: Duelyst
 directories:
   output: release
+  buildResources: build
 files:
   - dist/client/browser/**
   - dist-electron/**
@@ -10,6 +11,8 @@ files:
   - package.json
 win:
   target: nsis
+  # Généré depuis build/icon.svg (logo du site) par scripts/make-icon.js.
+  icon: build/icon.ico
   # Nom de fichier neutre, servi tel quel par /download.
   artifactName: launcher-setup-${version}.${ext}
 nsis:

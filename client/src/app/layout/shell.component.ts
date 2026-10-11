@@ -20,8 +20,10 @@ import { LabTrackerService } from '../lab/lab-tracker.service';
     <div class="shell">
       <nav class="rail">
         <span class="logo">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
-            <path d="M5 4l14 16M19 4L5 20M8 4H4v4M16 4h4v4" />
+          <svg viewBox="0 0 32 32" width="30" height="30" aria-label="Duelyst">
+            <path d="M3 6h7l6 9-3.5 5.2L3 6z" fill="var(--cyan)" />
+            <path d="M29 6h-7l-6 9 3.5 5.2L29 6z" fill="var(--pink)" />
+            <path d="M12.5 22.5 16 17.3l3.5 5.2L16 27.5z" fill="var(--text)" />
           </svg>
         </span>
         <a routerLink="/" routerLinkActive="on" [routerLinkActiveOptions]="{ exact: true }" title="Accueil">
@@ -97,7 +99,7 @@ import { LabTrackerService } from '../lab/lab-tracker.service';
     .rail a, .rail .logo, .rail .me { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--muted); }
     .rail a:hover { color: var(--text); background: var(--panel); }
     .rail a.on { color: var(--cyan); background: var(--cyan-dim); }
-    .rail .logo { background: var(--cyan); color: #04141a; margin-bottom: 14px; box-shadow: 0 0 18px rgba(25, 227, 255, 0.4); }
+    .rail .logo { margin-bottom: 14px; }
     .rail .me app-avatar { width: 100%; height: 100%; }
     .profile { position: relative; }
     .rail .me.open { box-shadow: 0 0 0 3px var(--cyan-dim), 0 0 16px rgba(25, 227, 255, 0.4); }

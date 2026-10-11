@@ -19,6 +19,6 @@ services:
       - key: Jwt__Key
         sync: false   # secret fort (≥ 32 caractères), voir CONFIGURATION-EXTERNE.md §3.1
       - key: Jwt__Issuer
-        value: lol1v1
+        value: duelyst
       - key: Jwt__Audience
-        value: lol1v1-client
+        value: duelyst-client

@@ -47,7 +47,7 @@ const GAME_STATUS: Record<string, string> = {
       } @else if (error()) {
         <div class="error-text">{{ error() }}</div>
       } @else {
-        <h2>Sur LoL 1v1 <span class="muted count">{{ onApp().length }}</span></h2>
+        <h2>Sur Duelyst <span class="muted count">{{ onApp().length }}</span></h2>
         <div class="card list">
           @for (f of onApp(); track f.puuid) {
             <div class="list-item">

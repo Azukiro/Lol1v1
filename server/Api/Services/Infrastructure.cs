@@ -31,8 +31,8 @@ public sealed class SeriesLocks
 public sealed class JwtOptions
 {
     public string Key { get; set; } = "";
-    public string Issuer { get; set; } = "lol1v1";
-    public string Audience { get; set; } = "lol1v1-client";
+    public string Issuer { get; set; } = "duelyst";
+    public string Audience { get; set; } = "duelyst-client";
     public int LifetimeDays { get; set; } = 30;
 }
 

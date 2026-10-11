@@ -9,7 +9,7 @@ import { AuthService, errorMessage } from '../core/api.service';
   template: `
     <div class="wrap">
       <form class="card cyan box" (ngSubmit)="submit()">
-        <div class="kicker">LoL 1v1</div>
+        <div class="kicker">Duelyst</div>
         <h1>{{ mode() === 'login' ? 'Connexion' : 'Créer un compte' }}</h1>
         <p class="muted">Des séries de 1v1 entre amis, arbitrées automatiquement.</p>
 

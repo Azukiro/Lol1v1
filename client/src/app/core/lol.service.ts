@@ -1,18 +1,18 @@
 import { effect, Injectable, signal } from '@angular/core';
-import type { ChampSelectState, GameflowState, LcuPool, LcuStatus, Lol1v1Bridge, LolFriend, OverlayData, UpdateStatus } from '../../shared/ipc';
+import type { ChampSelectState, GameflowState, LcuPool, LcuStatus, DuelystBridge, LolFriend, OverlayData, UpdateStatus } from '../../shared/ipc';
 
-type Bridge = Lol1v1Bridge & { loadConfig(): Promise<{ apiUrl: string; version: string }> };
+type Bridge = DuelystBridge & { loadConfig(): Promise<{ apiUrl: string; version: string }> };
 
 declare global {
   interface Window {
-    lol1v1?: Bridge;
+    duelyst?: Bridge;
   }
 }
 
 /** Pont vers le processus principal Electron (LCU, Live Client Data, overlay). Inactif dans un navigateur. */
 @Injectable({ providedIn: 'root' })
 export class LolService {
-  private readonly bridge = window.lol1v1;
+  private readonly bridge = window.duelyst;
   readonly available = !!this.bridge;
 
   readonly status = signal<LcuStatus>({ connected: false, error: this.bridge ? 'Recherche du client LoL…' : 'Hors Electron : client LoL indisponible.' });

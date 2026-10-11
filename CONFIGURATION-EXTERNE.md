@@ -1,4 +1,4 @@
-# LoL 1v1 – Configuration externe (hors code)
+# Duelyst – Configuration externe (hors code)
 
 Ce fichier liste tout ce que **tu dois faire toi-même** dans des services et outils externes : comptes, consoles web, secrets, réglages du poste et du jeu. Le code ne peut pas le faire à ta place.
 
@@ -112,7 +112,7 @@ Lis et note tes conclusions (dans `08-risques-et-poc.md` ou une issue GitHub) :
 - **Docs League of Legends** (sections *League Client API* et *Game Client API*) : https://developer.riotgames.com/docs/lol
 - **Conditions d'utilisation de l'API** : https://developer.riotgames.com/terms
 
-Points à vérifier explicitement pour LoL 1v1 :
+Points à vérifier explicitement pour Duelyst :
 
 | Point | Ce que disent les docs (oct. 2026) | Impact |
 |---|---|---|
@@ -224,7 +224,7 @@ Offre gratuite (vérifiée en oct. 2026) : web service gratuit, 512 Mo de RAM, 7
    | `ConnectionStrings__Default` | chaîne **Npgsql** de [§5](#5-neon--base-postgresql) |
    | `Jwt__Key` | clé de **production** générée au [§3.1](#31-clé-jwt-jwt__key) |
 
-   `Jwt__Issuer` (`lol1v1`), `Jwt__Audience` (`lol1v1-client`) et `ASPNETCORE_ENVIRONMENT=Production` sont normalement déjà dans le Blueprint. Sinon, ajoute-les à la main.
+   `Jwt__Issuer` (`duelyst`), `Jwt__Audience` (`duelyst-client`) et `ASPNETCORE_ENVIRONMENT=Production` sont normalement déjà dans le Blueprint. Sinon, ajoute-les à la main.
 4. **Apply**. Le premier build Docker prend quelques minutes.
 
 ### Option B : Web Service Docker créé à la main
@@ -246,8 +246,8 @@ Offre gratuite (vérifiée en oct. 2026) : web service gratuit, 512 Mo de RAM, 7
      |---|---|
      | `ConnectionStrings__Default` | chaîne Npgsql Neon |
      | `Jwt__Key` | clé de production (≥ 32 caractères) |
-     | `Jwt__Issuer` | `lol1v1` |
-     | `Jwt__Audience` | `lol1v1-client` |
+     | `Jwt__Issuer` | `duelyst` |
+     | `Jwt__Audience` | `duelyst-client` |
      | `ASPNETCORE_ENVIRONMENT` | `Production` |
 
    - **Ne définis pas `PORT`** : Render le fournit et l'API l'utilise.
@@ -396,8 +396,8 @@ Données traitées : e-mail, hash du mot de passe, Riot ID, PUUID, historique de
 |---|---|---|---|---|
 | `ConnectionStrings__Default` | `Host=ep-….eu-central-1.aws.neon.tech;Database=lol1v1;Username=…;Password=…;SSL Mode=Require;Trust Server Certificate=true` | Render → Environment | Neon (§5), convertie au format Npgsql | 🟡 |
 | `Jwt__Key` | ≥ 32 caractères aléatoires (Base64 de 48 octets) | Render → Environment (prod) ; `dotnet user-secrets` (dev) | Toi, via PowerShell (§3.1) | 🟢 dev / 🟡 prod |
-| `Jwt__Issuer` | `lol1v1` | Render (ou valeur par défaut) | fixe | 🟡 |
-| `Jwt__Audience` | `lol1v1-client` | Render (ou valeur par défaut) | fixe | 🟡 |
+| `Jwt__Issuer` | `duelyst` | Render (ou valeur par défaut) | fixe | 🟡 |
+| `Jwt__Audience` | `duelyst-client` | Render (ou valeur par défaut) | fixe | 🟡 |
 | `ASPNETCORE_ENVIRONMENT` | `Production` | Render | fixe | 🟡 |
 | `PORT` | fourni par Render | **ne pas définir** | Render | — |
 | `Riot__ApiKey` | `RGAPI-…` | Render uniquement | Portail Riot (§10.2) | ⚪ |

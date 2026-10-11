@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
-import type { Lol1v1Bridge } from '../src/shared/ipc';
+import type { DuelystBridge } from '../src/shared/ipc';
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   const listener = (_e: IpcRendererEvent, payload: T) => cb(payload);
@@ -10,7 +10,7 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 // Rempli au démarrage de l'interface via loadConfig() (le preload sandboxé n'a pas accès à l'environnement).
 const config = { apiUrl: '', version: '' };
 
-const bridge: Lol1v1Bridge & { loadConfig(): Promise<{ apiUrl: string; version: string }> } = {
+const bridge: DuelystBridge & { loadConfig(): Promise<{ apiUrl: string; version: string }> } = {
   config,
   loadConfig: () => ipcRenderer.invoke('config'),
   lcu: {
@@ -49,4 +49,4 @@ const bridge: Lol1v1Bridge & { loadConfig(): Promise<{ apiUrl: string; version: 
   },
 };
 
-contextBridge.exposeInMainWorld('lol1v1', bridge);
+contextBridge.exposeInMainWorld('duelyst', bridge);

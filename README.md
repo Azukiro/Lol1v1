@@ -1,4 +1,4 @@
-# LoL 1v1
+# Duelyst
 
 Client Windows qui organise des séries de 1v1 sur League of Legends entre amis : configuration de la série, attribution des champions, suivi de la partie via les API locales du client LoL, détection des conditions de victoire et enregistrement des résultats. Specs : dossier `Documents/` (local, non versionné). Configuration des services externes : [CONFIGURATION-EXTERNE.md](CONFIGURATION-EXTERNE.md).
 
@@ -51,7 +51,8 @@ cd client && npm test
 ## Déploiement
 
 - API : `render.yaml` (Blueprint Render, Docker, `server/Dockerfile`), base Neon via `ConnectionStrings__Default`.
-- Client : chaque push sur `dev` qui touche `client/` lance `.github/workflows/release-client.yml`, qui publie la version `0.1.<n°>` dans GitHub Releases. Les apps installées la téléchargent en arrière-plan et l'installent à la fermeture (bandeau « Redémarrer maintenant » dans l'app). Build local : `API_URL=https://<service>.onrender.com npm run dist` (installeur dans `client/release/`).
+- Page vitrine « Duelyst » : `server/Api/wwwroot/index.html`, servie à la racine de l'API. `/download` redirige vers l'installeur embarqué (`/updates/launcher-setup-<version>.exe`), `/download/latest` donne version et taille (dossier surchargeable par `Launcher:UpdatesPath`).
+- Client : chaque push sur `dev` qui touche `client/` lance `.github/workflows/release-client.yml`, qui construit la version `0.1.<n°>`, la pousse dans l'image `ghcr.io/azukiro/duelyst-launcher` puis redéploie l'API (secret `RENDER_DEPLOY_HOOK`). Le Dockerfile du serveur copie cette image dans `/app/updates` : les apps installées y trouvent la mise à jour, la téléchargent en arrière-plan et l'installent à la fermeture (bandeau « Redémarrer maintenant » dans l'app). GitHub Releases est encore publié pour la transition des anciennes installations. Le paquet ghcr doit être public (Render le tire sans identifiants) ; il doit exister avant tout `docker build` du serveur. Build local : `API_URL=https://<service>.onrender.com npm run dist` (installeur dans `client/release/`).
 
 ## Choix d'implémentation à connaître
 

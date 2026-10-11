@@ -9,7 +9,7 @@ import { LolService } from '../core/lol.service';
     @if (lol.window; as win) {
       <!-- Double-clic sur la zone de déplacement : Windows agrandit / restaure tout seul. -->
       <header class="bar">
-        <span class="title">LoL 1v1 <span class="version">v{{ version }}</span></span>
+        <span class="title">Duelyst <span class="version">v{{ version }}</span></span>
         <div class="controls">
           <button title="Réduire" (click)="win.minimize()">
             <svg viewBox="0 0 12 12" width="12" height="12"><path d="M1 6h10" stroke="currentColor" stroke-width="1.2" /></svg>

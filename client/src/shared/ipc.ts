@@ -71,7 +71,7 @@ export interface UpdateStatus {
   version: string;
 }
 
-export interface Lol1v1Bridge {
+export interface DuelystBridge {
   config: { apiUrl: string; version: string };
   lcu: {
     status(): Promise<LcuStatus>;

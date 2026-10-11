@@ -53,3 +53,43 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "v${{ steps.version.outputs.version }}" --draft=false --latest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher
+          path: |
+            client/release/*.exe
+            client/release/*.exe.blockmap
+            client/release/latest.yml
+          if-no-files-found: error
+
+  # Image « scratch » qui ne contient que l'installeur : le Dockerfile du serveur la copie dans /app/updates.
+  image:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: launcher
+          path: launcher
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Construire et pousser l'image
+        working-directory: launcher
+        run: |
+          printf 'FROM scratch\nCOPY . /\n' > ../Dockerfile.launcher
+          IMAGE=ghcr.io/azukiro/duelyst-launcher
+          VERSION=$(sed -n 's/^version: //p' latest.yml)
+          docker build -f ../Dockerfile.launcher -t "$IMAGE:latest" -t "$IMAGE:$VERSION" \
+            --label org.opencontainers.image.source=https://github.com/${{ github.repository }} .
+          docker push --all-tags "$IMAGE"
+      # Deploy hook Render (Settings > Deploy Hook), à ranger dans le secret RENDER_DEPLOY_HOOK.
+      - name: Redéployer l'API
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then echo "::warning::RENDER_DEPLOY_HOOK absent, redéploiement manuel nécessaire"; exit 0; fi
+          curl -fsS -X POST "$HOOK"

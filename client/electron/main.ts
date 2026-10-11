@@ -38,7 +38,7 @@ function createMainWindow() {
     minWidth: 1024,
     minHeight: 680,
     backgroundColor: '#0b0e14',
-    title: `LoL 1v1 v${app.getVersion()}`,
+    title: `Duelyst v${app.getVersion()}`,
     // Barre de titre dessinée par l'app (TitleBarComponent) : pas de cadre Windows.
     frame: false,
     autoHideMenuBar: true,
@@ -49,7 +49,7 @@ function createMainWindow() {
       sandbox: true,
     },
   });
-  // Garde « LoL 1v1 vX.Y.Z » au lieu du <title> de la page.
+  // Garde « Duelyst vX.Y.Z » au lieu du <title> de la page.
   mainWindow.on('page-title-updated', (e) => e.preventDefault());
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url);
@@ -159,7 +159,7 @@ function registerIpc() {
 }
 
 /**
- * Mise à jour automatique depuis GitHub Releases : vérification au démarrage puis toutes les 30 min,
+ * Mise à jour automatique depuis <API>/updates (voir electron-builder.yml) : vérification au démarrage puis toutes les 30 min,
  * téléchargement en arrière-plan, installation silencieuse à la fermeture (ou tout de suite via l'interface).
  */
 let updateReady: string | null = null;
@@ -172,13 +172,13 @@ function startAutoUpdate() {
     updateReady = info.version;
     send('update:status', { state: 'ready', version: info.version });
   });
-  autoUpdater.on('error', () => undefined); // hors ligne, GitHub indisponible… on réessaiera au prochain passage
+  autoUpdater.on('error', () => undefined); // hors ligne, serveur indisponible… on réessaiera au prochain passage
   const check = () => void autoUpdater.checkForUpdates().catch(() => undefined);
   check();
   setInterval(check, 30 * 60 * 1000);
 }
 
-app.setAppUserModelId('fr.lol1v1.app');
+app.setAppUserModelId('fr.duelyst.app');
 
 // Une seule instance : un second lancement ramène la fenêtre existante puis se ferme.
 if (!app.requestSingleInstanceLock()) {

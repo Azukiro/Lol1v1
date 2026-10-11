@@ -6,7 +6,7 @@ import { AuthResponse, ChampionRef, HistoryEntry, Invitation, PresetConfig, Pres
 /** URL de l'API : fournie par Electron (API_URL), sinon localhost. */
 export const appConfig = { apiUrl: 'http://localhost:5080', version: '' };
 
-const TOKEN_KEY = 'lol1v1.token';
+const TOKEN_KEY = 'duelyst.token';
 
 export function readToken(): string | null {
   try {

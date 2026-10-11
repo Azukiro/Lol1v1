@@ -5,7 +5,9 @@ using Api.Hubs;
 using Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -20,7 +22,7 @@ builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 
 // Database:Provider=InMemory : mode démo sans PostgreSQL (données perdues à l'arrêt).
 if (builder.Configuration["Database:Provider"] == "InMemory")
-    builder.Services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase("lol1v1"));
+    builder.Services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase("duelyst"));
 else
     builder.Services.AddDbContext<AppDbContext>(o =>
         o.UseNpgsql(builder.Configuration.GetConnectionString("Default")).UseSnakeCaseNamingConvention());
@@ -61,6 +63,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SeriesLocks>();
 builder.Services.AddSingleton<ReferenceDataService>();
 builder.Services.AddSingleton<TokenService>();
+builder.Services.AddSingleton<LauncherReleaseService>();
 builder.Services.AddSingleton<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<ISeriesNotifier, SeriesNotifier>();
 builder.Services.AddScoped<SeriesService>();
@@ -88,11 +91,35 @@ app.Use(async (ctx, next) =>
     }
 });
 
+// Page vitrine (wwwroot/index.html) servie à la racine.
+app.UseDefaultFiles();
+app.UseStaticFiles();
+// Flux de mise à jour du launcher (latest.yml, installeur, blockmap) embarqué dans l'image.
+var launcher = app.Services.GetRequiredService<LauncherReleaseService>();
+if (Directory.Exists(launcher.UpdatesPath))
+{
+    var types = new FileExtensionContentTypeProvider();
+    types.Mappings[".yml"] = "text/yaml";
+    types.Mappings[".blockmap"] = "application/octet-stream";
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        RequestPath = "/updates",
+        FileProvider = new PhysicalFileProvider(launcher.UpdatesPath),
+        ContentTypeProvider = types,
+        // latest.yml change à chaque version : jamais servi depuis un cache.
+        OnPrepareResponse = ctx => { if (ctx.File.Name == "latest.yml") ctx.Context.Response.Headers.CacheControl = "no-cache"; },
+    });
+}
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", time = DateTimeOffset.UtcNow }));
+// Téléchargement du launcher depuis la page vitrine.
+app.MapGet("/download", (LauncherReleaseService releases) =>
+    releases.GetLatest() is { } l ? Results.Redirect($"/updates/{Uri.EscapeDataString(l.FileName)}") : Results.NotFound(new { error = "Aucun installeur disponible." }));
+app.MapGet("/download/latest", (LauncherReleaseService releases) =>
+    releases.GetLatest() is { } l ? Results.Ok(new { l.Version, l.Size, l.PublishedAt }) : Results.NotFound());
 app.MapControllers();
 app.MapHub<SeriesHub>("/hubs/series");
 

@@ -1,5 +1,5 @@
-appId: fr.lol1v1.app
-productName: LoL 1v1
+appId: fr.duelyst.app
+productName: Duelyst
 directories:
   output: release
 files:
@@ -10,12 +10,19 @@ files:
   - package.json
 win:
   target: nsis
+  # Nom de fichier neutre, servi tel quel par /download.
+  artifactName: launcher-setup-${version}.${ext}
 nsis:
   oneClick: true
   perMachine: false
-# Mise à jour automatique via GitHub Releases (le dépôt doit être public pour electron-updater).
+# Mise à jour automatique : le premier fournisseur est celui que l'app interroge.
+# generic = /updates de l'API (installeur embarqué dans l'image Docker du serveur).
+# github  = transition : les apps installées avant le passage au serveur y prennent la version
+#           qui bascule sur /updates. À retirer avant de passer le dépôt en privé.
 publish:
-  provider: github
-  owner: Azukiro
-  repo: Lol1v1
-  releaseType: draft
+  - provider: generic
+    url: ${env.API_URL}/updates
+  - provider: github
+    owner: Azukiro
+    repo: Lol1v1
+    releaseType: draft

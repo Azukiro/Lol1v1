@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: write   # le GITHUB_TOKEN intégré suffit pour publier la Release (pas de PAT nécessaire)
+  packages: write   # image ghcr.io de l'installeur
 
 concurrency:
   group: release-client

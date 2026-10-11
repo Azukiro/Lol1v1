@@ -124,7 +124,9 @@ function registerIpc() {
   ipcMain.handle('lcu:status', () => lcu.status());
   ipcMain.handle('lcu:pool', () => lcu.pool());
   ipcMain.handle('lcu:friends', () => lcu.friends());
-  ipcMain.handle('lcu:createLobby', (_e, puuid: string, name: string) => lcu.createLobby(puuid, name));
+  ipcMain.handle('lcu:createLobby', (_e, puuids: string[], name: string, teamSize: number) => lcu.createLobby(puuids, name, teamSize));
+  ipcMain.handle('lcu:invite', (_e, puuids: string[]) => lcu.invite(puuids));
+  ipcMain.handle('lcu:switchTeam', () => lcu.switchTeam());
   ipcMain.handle('lcu:startChampSelect', () => lcu.startChampSelect());
   ipcMain.handle('lcu:setSummonerSpells', (_e, spells: [number, number]) => lcu.setSummonerSpells(spells));
   ipcMain.handle('lcu:prepareChampSelect', (_e, championId: number, spells: [number, number] | null, lock: boolean) =>

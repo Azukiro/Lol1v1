@@ -27,6 +27,47 @@ public static class DrawService
     }
 
     /// <summary>
+    /// Miroir 2v2 : un champion par place, communs aux quatre pools, distincts entre eux (deux coéquipiers
+    /// ne peuvent pas jouer le même champion) et jamais rejoués dans la série. La place 0 suit le tirage 1v1.
+    /// </summary>
+    public static int[] DrawMirrorTeams(string seed, int roundNumber, int teamSize, IReadOnlyList<IEnumerable<int>> pools, IEnumerable<int> alreadyPlayed)
+    {
+        var played = alreadyPlayed.ToHashSet();
+        var common = pools.Skip(1).Aggregate(pools[0].ToHashSet(), (acc, p) => { acc.IntersectWith(p); return acc; });
+        var drawn = new int[teamSize];
+        for (var seat = 0; seat < teamSize; seat++)
+        {
+            var candidates = common.Where(c => !played.Contains(c)).Order().ToList();
+            if (candidates.Count == 0) throw new DomainException("Plus assez de champions communs aux quatre joueurs pour le tirage miroir.");
+            var purpose = seat == 0 ? $"round:{roundNumber}:mirror" : $"round:{roundNumber}:mirror:{seat}";
+            drawn[seat] = candidates[Rng(seed, purpose).Next(candidates.Count)];
+            played.Add(drawn[seat]);
+        }
+        return drawn;
+    }
+
+    /// <summary>
+    /// Aléatoire 2v2 : un champion par joueur dans son pool, sans répétition pour un même joueur
+    /// et quatre champions différents dans la manche.
+    /// </summary>
+    public static int[] DrawRandomTeams(string seed, int roundNumber, IReadOnlyList<(IEnumerable<int> Pool, IEnumerable<int> Played)> players)
+    {
+        var rng = Rng(seed, $"round:{roundNumber}:random-teams");
+        var taken = new HashSet<int>();
+        var drawn = new int[players.Count];
+        // Les pools les plus petits tirent en premier : moins de risque de se retrouver sans champion libre.
+        foreach (var i in Enumerable.Range(0, players.Count).OrderBy(i => players[i].Pool.Count()).ThenBy(i => i))
+        {
+            var played = players[i].Played.ToHashSet();
+            var candidates = players[i].Pool.Where(c => !played.Contains(c) && !taken.Contains(c)).Order().ToList();
+            if (candidates.Count == 0) throw new DomainException("Plus aucun champion disponible pour un des joueurs.");
+            drawn[i] = candidates[rng.Next(candidates.Count)];
+            taken.Add(drawn[i]);
+        }
+        return drawn;
+    }
+
+    /// <summary>
     /// Deck miroir : un champion parmi les entrées non consommées des deux decks.
     /// Un champion présent dans les deux decks a deux chances d'être tiré (et peut être joué deux fois).
     /// </summary>

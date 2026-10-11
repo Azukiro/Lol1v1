@@ -58,9 +58,11 @@ export interface ChampSelectState {
   spells: [number, number];
 }
 
-/** Lobby LoL courant : joueurs présents (toutes équipes). */
+/** Lobby LoL courant : joueurs présents (toutes équipes) et équipes de la partie perso (100 = bleue, 200 = rouge). */
 export interface LobbyState {
   puuids: string[];
+  team100: string[];
+  team200: string[];
 }
 
 export interface OverlayData {
@@ -82,7 +84,9 @@ export interface DuelystBridge {
     status(): Promise<LcuStatus>;
     pool(): Promise<LcuPool>;
     friends(): Promise<LolFriend[]>;
-    createLobby(opponentPuuid: string, lobbyName: string): Promise<void>;
+    createLobby(inviteePuuids: string[], lobbyName: string, teamSize: number): Promise<void>;
+    invite(puuids: string[]): Promise<void>;
+    switchTeam(): Promise<void>;
     startChampSelect(): Promise<void>;
     acceptInvitationFrom(puuid: string): Promise<boolean>;
     prepareChampSelect(championId: number, spells: [number, number] | null, lock: boolean): Promise<boolean>;

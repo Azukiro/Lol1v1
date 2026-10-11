@@ -199,3 +199,34 @@ test('lab: progress = count / threshold, OR = max, AND = mean; every tower count
   assert.equal(progress({ op: 'OR', children: [{ condition: 'KILLS', threshold: 2 }, { condition: 'TOWERS', threshold: 2 }] }, self), 1);
   assert.equal(describe({ condition: 'TOWERS', threshold: 2 }), 'Tours ≥ 2');
 });
+
+test('live events 2v2: teammate kills count for my team, CS summed per team', () => {
+  const data: LiveGameData = {
+    activePlayer: { riotId: 'Kaelis#EUW' },
+    allPlayers: [
+      { riotId: 'Kaelis#EUW', riotIdGameName: 'Kaelis', team: 'ORDER', scores: { creepScore: 20 } },
+      { riotId: 'Mira#EUW', riotIdGameName: 'Mira', team: 'ORDER', scores: { creepScore: 10 } },
+      { riotId: 'Vorn#EUW', riotIdGameName: 'Vorn', team: 'CHAOS', scores: { creepScore: 30 } },
+      { riotId: 'Thane#EUW', riotIdGameName: 'Thane', team: 'CHAOS', scores: { creepScore: 10 } },
+    ],
+    events: {
+      Events: [
+        { EventID: 1, EventName: 'ChampionKill', EventTime: 50, KillerName: 'Mira', VictimName: 'Vorn' },
+        { EventID: 2, EventName: 'ChampionKill', EventTime: 80, KillerName: 'Thane', VictimName: 'Kaelis' },
+      ],
+    },
+    gameData: { gameTime: 400 },
+  };
+  const obs = extractObservations(data, new Set());
+  assert.deepEqual(
+    obs.filter((o) => o.type === 'KILL').map((o) => [o.eventTime, o.payload.subject]),
+    [
+      [50, 'SELF'],
+      [80, 'OPPONENT'],
+    ],
+  );
+  assert.deepEqual(obs.filter((o) => o.type === 'CS').map((o) => o.eventId), ['self-10', 'self-20', 'self-30', 'view-40']);
+  const facts = localFacts(data);
+  assert.equal(facts.self.killTimes.length, 1);
+  assert.equal(facts.opponent.csSamples[0].value, 40);
+});

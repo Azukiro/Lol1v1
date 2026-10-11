@@ -27,8 +27,9 @@ import { gameName, RoundRecapComponent, RoundRecapHeadComponent } from '../share
             <button class="head" (click)="toggle(e.series.id)" [attr.aria-expanded]="expanded() === e.series.id">
               <app-avatar class="avatar neutral opp" [iconId]="e.series.opponentProfileIconId" [name]="gameName(e.series.opponentRiotId)" />
               <div class="who">
-                <div><strong>{{ gameName(e.series.opponentRiotId) }}</strong></div>
+                <div><strong>{{ opponentLabel(e.series) }}</strong></div>
                 <div class="row wrap chips">
+                  @if (e.series.teamSize > 1) { <span class="chip pink">2v2 · avec {{ e.series.partnerName }}</span> }
                   <span class="chip">BO{{ e.series.bestOf }}</span>
                   <span class="chip">{{ modeLabel[e.series.championMode] }}</span>
                   <span class="chip">{{ spellLabel[e.series.spellMode] }}</span>
@@ -57,7 +58,7 @@ import { gameName, RoundRecapComponent, RoundRecapHeadComponent } from '../share
             @if (expanded() === e.series.id) {
               <div class="recap">
                 @if (e.rounds.length) {
-                  <app-round-recap-head [opponent]="gameName(e.series.opponentRiotId)" />
+                  <app-round-recap-head [opponent]="opponentLabel(e.series)" />
                 }
                 @for (r of e.rounds; track r.number) {
                   <app-round-recap [round]="r" [mySlot]="e.series.mySlot" />
@@ -65,7 +66,9 @@ import { gameName, RoundRecapComponent, RoundRecapHeadComponent } from '../share
                   <div class="muted small">Aucune manche jouée.</div>
                 }
                 <div class="row more">
-                  <a class="btn ghost small" routerLink="/stats" [queryParams]="{ tab: 'players', player: e.series.opponentRiotId }">Face à face avec {{ gameName(e.series.opponentRiotId) }} →</a>
+                  @if (e.series.teamSize === 1) {
+                    <a class="btn ghost small" routerLink="/stats" [queryParams]="{ tab: 'players', player: e.series.opponentRiotId }">Face à face avec {{ gameName(e.series.opponentRiotId) }} →</a>
+                  }
                   <a class="btn ghost small" [routerLink]="['/series', e.series.id]">Voir la série →</a>
                 </div>
               </div>
@@ -124,6 +127,11 @@ export class HistoryPage implements OnInit {
   private readonly api = inject(ApiService);
   protected readonly ref = inject(ReferenceService);
   protected readonly gameName = gameName;
+
+  /** Adversaire en 1v1, « Pseudo1 & Pseudo2 » en 2v2. */
+  protected opponentLabel(s: SeriesSummary) {
+    return s.teamSize > 1 ? s.opponentName : gameName(s.opponentRiotId);
+  }
   protected readonly modeLabel = MODE_LABELS;
   protected readonly spellLabel = SPELL_MODE_LABELS;
   protected readonly entries = signal<HistoryEntry[]>([]);

@@ -91,7 +91,16 @@ import { ChampionCardComponent } from '../../shared/champion-card.component';
       </section>
     }
 
-    @if (waiting()) {
+    @if (waiting() && s.teamSize > 1) {
+      <div class="card waiting">
+        <h3>En attente des autres joueurs</h3>
+        <ul class="muted">
+          @for (p of others(); track p.userId) {
+            <li><span class="dot" [class.ok]="p.poolUpdatedAt" [class.wait]="!p.poolUpdatedAt"></span>{{ p.displayName }}{{ p.slot === s.mySlot ? ' (coéquipier)' : '' }}</li>
+          }
+        </ul>
+      </div>
+    } @else if (waiting()) {
       <div class="card waiting">
         <h3>En attente de {{ opponent().displayName }}</h3>
         <ul class="muted">
@@ -134,8 +143,10 @@ export class SetupPhaseComponent {
   private readonly toast = inject(ToastService);
 
   readonly state = input.required<SeriesState>();
-  protected readonly me = computed(() => this.state().players.find((p) => p.slot === this.state().mySlot)!);
+  protected readonly me = computed(() => this.state().players.find((p) => p.userId === this.state().myUserId)!);
   protected readonly opponent = computed(() => this.state().players.find((p) => p.slot !== this.state().mySlot)!);
+  /** 2v2 : les trois autres joueurs, dont on attend le pool. */
+  protected readonly others = computed(() => this.state().players.filter((p) => p.userId !== this.state().myUserId));
   protected readonly usesDeck = usesDeck;
   protected readonly mirrorDeck = computed(() => this.state().championMode === 'MIRROR_DECK');
   /** Champions proposés pour le deck : tout mon pool, ou seulement les communs en deck miroir. */

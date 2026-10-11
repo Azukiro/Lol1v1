@@ -51,6 +51,11 @@ public class Invitation
     /// <summary>Configuration de série (jsonb).</summary>
     public string Config { get; set; } = "{}";
     public InvitationStatus Status { get; set; } = InvitationStatus.PENDING;
+    /// <summary>2v2 : invitations d'un même défi (coéquipier + 2 adversaires), null en 1v1.</summary>
+    public Guid? GroupId { get; set; }
+    /// <summary>2v2 : équipe (A = celle du créateur) et place du joueur invité.</summary>
+    public Slot Team { get; set; } = Slot.B;
+    public int Seat { get; set; }
     public Guid? SeriesId { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -60,6 +65,8 @@ public class Series
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public int BestOf { get; set; }
+    /// <summary>Joueurs par équipe : 1 (1v1) ou 2 (2v2).</summary>
+    public int TeamSize { get; set; } = 1;
     public ChampionMode ChampionMode { get; set; }
     public SpellMode SpellMode { get; set; }
     /// <summary>Arbre ET/OU (jsonb).</summary>
@@ -86,7 +93,11 @@ public class SeriesPlayer
     public User User { get; set; } = null!;
     public Guid RiotAccountId { get; set; }
     public RiotAccount RiotAccount { get; set; } = null!;
+    /// <summary>Équipe du joueur (A = celle du créateur).</summary>
     public Slot Slot { get; set; }
+    /// <summary>Place dans l'équipe (0 = capitaine) : en miroir 2v2, les joueurs de même place jouent le même champion.</summary>
+    public int Seat { get; set; }
+    /// <summary>Manches gagnées par son équipe.</summary>
     public int RoundsWon { get; set; }
     /// <summary>{ "owned": [ids], "free": [ids] } (jsonb).</summary>
     public string? PoolSnapshot { get; set; }
@@ -139,9 +150,9 @@ public class Round
     public string? WinningCondition { get; set; }
     /// <summary>Labo : objectifs secrets tirés pour la manche (jsonb).</summary>
     public string? LabState { get; set; }
-    /// <summary>Joueur ayant demandé l'annulation, en attente de l'accord de l'autre.</summary>
+    /// <summary>Joueur ayant demandé l'annulation, en attente de l'accord de l'équipe adverse.</summary>
     public Guid? VoidRequestedBy { get; set; }
-    /// <summary>Votes de résolution de litige : slot du vainqueur désigné, ou "VOID".</summary>
+    /// <summary>Votes de résolution de litige par équipe : slot du vainqueur désigné, ou "VOID".</summary>
     public string? DisputeVoteA { get; set; }
     public string? DisputeVoteB { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

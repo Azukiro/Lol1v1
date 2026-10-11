@@ -241,8 +241,11 @@ export class LcuConnector extends EventEmitter {
     }
   }
 
-  /** Partie personnalisée Abîme hurlant (map 12), 1 joueur par équipe, blind pick. */
-  async createLobby(opponentPuuid: string, lobbyName: string): Promise<void> {
+  /**
+   * Partie personnalisée Abîme hurlant (map 12), blind pick, teamSize joueurs par équipe.
+   * Invite les joueurs donnés (en 2v2, d'abord le coéquipier seul : voir GameTrackerService).
+   */
+  async createLobby(inviteePuuids: string[], lobbyName: string, teamSize = 1): Promise<void> {
     const queue = await this.customAramBlindQueue();
     const create = (name: string) =>
       this.request('POST', '/lol-lobby/v2/lobby', {
@@ -254,8 +257,8 @@ export class LcuConnector extends EventEmitter {
             mutators: { id: queue.gameTypeConfigId },
             gameTypeConfig: { id: queue.gameTypeConfigId },
             spectatorPolicy: 'AllAllowed',
-            teamSize: 1,
-            maxPlayerCount: 2,
+            teamSize,
+            maxPlayerCount: 2 * teamSize,
           },
           lobbyName: name,
           lobbyPassword: '',
@@ -272,8 +275,21 @@ export class LcuConnector extends EventEmitter {
         if (i === names.length - 1 || !String(e).includes('INVALID_LOBBY_NAME')) throw e;
       }
     }
-    const opponent = await this.request<{ summonerId: number }>('GET', `/lol-summoner/v2/summoners/puuid/${encodeURIComponent(opponentPuuid)}`);
-    await this.request('POST', '/lol-lobby/v2/lobby/invitations', [{ toSummonerId: opponent.summonerId }]);
+    await this.invite(inviteePuuids);
+  }
+
+  /** Invite des joueurs dans le lobby courant. */
+  async invite(puuids: string[]): Promise<void> {
+    if (!puuids.length) return;
+    const ids = await Promise.all(
+      puuids.map((puuid) => this.request<{ summonerId: number }>('GET', `/lol-summoner/v2/summoners/puuid/${encodeURIComponent(puuid)}`)),
+    );
+    await this.request('POST', '/lol-lobby/v2/lobby/invitations', ids.map((s) => ({ toSummonerId: s.summonerId })));
+  }
+
+  /** Partie perso : passe le joueur local dans l'autre équipe (place libre requise). */
+  async switchTeam(): Promise<void> {
+    await this.request('POST', '/lol-lobby/v1/lobby/custom/switch-teams');
   }
 
   async startChampSelect(): Promise<void> {
@@ -408,13 +424,11 @@ export interface LobbySession {
   gameConfig?: { customTeam100?: LobbyMember[]; customTeam200?: LobbyMember[]; customSpectators?: LobbyMember[] };
 }
 
-/** Joueurs présents dans le lobby, toutes équipes confondues (partie perso : équipes 100 / 200). */
+/** Joueurs présents dans le lobby, toutes équipes confondues, et composition des équipes 100 / 200 (partie perso). */
 export function normalizeLobby(session: LobbySession): LobbyState {
-  const all = [
-    ...(session.members ?? []),
-    ...(session.gameConfig?.customTeam100 ?? []),
-    ...(session.gameConfig?.customTeam200 ?? []),
-    ...(session.gameConfig?.customSpectators ?? []),
-  ];
-  return { puuids: [...new Set(all.map((m) => m.puuid).filter((p): p is string => !!p))] };
+  const ids = (list: LobbyMember[] | undefined) => (list ?? []).map((m) => m.puuid).filter((p): p is string => !!p);
+  const team100 = ids(session.gameConfig?.customTeam100);
+  const team200 = ids(session.gameConfig?.customTeam200);
+  const all = [...ids(session.members), ...team100, ...team200, ...ids(session.gameConfig?.customSpectators)];
+  return { puuids: [...new Set(all)], team100, team200 };
 }

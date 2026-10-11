@@ -24,6 +24,21 @@ const CONDITIONS: { code: ConditionCode; label: string; hint: string }[] = [
   { code: 'CS', label: 'CS', hint: 'Le premier à atteindre ce nombre de minions.' },
 ];
 
+/** Rôles du 2v2, dans l'ordre de saisie. */
+type TeamRole = 'teammate' | 'opponent' | 'opponent2';
+const TEAM_ROLES: { id: TeamRole; label: string }[] = [
+  { id: 'teammate', label: 'Coéquipier' },
+  { id: 'opponent', label: 'Adversaire 1' },
+  { id: 'opponent2', label: 'Adversaire 2' },
+];
+
+/** Modes jouables en 2v2 (les decks et bans restent des duels). */
+const TEAM_MODES: ChampionMode[] = ['MIRROR', 'RANDOM'];
+const TEAM_HINTS: Partial<Record<ChampionMode, string>> = {
+  MIRROR: 'Deux champions tirés au sort : chaque équipe joue la même paire.',
+  RANDOM: 'Un champion différent pour chacun des 4, tiré au sort.',
+};
+
 const MODES: { id: ChampionMode; label: string; hint: string }[] = [
   { id: 'MIRROR', label: 'Miroir', hint: 'Le même champion pour les deux, tiré au sort.' },
   { id: 'RANDOM', label: 'Aléatoire', hint: 'Un champion différent chacun, tiré au sort.' },
@@ -69,12 +84,31 @@ const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
           }
 
           <section class="block">
-            <div class="block-head"><h3>Adversaire</h3></div>
-            <input class="input opp-input" placeholder="Pseudo#TAG" [ngModel]="opponent()" (ngModelChange)="opponent.set($event)" name="opp" autocomplete="off" />
+            <div class="block-head">
+              <h3>{{ teamSize() > 1 ? 'Joueurs' : 'Adversaire' }}</h3>
+              <div class="seg" role="radiogroup" aria-label="Mode de jeu">
+                <button role="radio" [attr.aria-checked]="teamSize() === 1" [class.on]="teamSize() === 1" (click)="setTeamSize(1)">1v1</button>
+                <button role="radio" [attr.aria-checked]="teamSize() === 2" [class.on]="teamSize() === 2" (click)="setTeamSize(2)">2v2</button>
+              </div>
+            </div>
+            @if (teamSize() > 1) {
+              <div class="team-fields">
+                @for (r of teamRoles; track r.id) {
+                  <label class="team-field" [class.active]="activeRole() === r.id" [class.mate]="r.id === 'teammate'">
+                    <span class="kicker">{{ r.label }}</span>
+                    <input class="input" placeholder="Pseudo#TAG" [ngModel]="roleValue(r.id)" (ngModelChange)="setRole(r.id, $event)" (focus)="activeRole.set(r.id)"
+                      [name]="r.id" autocomplete="off" />
+                  </label>
+                }
+              </div>
+              <p class="muted small hint">Toi et ton coéquipier contre les deux adversaires. La série démarre quand les trois ont accepté.</p>
+            } @else {
+              <input class="input opp-input" placeholder="Pseudo#TAG" [ngModel]="opponent()" (ngModelChange)="opponent.set($event)" name="opp" autocomplete="off" />
+            }
             @if (suggestions().length) {
               <div class="people">
                 @for (p of suggestions(); track p.riotId) {
-                  <button class="person" [class.on]="opponent() === p.riotId" (click)="opponent.set(p.riotId)">
+                  <button class="person" [class.on]="isChosen(p.riotId)" (click)="choose(p.riotId)">
                     <app-avatar class="avatar neutral" [iconId]="p.iconId" [name]="p.riotId" />
                     <span class="grow"><strong>{{ gameName(p.riotId) }}</strong><span class="muted">#{{ tagLine(p.riotId) }}</span></span>
                     <span class="tag">{{ p.source }}</span>
@@ -100,9 +134,9 @@ const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
             <div class="block-head"><h3>Champions</h3></div>
             <div class="choices">
               @for (m of modes; track m.id) {
-                <button class="choice" [class.on]="mode() === m.id" (click)="edit(mode, m.id)">
+                <button class="choice" [class.on]="mode() === m.id" [disabled]="!modeAllowed(m.id)" (click)="edit(mode, m.id)">
                   <strong>{{ m.label }}</strong>
-                  <span>{{ m.hint }}</span>
+                  <span>{{ modeAllowed(m.id) ? modeHint(m) : '1v1 uniquement.' }}</span>
                 </button>
               }
             </div>
@@ -123,6 +157,9 @@ const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
               <h3>Pour gagner une manche</h3>
               <span class="muted small">Clique sur OU / ET pour changer le lien entre deux conditions.</span>
             </div>
+            @if (teamSize() > 1) {
+              <p class="muted small team-note">En 2v2, tout compte par équipe : kills et tours de chacun, CS des deux joueurs cumulés.</p>
+            }
             <div class="stack">
               @for (item of items(); track $index; let i = $index) {
                 @if (i > 0) {
@@ -171,14 +208,14 @@ const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
         <aside>
           <div class="card cyan recap">
             <div class="kicker">Récapitulatif</div>
-            <h3>{{ auth.user()?.displayName }} <span class="muted">vs</span> {{ opponentName() }}</h3>
+            <h3>{{ myTeamName() }} <span class="muted">vs</span> {{ opponentName() }}</h3>
             <ul class="summary">
-              <li><span class="muted">Format</span><strong>BO{{ bestOf() }}</strong><span class="muted small">premier à {{ winsNeeded() }}</span></li>
+              <li><span class="muted">Format</span><strong>{{ teamSize() > 1 ? '2v2 · ' : '' }}BO{{ bestOf() }}</strong><span class="muted small">premier à {{ winsNeeded() }}</span></li>
               <li><span class="muted">Champions</span><strong>{{ modeLabel[mode()] }}</strong></li>
               <li><span class="muted">Sorts</span><strong>{{ spellLabel[spellMode()] }}</strong></li>
             </ul>
             <div class="win-rule">
-              <span class="muted small">Une manche est gagnée par le premier qui remplit :</span>
+              <span class="muted small">Une manche est gagnée par {{ teamSize() > 1 ? 'la première équipe qui remplit' : 'le premier qui remplit' }} :</span>
               <strong>{{ exprLabel() }}</strong>
             </div>
             @if (mode() === 'DECK') {
@@ -229,6 +266,15 @@ const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
     .preset.mine.on { border-color: var(--yellow); background: rgba(255, 201, 77, 0.1); }
 
     .opp-input { width: 100%; font-size: 15px; }
+    .team-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .team-field { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: #0a0d13; transition: border-color 0.15s; }
+    .team-field .kicker { color: var(--pink); }
+    .team-field.mate .kicker { color: var(--cyan); }
+    .team-field.active { border-color: #3a465c; }
+    .team-field .input { width: 100%; }
+    .team-note { margin: -4px 0 12px; }
+    .choice:disabled { opacity: 0.45; cursor: not-allowed; }
+    .choice:disabled:hover { border-color: var(--line); }
     .people { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; margin-top: 12px; }
     .person { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: #0a0d13; cursor: pointer; text-align: left; transition: border-color 0.15s; }
     .person:hover { border-color: #3a465c; }
@@ -279,6 +325,7 @@ const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
       .layout { grid-template-columns: 1fr; }
       aside { position: static; }
       .choices { grid-template-columns: 1fr; }
+      .team-fields { grid-template-columns: 1fr; }
     }
   `,
 })
@@ -303,6 +350,18 @@ export class NewChallengePage implements OnInit {
   readonly presetParam = input<string | undefined>(undefined, { alias: 'preset' });
   /** Format choisi au lancement rapide (?bo=5). */
   readonly bestOfParam = input<string | undefined>(undefined, { alias: 'bo' });
+  /** Revanche 2v2 : ?format=2v2&teammate=…&opponent=…&opponent2=…. */
+  readonly formatParam = input<string | undefined>(undefined, { alias: 'format' });
+  readonly teammateParam = input<string | undefined>(undefined, { alias: 'teammate' });
+  readonly opponent2Param = input<string | undefined>(undefined, { alias: 'opponent2' });
+
+  protected readonly teamRoles = TEAM_ROLES;
+  /** Joueurs par équipe : 1 (1v1) ou 2 (2v2). */
+  protected readonly teamSize = signal(1);
+  protected readonly teammate = signal('');
+  protected readonly opponent2 = signal('');
+  /** 2v2 : champ que remplit un clic sur une suggestion. */
+  protected readonly activeRole = signal<TeamRole>('teammate');
 
   protected readonly presets = signal<Preset[]>([]);
   protected readonly appliedPreset = signal<string | null>(null);
@@ -342,12 +401,70 @@ export class NewChallengePage implements OnInit {
   });
   /** Raison pour laquelle le défi ne peut pas encore partir. */
   protected readonly blocker = computed(() => {
-    if (!this.opponent().includes('#')) return 'Choisis un adversaire (Pseudo#TAG).';
+    if (this.teamSize() > 1) {
+      const ids = [this.teammate(), this.opponent(), this.opponent2()].map((x) => x.trim());
+      if (!this.teammate().includes('#')) return 'Choisis ton coéquipier (Pseudo#TAG).';
+      if (!this.opponent().includes('#') || !this.opponent2().includes('#')) return 'Choisis deux adversaires (Pseudo#TAG).';
+      if (new Set(ids.map((x) => x.toLowerCase())).size !== 3) return 'Trois joueurs différents.';
+      if (!this.modeAllowed(this.mode())) return 'En 2v2 : mode Miroir ou Aléatoire.';
+    } else if (!this.opponent().includes('#')) return 'Choisis un adversaire (Pseudo#TAG).';
     return this.exprError();
   });
 
   protected opponentName() {
-    return this.opponent().split('#')[0] || '?';
+    const name = (id: string) => id.split('#')[0] || '?';
+    return this.teamSize() > 1 ? `${name(this.opponent())} & ${name(this.opponent2())}` : name(this.opponent());
+  }
+
+  protected myTeamName() {
+    const me = this.auth.user()?.displayName ?? '';
+    return this.teamSize() > 1 ? `${me} & ${this.teammate().split('#')[0] || '?'}` : me;
+  }
+
+  protected modeAllowed(mode: ChampionMode) {
+    return this.teamSize() === 1 || TEAM_MODES.includes(mode);
+  }
+
+  protected modeHint(m: { id: ChampionMode; hint: string }) {
+    return (this.teamSize() > 1 && TEAM_HINTS[m.id]) || m.hint;
+  }
+
+  protected setTeamSize(size: number) {
+    this.teamSize.set(size);
+    if (!this.modeAllowed(this.mode())) this.edit(this.mode, 'MIRROR');
+  }
+
+  private roleSignal(role: TeamRole) {
+    return role === 'teammate' ? this.teammate : role === 'opponent' ? this.opponent : this.opponent2;
+  }
+
+  protected roleValue(role: TeamRole) {
+    return this.roleSignal(role)();
+  }
+
+  protected setRole(role: TeamRole, value: string) {
+    this.roleSignal(role).set(value);
+  }
+
+  protected isChosen(riotId: string) {
+    return this.teamSize() > 1 ? TEAM_ROLES.some((r) => this.roleValue(r.id) === riotId) : this.opponent() === riotId;
+  }
+
+  /** Suggestion cliquée : en 2v2, remplit le champ actif puis passe au suivant encore vide. */
+  protected choose(riotId: string) {
+    if (this.teamSize() === 1) {
+      this.opponent.set(riotId);
+      return;
+    }
+    const current = TEAM_ROLES.find((r) => this.roleValue(r.id) === riotId);
+    if (current) {
+      this.setRole(current.id, '');
+      this.activeRole.set(current.id);
+      return;
+    }
+    this.setRole(this.activeRole(), riotId);
+    const next = TEAM_ROLES.find((r) => !this.roleValue(r.id));
+    if (next) this.activeRole.set(next.id);
   }
 
   protected gameName(riotId: string) {
@@ -360,6 +477,11 @@ export class NewChallengePage implements OnInit {
 
   async ngOnInit() {
     this.opponent.set(this.opponentParam() ?? '');
+    if (this.formatParam() === '2v2') {
+      this.setTeamSize(2);
+      this.teammate.set(this.teammateParam() ?? '');
+      this.opponent2.set(this.opponent2Param() ?? '');
+    }
     const bo = Number(this.bestOfParam());
     if (this.bestOfs.includes(bo)) this.bestOf.set(bo);
     try {
@@ -512,8 +634,14 @@ export class NewChallengePage implements OnInit {
     this.busy.set(true);
     this.error.set('');
     try {
-      await this.api.invite(this.opponent().trim(), { bestOf: this.bestOf(), championMode: this.mode(), spellMode: this.spellMode(), winExpression: expr });
-      this.toast.success(`Défi envoyé à ${this.opponent()}. Il expire dans 24 h.`);
+      const config = { bestOf: this.bestOf(), championMode: this.mode(), spellMode: this.spellMode(), winExpression: expr };
+      if (this.teamSize() > 1) {
+        await this.api.inviteTeams(this.teammate().trim(), [this.opponent().trim(), this.opponent2().trim()], config);
+        this.toast.success(`Défi 2v2 envoyé aux trois joueurs. Il démarre quand tous ont accepté (expire dans 24 h).`);
+      } else {
+        await this.api.invite(this.opponent().trim(), config);
+        this.toast.success(`Défi envoyé à ${this.opponent()}. Il expire dans 24 h.`);
+      }
       void this.router.navigateByUrl('/');
     } catch (e) {
       this.error.set(errorMessage(e));

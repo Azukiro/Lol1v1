@@ -170,10 +170,14 @@ export class ShellComponent implements OnInit, OnDestroy {
       if (name === 'InvitationReceived' || invitation.status === 'ACCEPTED') this.lol.attention();
       if (name === 'InvitationReceived') this.toast.info(`${invitation.from.displayName} te défie : ${invitation.configLabel}`);
       if (name === 'InvitationUpdated' && invitation.status === 'ACCEPTED' && invitation.seriesId) {
-        this.toast.success(`${invitation.to.displayName} a accepté ton défi !`);
+        this.toast.success(invitation.group ? 'Tous les joueurs ont accepté : la série 2v2 commence !' : `${invitation.to.displayName} a accepté ton défi !`);
         void this.router.navigate(['/series', invitation.seriesId]);
       }
-      if (name === 'InvitationUpdated' && invitation.status === 'DECLINED') this.toast.info(`${invitation.to.displayName} a refusé ton défi.`);
+      // 2v2 : réponses intermédiaires des autres invités.
+      if (name === 'InvitationUpdated' && invitation.status === 'ACCEPTED' && !invitation.seriesId && invitation.group)
+        this.toast.info(`${invitation.to.displayName} a accepté le défi 2v2.`);
+      if (name === 'InvitationUpdated' && invitation.status === 'DECLINED')
+        this.toast.info(invitation.group ? `${invitation.to.displayName} a refusé : défi 2v2 annulé.` : `${invitation.to.displayName} a refusé ton défi.`);
     });
     try {
       await this.hub.connect();

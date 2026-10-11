@@ -2,7 +2,7 @@ import { Component, computed, effect, inject, input, signal } from '@angular/cor
 import { errorMessage } from '../../core/api.service';
 import { GameTrackerService } from '../../core/game-tracker.service';
 import { HubService } from '../../core/hub.service';
-import { MODE_LABELS, usesDeck } from '../../core/models';
+import { MODE_LABELS, teamName, usesDeck } from '../../core/models';
 import { BanPhaseComponent, SetupPhaseComponent } from './prep.components';
 import { LivePhaseComponent, LobbyPhaseComponent, PickPhaseComponent, SeriesRecapComponent } from './round.components';
 import { LabObjectiveComponent } from '../../lab/lab-objective.component';
@@ -22,12 +22,12 @@ import { DeckDrawComponent } from './deck-draw.component';
           @if (phase() !== 'done') {
           <div class="score">
             <div>
-              <div class="name">{{ me()!.displayName }}</div>
+              <div class="name">{{ myTeam() }}</div>
               <div class="pips me">@for (i of pips(); track $index) { <i [class.on]="$index < me()!.roundsWon"></i> }</div>
             </div>
             <span class="num me">{{ me()!.roundsWon }}</span><span class="sep">:</span><span class="num opp">{{ opp()!.roundsWon }}</span>
             <div>
-              <div class="name">{{ opp()!.displayName }}</div>
+              <div class="name">{{ oppTeam() }}</div>
               <div class="pips opp">@for (i of pips(); track $index) { <i [class.on]="$index < opp()!.roundsWon"></i> }</div>
             </div>
           </div>
@@ -64,8 +64,11 @@ export class SeriesPage {
   protected readonly error = signal('');
 
   protected readonly state = computed(() => this.hub.series()[this.id()] ?? null);
-  protected readonly me = computed(() => this.state()?.players.find((p) => p.slot === this.state()!.mySlot));
+  protected readonly me = computed(() => this.state()?.players.find((p) => p.userId === this.state()!.myUserId));
   protected readonly opp = computed(() => this.state()?.players.find((p) => p.slot !== this.state()!.mySlot));
+  /** Noms affichés au score : pseudo en 1v1, « Pseudo1 & Pseudo2 » en 2v2. */
+  protected readonly myTeam = computed(() => teamName(this.state()!, this.state()!.mySlot));
+  protected readonly oppTeam = computed(() => teamName(this.state()!, this.opp()!.slot));
   protected readonly round = computed(() => {
     const s = this.state();
     return s?.rounds.find((r) => r.id === s.currentRoundId) ?? null;
@@ -98,8 +101,9 @@ export class SeriesPage {
   protected readonly kicker = computed(() => {
     const s = this.state()!;
     const r = this.round();
-    const base = `${s.lab ? 'Labo · Objectifs secrets · ' : ''}BO${s.bestOf} · ${MODE_LABELS[s.championMode]}`;
-    if (s.status === 'SETUP' || s.status === 'BANS') return `Contre ${this.opp()!.displayName} · ${base} · Étape ${s.status === 'SETUP' ? 1 : 2}/2`;
+    const format = s.teamSize > 1 ? `${s.teamSize}v${s.teamSize} · ` : '';
+    const base = `${s.lab ? 'Labo · Objectifs secrets · ' : ''}${format}BO${s.bestOf} · ${MODE_LABELS[s.championMode]}`;
+    if (s.status === 'SETUP' || s.status === 'BANS') return `Contre ${this.oppTeam()} · ${base} · Étape ${s.status === 'SETUP' ? 1 : 2}/2`;
     return r ? `Manche ${r.number}${r.attempt > 1 ? ` (tentative ${r.attempt})` : ''} · ${base}` : base;
   });
 

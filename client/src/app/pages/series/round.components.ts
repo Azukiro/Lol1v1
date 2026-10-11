@@ -4,7 +4,7 @@ import { ApiService, errorMessage } from '../../core/api.service';
 import { GameTrackerService } from '../../core/game-tracker.service';
 import { HubService } from '../../core/hub.service';
 import { LolService } from '../../core/lol.service';
-import { formatGameTime, HistoryEntry, MODE_LABELS, Round, SeriesState, SlotName, SPELL_MODE_LABELS } from '../../core/models';
+import { formatGameTime, HistoryEntry, MODE_LABELS, myAssignment, Round, SeriesState, SlotName, SPELL_MODE_LABELS, teamName, teamPlayers } from '../../core/models';
 import { ReferenceService } from '../../core/reference.service';
 import { ToastService } from '../../core/toast.service';
 import { ChampionCardComponent, SpellIconComponent } from '../../shared/champion-card.component';
@@ -13,8 +13,16 @@ import { ChampIconComponent } from '../../shared/champ-icon.component';
 import { gameName, RoundRecapComponent, RoundRecapHeadComponent } from '../../shared/round-recap.component';
 import { describe, leaves, WinNode } from '../../../shared/rules-engine';
 
+/** Moi et mon adversaire direct (en 2v2 : celui de l'autre équipe à ma place). */
 function players(s: SeriesState) {
-  return { me: s.players.find((p) => p.slot === s.mySlot)!, opp: s.players.find((p) => p.slot !== s.mySlot)! };
+  const me = s.players.find((p) => p.userId === s.myUserId)!;
+  const others = s.players.filter((p) => p.slot !== s.mySlot);
+  return { me, opp: others.find((p) => p.seat === me.seat) ?? others[0] };
+}
+
+/** Nom de l'équipe adverse (en 1v1, l'adversaire). */
+function opponentsName(s: SeriesState) {
+  return teamName(s, s.mySlot === 'A' ? 'B' : 'A');
 }
 
 /** Attribution : pick aveugle (deck) et/ou choix des 2 sorts (deck de sorts). */
@@ -66,11 +74,16 @@ function players(s: SeriesState) {
           </div>
         </div>
         <div class="card pink">
-          <h3>{{ opp().displayName }} {{ oppAssignment()?.submitted ? 'a verrouillé' : 'choisit…' }}</h3>
-          <p class="muted small">Révélé quand tu verrouilles.</p>
+          @if (s.teamSize > 1) {
+            <h3>{{ othersLocked() }}/{{ s.players.length - 1 }} autres joueurs ont verrouillé</h3>
+            <p class="muted small">Révélés quand tout le monde a verrouillé.</p>
+          } @else {
+            <h3>{{ opp().displayName }} {{ oppAssignment()?.submitted ? 'a verrouillé' : 'choisit…' }}</h3>
+            <p class="muted small">Révélé quand tu verrouilles.</p>
+          }
         </div>
         @if (submitted()) {
-          <div class="card">Choix verrouillé. En attente de {{ opp().displayName }}…</div>
+          <div class="card">Choix verrouillé. En attente {{ s.teamSize > 1 ? 'des autres joueurs' : 'de ' + opp().displayName }}…</div>
         } @else {
           <button class="btn primary big" (click)="lock()" [disabled]="!canLock() || busy()">Verrouiller</button>
         }
@@ -96,8 +109,9 @@ export class PickPhaseComponent {
   readonly round = input.required<Round>();
 
   protected readonly opp = computed(() => players(this.state()).opp);
-  protected readonly mine = computed(() => this.round().assignments.find((a) => a.slot === this.state().mySlot));
-  protected readonly oppAssignment = computed(() => this.round().assignments.find((a) => a.slot !== this.state().mySlot));
+  protected readonly mine = computed(() => myAssignment(this.state(), this.round()));
+  protected readonly oppAssignment = computed(() => this.round().assignments.find((a) => a.userId === this.opp().userId));
+  protected readonly othersLocked = computed(() => this.round().assignments.filter((a) => a.userId !== this.state().myUserId && a.submitted).length);
   protected readonly submitted = computed(() => !!this.mine()?.submitted);
   protected readonly available = computed(() => this.state().me.deck.filter((d) => !d.banned && !d.consumed));
   protected readonly bannedCount = computed(() => this.state().me.deck.filter((d) => d.banned).length);
@@ -142,16 +156,18 @@ export class PickPhaseComponent {
   template: `
     @let s = state();
     <div class="grid layout">
-      <section class="versus">
-        @for (a of round().assignments; track a.slot) {
-          <div class="side" [class.me]="a.slot === s.mySlot">
-            <div class="kicker" [class.danger]="a.slot !== s.mySlot">{{ name(a.slot) }}{{ a.slot === s.mySlot ? ' · toi' : '' }}</div>
-            @if (a.championId) {
-              <app-champion-card [championId]="a.championId" [selected]="a.slot === s.mySlot" />
+      <section class="versus" [class.duo]="s.teamSize > 1">
+        @for (slot of slots(); track slot) {
+          <div class="side" [class.me]="slot === s.mySlot">
+            @for (a of teamAssignments(round(), slot); track a.userId) {
+              <div class="kicker" [class.danger]="slot !== s.mySlot">{{ playerName(a.userId) }}{{ a.userId === s.myUserId ? ' · toi' : '' }}</div>
+              @if (a.championId) {
+                <app-champion-card [championId]="a.championId" [selected]="a.userId === s.myUserId" />
+              }
+              <div class="row wrap">
+                @if (a.spell1Id) { <app-spell-icon [spellId]="a.spell1Id" /> <app-spell-icon [spellId]="a.spell2Id" /> }
+              </div>
             }
-            <div class="row wrap">
-              @if (a.spell1Id) { <app-spell-icon [spellId]="a.spell1Id" /> <app-spell-icon [spellId]="a.spell2Id" /> }
-            </div>
           </div>
         }
         <div class="vs">VS</div>
@@ -161,14 +177,18 @@ export class PickPhaseComponent {
         @if (isCreator()) {
           <div class="card cyan stack">
             <h3>Lancement automatique</h3>
-            <p class="muted small">Partie personnalisée Abîme hurlant 1v1 en blind pick : lobby créé, {{ opp().displayName }} invité, sélection démarrée dès qu'il rejoint, champion verrouillé.</p>
+            @if (s.teamSize > 1) {
+              <p class="muted small">Partie personnalisée Abîme hurlant {{ s.teamSize }}v{{ s.teamSize }} en blind pick : lobby créé, ton coéquipier invité puis {{ opponentsName() }} une fois qu'il est dans ton équipe. Sélection démarrée quand les 4 sont placés, champion verrouillé.</p>
+            } @else {
+              <p class="muted small">Partie personnalisée Abîme hurlant 1v1 en blind pick : lobby créé, {{ opp().displayName }} invité, sélection démarrée dès qu'il rejoint, champion verrouillé.</p>
+            }
             <button class="btn" (click)="launch()" [disabled]="busy() || !lol.status().connected" [title]="lol.status().connected ? '' : 'Lance le client LoL'">Relancer le lobby</button>
             <button class="btn" (click)="startSelect()" [disabled]="busy() || lol.gameflow().phase !== 'Lobby'">Démarrer la sélection</button>
           </div>
         } @else {
           <div class="card cyan">
             <h3>Lancement automatique</h3>
-            <p class="muted small">{{ opp().displayName }} crée le lobby : son invitation est acceptée et ton champion verrouillé automatiquement.</p>
+            <p class="muted small">{{ creator().displayName }} crée le lobby : son invitation est acceptée{{ s.teamSize > 1 ? ', tu rejoins ton équipe' : '' }} et ton champion verrouillé automatiquement.</p>
           </div>
         }
 
@@ -197,8 +217,8 @@ export class PickPhaseComponent {
           <summary>Création manuelle (secours)</summary>
           <ol class="muted small">
             <li>Jouer → Personnalisée → Créer une partie personnalisée.</li>
-            <li>Carte : Abîme hurlant · Joueurs par équipe : 1 · Type : Blind pick.</li>
-            <li>Invite {{ opp().riotId }}, puis démarre la partie.</li>
+            <li>Carte : Abîme hurlant · Joueurs par équipe : {{ s.teamSize }} · Type : Blind pick.</li>
+            <li>Invite {{ guestIds() }}{{ s.teamSize > 1 ? ', place chaque équipe' : '' }}, puis démarre la partie.</li>
           </ol>
         </details>
         <button class="btn ghost small" (click)="requestVoid()">Proposer d'annuler la manche</button>
@@ -210,6 +230,7 @@ export class PickPhaseComponent {
     .versus { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 80px; align-items: start; }
     .side { display: flex; flex-direction: column; gap: 12px; }
     .side app-champion-card { max-width: 220px; }
+    .duo .side app-champion-card { max-width: 150px; }
     .vs { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); font-family: var(--display); font-weight: 700; font-size: 40px; color: var(--muted); }
     .small { font-size: 12px; }
     .check { margin-top: 8px; }
@@ -228,11 +249,25 @@ export class LobbyPhaseComponent {
   readonly round = input.required<Round>();
   protected readonly busy = signal(false);
   protected readonly opp = computed(() => players(this.state()).opp);
-  protected readonly mine = computed(() => this.round().assignments.find((a) => a.slot === this.state().mySlot));
-  protected readonly isCreator = computed(() => this.state().mySlot === this.state().creatorSlot);
+  protected readonly opponentsName = computed(() => opponentsName(this.state()));
+  protected readonly mine = computed(() => myAssignment(this.state(), this.round()));
+  protected readonly creator = computed(() => teamPlayers(this.state(), 'A')[0]);
+  protected readonly isCreator = computed(() => this.creator()?.userId === this.state().myUserId);
+  protected readonly guestIds = computed(() =>
+    this.state()
+      .players.filter((p) => p.userId !== this.creator()?.userId)
+      .map((p) => p.riotId)
+      .join(', '),
+  );
 
-  protected name(slot: SlotName) {
-    return this.state().players.find((p) => p.slot === slot)?.displayName ?? slot;
+  protected readonly slots = computed<SlotName[]>(() => ['A', 'B']);
+
+  protected teamAssignments(round: Round, slot: SlotName) {
+    return round.assignments.filter((a) => a.slot === slot);
+  }
+
+  protected playerName(userId: string) {
+    return this.state().players.find((p) => p.userId === userId)?.displayName ?? '?';
   }
 
   protected spellsOk(spells: [number, number]) {
@@ -273,11 +308,15 @@ export class LobbyPhaseComponent {
     <div class="grid layout">
       <section class="stack">
         <div class="versus card">
-          @for (a of round().assignments; track a.slot) {
-            <div class="side" [class.right]="a.slot !== s.mySlot" [style.order]="a.slot === s.mySlot ? 0 : 2">
-              <div class="kicker" [class.danger]="a.slot !== s.mySlot">{{ name(a.slot) }}{{ a.slot === s.mySlot ? ' · toi' : '' }}</div>
-              <h2>{{ ref.championName(a.championId) }}</h2>
-              <span class="chip" [class.green]="a.conform" [class.pink]="!a.conform">{{ a.conform ? '✓ conforme' : '✕ non conforme' }}</span>
+          @for (slot of slots(); track slot) {
+            <div class="side" [class.right]="slot !== s.mySlot" [style.order]="slot === s.mySlot ? 0 : 2">
+              @for (a of teamAssignments(round(), slot); track a.userId) {
+                <div class="player">
+                  <div class="kicker" [class.danger]="slot !== s.mySlot">{{ playerName(a.userId) }}{{ a.userId === s.myUserId ? ' · toi' : '' }}</div>
+                  <h2>{{ ref.championName(a.championId) }}</h2>
+                  <span class="chip" [class.green]="a.conform" [class.pink]="!a.conform">{{ a.conform ? '✓ conforme' : '✕ non conforme' }}</span>
+                </div>
+              }
             </div>
           }
           <div class="mid" style="order: 1">
@@ -290,10 +329,10 @@ export class LobbyPhaseComponent {
           <div class="card pink stack">
             <h3>Manche en litige</h3>
             @for (c of s.live?.contradictions ?? []; track c) { <p class="muted small">{{ c }}</p> }
-            <p class="small">Désignez ensemble le vainqueur. En cas de désaccord, la manche est annulée et rejouée.</p>
+            <p class="small">Désignez ensemble le vainqueur{{ s.teamSize > 1 ? ' (un vote par équipe, le dernier compte)' : '' }}. En cas de désaccord, la manche est annulée et rejouée.</p>
             <div class="row wrap">
-              <button class="btn" [class.outline]="round().myDisputeVote === s.mySlot" (click)="vote(s.mySlot)">J'ai gagné</button>
-              <button class="btn" [class.outline]="round().myDisputeVote === oppSlot()" (click)="vote(oppSlot())">{{ opp().displayName }} a gagné</button>
+              <button class="btn" [class.outline]="round().myDisputeVote === s.mySlot" (click)="vote(s.mySlot)">{{ s.teamSize > 1 ? 'Mon équipe a gagné' : 'J’ai gagné' }}</button>
+              <button class="btn" [class.outline]="round().myDisputeVote === oppSlot()" (click)="vote(oppSlot())">{{ opponentsName() }} {{ s.teamSize > 1 ? 'ont' : 'a' }} gagné</button>
               <button class="btn" [class.outline]="round().myDisputeVote === 'VOID'" (click)="vote('VOID')">Annuler la manche</button>
             </div>
           </div>
@@ -304,7 +343,7 @@ export class LobbyPhaseComponent {
           <ng-content />
         } @else {
           <div class="card">
-            <div class="row"><h2>Conditions de victoire</h2><span class="spacer"></span><span class="muted small">La première atteinte gagne</span></div>
+            <div class="row"><h2>Conditions de victoire</h2><span class="spacer"></span><span class="muted small">La première atteinte gagne{{ s.teamSize > 1 ? ' · comptées par équipe, CS cumulés' : '' }}</span></div>
             <div class="conds">
               @for (leaf of conditionLeaves(); track $index) {
                 <div class="cond">
@@ -312,7 +351,7 @@ export class LobbyPhaseComponent {
                   <div class="bars">
                     @for (p of progressRows(leaf); track p.slot) {
                       <div class="bar-row">
-                        <span class="who" [class.accent]="p.mine" [class.danger]="!p.mine">{{ p.mine ? 'Toi' : opp().displayName }}</span>
+                        <span class="who" [class.accent]="p.mine" [class.danger]="!p.mine">{{ p.mine ? (s.teamSize > 1 ? 'Ton équipe' : 'Toi') : opponentsName() }}</span>
                         <div class="bar"><i [style.transform]="'scaleX(' + p.pct / 100 + ')'" [class.me]="p.mine"></i></div>
                         <span class="val">{{ p.text }}</span>
                       </div>
@@ -358,8 +397,10 @@ export class LobbyPhaseComponent {
     h2 { margin: 6px 0 10px; }
     .versus { display: flex; align-items: center; justify-content: space-between; gap: 20px;
       background: linear-gradient(110deg, rgba(25, 227, 255, 0.08), var(--panel) 45%, var(--panel) 55%, rgba(255, 51, 102, 0.08)); }
+    .side { display: flex; flex-direction: column; gap: 10px; }
     .side.right { text-align: right; }
     .side h2 { font-size: 36px; }
+    .player h2 { margin: 2px 0 6px; }
     .mid { display: flex; flex-direction: column; align-items: center; gap: 8px; }
     .vs { font-family: var(--display); font-weight: 700; font-size: 32px; color: var(--muted); }
     .conds { display: grid; gap: 16px; margin-top: 8px; }
@@ -387,7 +428,18 @@ export class LivePhaseComponent {
   readonly round = input.required<Round>();
 
   protected readonly opp = computed(() => players(this.state()).opp);
+  protected readonly opponentsName = computed(() => opponentsName(this.state()));
   protected readonly oppSlot = computed(() => this.opp().slot);
+  protected readonly slots = computed<SlotName[]>(() => ['A', 'B']);
+
+  protected teamAssignments(round: Round, slot: SlotName) {
+    return round.assignments.filter((a) => a.slot === slot);
+  }
+
+  protected playerName(userId: string) {
+    return this.state().players.find((p) => p.userId === userId)?.displayName ?? '?';
+  }
+
   protected readonly conditionLeaves = computed(() => {
     const expr = this.state().winExpression;
     return expr ? leaves(expr) : [];
@@ -397,7 +449,7 @@ export class LivePhaseComponent {
   protected readonly fmt = formatGameTime;
 
   protected name(slot: SlotName) {
-    return this.state().players.find((p) => p.slot === slot)?.displayName ?? slot;
+    return teamName(this.state(), slot) || slot;
   }
 
   protected label(leaf: WinNode) {
@@ -475,7 +527,7 @@ export class LivePhaseComponent {
         <div class="kicker">Série terminée · contre {{ oppName() }}</div>
         <h1 class="big">{{ outcome() === 'aborted' ? 'Interrompue' : outcome() === 'win' ? 'Victoire' : 'Défaite' }}</h1>
         <div class="row wrap chips">
-          <span class="chip">BO{{ s.bestOf }}</span>
+          <span class="chip">{{ s.teamSize > 1 ? s.teamSize + 'v' + s.teamSize + ' · ' : '' }}BO{{ s.bestOf }}</span>
           <span class="chip">{{ modeLabel[s.championMode] }}</span>
           <span class="chip">{{ spellLabel[s.spellMode] }}</span>
           <span class="muted small">{{ s.winExpressionLabel }}</span>
@@ -556,7 +608,7 @@ export class SeriesRecapComponent implements OnInit {
   protected readonly error = signal('');
   protected readonly me = computed(() => players(this.state()).me);
   protected readonly opp = computed(() => players(this.state()).opp);
-  protected readonly oppName = computed(() => gameName(this.opp().riotId));
+  protected readonly oppName = computed(() => (this.state().teamSize > 1 ? opponentsName(this.state()) : gameName(this.opp().riotId)));
   protected readonly outcome = computed(() => {
     const s = this.state();
     if (s.status !== 'FINISHED' || !s.winnerSlot) return 'aborted';
@@ -574,7 +626,15 @@ export class SeriesRecapComponent implements OnInit {
   }
 
   rematch() {
-    void this.router.navigate([this.state().lab ? '/labo' : '/new'], { queryParams: { opponent: this.opp().riotId } });
+    const s = this.state();
+    if (s.teamSize > 1) {
+      const me = this.me();
+      const mate = s.players.find((p) => p.slot === s.mySlot && p.userId !== me.userId);
+      const opponents = s.players.filter((p) => p.slot !== s.mySlot);
+      void this.router.navigate(['/new'], { queryParams: { format: '2v2', teammate: mate?.riotId, opponent: opponents[0]?.riotId, opponent2: opponents[1]?.riotId } });
+      return;
+    }
+    void this.router.navigate([s.lab ? '/labo' : '/new'], { queryParams: { opponent: this.opp().riotId } });
   }
 
   faceToFace() {

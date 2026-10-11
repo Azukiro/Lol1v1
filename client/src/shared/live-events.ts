@@ -1,7 +1,8 @@
 /**
  * Traduction des données de la Live Client Data API (https://127.0.0.1:2999/liveclientdata/allgamedata)
- * en observations brutes pour le serveur. Les bénéficiaires sont relatifs au joueur local (SELF / OPPONENT) :
- * le serveur les convertit en joueur absolu et croise les remontées des deux clients.
+ * en observations brutes pour le serveur. Les bénéficiaires sont relatifs à l'équipe du joueur local (SELF / OPPONENT) :
+ * le serveur les convertit en équipe absolue et croise les remontées des clients. En 1v1, l'équipe se réduit au joueur ;
+ * en 2v2, kills, first blood et tours de chaque membre comptent pour son équipe, et les CS sont cumulés.
  */
 import { CS_STEP, emptyFacts, Facts } from './rules-engine';
 
@@ -55,7 +56,14 @@ export function nameMatches(name: string | undefined, player: LivePlayer | undef
     .some((candidate) => norm(candidate) === n);
 }
 
-export function findPlayers(data: LiveGameData): { self?: LivePlayer; opponent?: LivePlayer } {
+export interface Teams {
+  self?: LivePlayer;
+  /** Mon équipe, moi compris. */
+  allies: LivePlayer[];
+  enemies: LivePlayer[];
+}
+
+export function findTeams(data: LiveGameData): Teams {
   const players = data.allPlayers ?? [];
   const active = data.activePlayer ?? {};
   const self = players.find(
@@ -64,8 +72,17 @@ export function findPlayers(data: LiveGameData): { self?: LivePlayer; opponent?:
       (active.riotIdGameName && nameMatches(active.riotIdGameName, p)) ||
       (active.summonerName && nameMatches(active.summonerName, p)),
   );
-  const opponent = self ? players.find((p) => p !== self && p.team !== self.team) : undefined;
-  return { self, opponent };
+  if (!self) return { allies: [], enemies: [] };
+  return {
+    self,
+    allies: players.filter((p) => p === self || (p.team && p.team === self.team)),
+    enemies: players.filter((p) => p !== self && p.team !== self.team),
+  };
+}
+
+/** CS cumulés d'une équipe. */
+function teamCs(team: LivePlayer[]): number {
+  return team.reduce((sum, p) => sum + (p.scores?.creepScore ?? 0), 0);
 }
 
 /**
@@ -85,11 +102,11 @@ export function turretOwner(turret: string | undefined): 'ORDER' | 'CHAOS' | nul
  */
 export function extractObservations(data: LiveGameData, seen: Set<string>): Observation[] {
   const out: Observation[] = [];
-  const { self, opponent } = findPlayers(data);
+  const { self, allies, enemies } = findTeams(data);
   if (!self) return out;
 
   const subjectOf = (name: string | undefined): Subject | null =>
-    nameMatches(name, self) ? 'SELF' : nameMatches(name, opponent) ? 'OPPONENT' : null;
+    allies.some((p) => nameMatches(name, p)) ? 'SELF' : enemies.some((p) => nameMatches(name, p)) ? 'OPPONENT' : null;
 
   const push = (o: Observation) => {
     const key = `${o.type}:${o.eventId}:${o.payload.subject}`;
@@ -103,7 +120,7 @@ export function extractObservations(data: LiveGameData, seen: Set<string>): Obse
     const id = `t${Math.round(e.EventTime * 1000)}`;
     switch (e.EventName) {
       case 'ChampionKill': {
-        // Compte si le jeu attribue le kill au joueur (y compris coup final d'une tour ou d'un minion).
+        // Compte si le jeu attribue le kill à un joueur de l'équipe (y compris coup final d'une tour ou d'un minion).
         const subject = subjectOf(e.KillerName);
         if (subject) push({ type: 'KILL', eventId: `${id}-${subject}`, eventTime: e.EventTime, payload: { subject, raw: e.KillerName } });
         break;
@@ -124,34 +141,35 @@ export function extractObservations(data: LiveGameData, seen: Set<string>): Obse
     }
   }
 
-  // CS : toujours remontés (conditions de victoire et récapitulatif), par paliers de 10.
+  // CS : toujours remontés (conditions de victoire et récapitulatif), par paliers de 10, cumulés par équipe.
   // Les seuils de CS d'une règle sont des multiples du palier : chacun tombe sur un palier déclaré.
   const time = data.gameData?.gameTime ?? 0;
-  const selfCs = self.scores?.creepScore ?? 0;
+  const selfCs = teamCs(allies);
   // Auto-déclaration : tous les paliers atteints, même si un relevé en a sauté.
   for (let t = CS_STEP; t <= selfCs; t += CS_STEP) {
     push({ type: 'CS', eventId: `self-${t}`, eventTime: time, payload: { subject: 'SELF', value: selfCs } });
   }
-  // Vue de l'adversaire, pour le contrôle de plausibilité côté serveur.
-  const oppCs = opponent?.scores?.creepScore ?? 0;
+  // Vue de l'équipe adverse, pour le contrôle de plausibilité côté serveur.
+  const oppCs = teamCs(enemies);
   const step = Math.floor(oppCs / CS_STEP) * CS_STEP;
-  if (opponent && step > 0) push({ type: 'CS', eventId: `view-${step}`, eventTime: time, payload: { subject: 'OPPONENT', value: oppCs } });
+  if (enemies.length && step > 0) push({ type: 'CS', eventId: `view-${step}`, eventTime: time, payload: { subject: 'OPPONENT', value: oppCs } });
   return out;
 }
 
-/** Faits locaux (non arbitrés) pour l'affichage immédiat de la progression. */
+/** Faits locaux (non arbitrés) par équipe, pour l'affichage immédiat de la progression. */
 export function localFacts(data: LiveGameData): { self: Facts; opponent: Facts } {
   const result = { self: emptyFacts(), opponent: emptyFacts() };
-  const { self, opponent } = findPlayers(data);
+  const { self, allies, enemies } = findTeams(data);
   if (!self) return result;
+  const inTeam = (name: string | undefined, team: LivePlayer[]) => team.some((p) => nameMatches(name, p));
   let firstTowerDone = false;
   for (const e of data.events?.Events ?? []) {
     if (e.EventName === 'ChampionKill') {
-      if (nameMatches(e.KillerName, self)) result.self.killTimes.push(e.EventTime);
-      else if (nameMatches(e.KillerName, opponent)) result.opponent.killTimes.push(e.EventTime);
+      if (inTeam(e.KillerName, allies)) result.self.killTimes.push(e.EventTime);
+      else if (inTeam(e.KillerName, enemies)) result.opponent.killTimes.push(e.EventTime);
     } else if (e.EventName === 'FirstBlood') {
-      if (nameMatches(e.Recipient, self)) result.self.firstBloodTime = e.EventTime;
-      else if (nameMatches(e.Recipient, opponent)) result.opponent.firstBloodTime = e.EventTime;
+      if (inTeam(e.Recipient, allies)) result.self.firstBloodTime = e.EventTime;
+      else if (inTeam(e.Recipient, enemies)) result.opponent.firstBloodTime = e.EventTime;
     } else if (e.EventName === 'TurretKilled') {
       const owner = turretOwner(e.TurretKilled);
       if (owner && self.team) {
@@ -163,7 +181,7 @@ export function localFacts(data: LiveGameData): { self: Facts; opponent: Facts }
     }
   }
   const time = data.gameData?.gameTime ?? 0;
-  result.self.csSamples.push({ value: self.scores?.creepScore ?? 0, time });
-  result.opponent.csSamples.push({ value: opponent?.scores?.creepScore ?? 0, time });
+  result.self.csSamples.push({ value: teamCs(allies), time });
+  result.opponent.csSamples.push({ value: teamCs(enemies), time });
   return result;
 }

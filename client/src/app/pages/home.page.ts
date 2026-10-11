@@ -88,31 +88,61 @@ import { describe } from '../../shared/rules-engine';
             <article class="card pink invite">
               <app-avatar class="avatar loss big" [iconId]="inv.from.profileIconId" [name]="inv.from.displayName" />
               <div class="grow">
-                <h3>{{ inv.from.displayName }} te défie</h3>
+                <h3>{{ inviteTitle(inv) }}</h3>
                 <div class="row wrap chips">
+                  @if (inv.group) { <span class="chip pink">2v2</span> }
                   <span class="chip">BO{{ inv.config.bestOf }}</span>
                   <span class="chip">{{ modeLabel[inv.config.championMode] }}</span>
                   <span class="chip">{{ spellLabel[inv.config.spellMode] }}</span>
                 </div>
                 <div class="muted small">{{ condLabel(inv.configLabel) }} · expire {{ inv.expiresAt | date: 'dd/MM HH:mm' }}</div>
+                @if (inv.group) {
+                  <div class="group">
+                    @for (m of inv.group; track m.player.userId) {
+                      <span class="member" [class.mate]="m.team === 'A'" [title]="statusLabel(m.status)">
+                        <span class="dot" [class.ok]="m.status === 'ACCEPTED'" [class.wait]="m.status === 'PENDING'" [class.ko]="m.status === 'DECLINED'"></span>
+                        {{ m.player.displayName }}<span class="muted"> · {{ m.team === 'A' ? 'équipe ' + inv.from.displayName : 'adversaire' }}</span>
+                      </span>
+                    }
+                  </div>
+                }
               </div>
-              <div class="stack actions">
-                <button class="btn danger-fill" (click)="accept(inv)" [disabled]="busy()">Accepter</button>
-                <button class="btn" (click)="decline(inv)" [disabled]="busy()">Refuser</button>
-              </div>
+              @if (inv.status === 'PENDING') {
+                <div class="stack actions">
+                  <button class="btn danger-fill" (click)="accept(inv)" [disabled]="busy()">Accepter</button>
+                  <button class="btn" (click)="decline(inv)" [disabled]="busy()">Refuser</button>
+                </div>
+              } @else {
+                <span class="muted small waiting">Accepté · en attente des autres</span>
+              }
             </article>
           }
           @for (inv of sent(); track inv.id) {
             <article class="card sent">
               <app-avatar class="avatar neutral" [iconId]="inv.to.profileIconId" [name]="inv.to.displayName" />
               <div class="grow">
-                <div class="who"><span class="dot wait"></span>Défi envoyé à <strong>{{ inv.to.displayName }}</strong> <span class="muted">{{ inv.to.riotId }}</span></div>
+                @if (inv.group) {
+                  <div class="who"><span class="dot wait"></span>Défi 2v2 envoyé · {{ acceptedCount(inv) }}/{{ inv.group.length }} ont accepté</div>
+                } @else {
+                  <div class="who"><span class="dot wait"></span>Défi envoyé à <strong>{{ inv.to.displayName }}</strong> <span class="muted">{{ inv.to.riotId }}</span></div>
+                }
                 <div class="row wrap chips">
+                  @if (inv.group) { <span class="chip pink">2v2</span> }
                   <span class="chip">BO{{ inv.config.bestOf }}</span>
                   <span class="chip">{{ modeLabel[inv.config.championMode] }}</span>
                   <span class="chip">{{ spellLabel[inv.config.spellMode] }}</span>
                 </div>
                 <div class="muted small">{{ condLabel(inv.configLabel) }} · expire {{ inv.expiresAt | date: 'dd/MM HH:mm' }}</div>
+                @if (inv.group) {
+                  <div class="group">
+                    @for (m of inv.group; track m.player.userId) {
+                      <span class="member" [class.mate]="m.team === 'A'" [title]="statusLabel(m.status)">
+                        <span class="dot" [class.ok]="m.status === 'ACCEPTED'" [class.wait]="m.status === 'PENDING'" [class.ko]="m.status === 'DECLINED'"></span>
+                        {{ m.player.displayName }}<span class="muted"> · {{ m.team === 'A' ? 'équipe ' + inv.from.displayName : 'adversaire' }}</span>
+                      </span>
+                    }
+                  </div>
+                }
               </div>
             </article>
           }
@@ -127,7 +157,7 @@ import { describe } from '../../shared/rules-engine';
             <a class="card current" [routerLink]="['/series', s.id]">
               <div class="score">
                 <div>
-                  <div class="name">{{ auth.user()?.displayName }}</div>
+                  <div class="name">{{ auth.user()?.displayName }}{{ s.partnerName ? ' & ' + s.partnerName : '' }}</div>
                   <div class="pips me">@for (i of pips(s); track $index) { <i [class.on]="$index < s.myWins"></i> }</div>
                 </div>
                 <span class="num me">{{ s.myWins }}</span><span class="sep">:</span><span class="num opp">{{ s.opponentWins }}</span>
@@ -236,6 +266,10 @@ import { describe } from '../../shared/rules-engine';
     .invite h3 { font-size: 18px; margin-bottom: 8px; }
     .invite .chips { margin-bottom: 8px; }
     .actions { gap: 8px; }
+    .group { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 12px; }
+    .member { display: inline-flex; align-items: center; gap: 6px; }
+    .member.mate { color: var(--cyan); }
+    .waiting { white-space: nowrap; }
     .chips { gap: 6px; }
     .grow { flex: 1; min-width: 0; }
     .small { font-size: 12px; }
@@ -396,6 +430,27 @@ export class HomePage implements OnInit, OnDestroy {
     }
   }
 
+  /** « X te défie » en 1v1 ; en 2v2, précise si je suis son coéquipier ou son adversaire. */
+  protected inviteTitle(inv: Invitation) {
+    const mine = inv.group?.find((m) => m.player.userId === this.auth.user()?.id);
+    if (!mine) return `${inv.from.displayName} te défie`;
+    if (mine.team === 'A') {
+      const opponents = inv.group!.filter((m) => m.team === 'B').map((m) => m.player.displayName);
+      return `${inv.from.displayName} t'appelle en renfort contre ${opponents.join(' & ')}`;
+    }
+    const mate = inv.group!.find((m) => m.team === 'B' && m.player.userId !== mine.player.userId);
+    const partner = inv.group!.find((m) => m.team === 'A');
+    return `${inv.from.displayName} & ${partner?.player.displayName ?? '?'} vous défient, toi et ${mate?.player.displayName ?? '?'}`;
+  }
+
+  protected acceptedCount(inv: Invitation) {
+    return inv.group?.filter((m) => m.status === 'ACCEPTED').length ?? 0;
+  }
+
+  protected statusLabel(status: string) {
+    return status === 'ACCEPTED' ? 'A accepté' : status === 'DECLINED' ? 'A refusé' : 'En attente';
+  }
+
   async accept(inv: Invitation) {
     this.busy.set(true);
     try {
@@ -404,6 +459,9 @@ export class HomePage implements OnInit, OnDestroy {
         this.tracker.setActive(res.seriesId);
         await this.hub.join(res.seriesId);
         void this.router.navigate(['/series', res.seriesId]);
+      } else {
+        this.toast.info('Défi accepté : la série démarre quand les autres joueurs auront accepté.');
+        await this.refresh();
       }
     } catch (e) {
       this.toast.error(errorMessage(e));

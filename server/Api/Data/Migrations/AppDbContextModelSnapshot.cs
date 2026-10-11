@@ -107,6 +107,14 @@ namespace Api.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("from_user_id");
 
+                    b.Property<Guid?>("GroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("group_id");
+
+                    b.Property<int>("Seat")
+                        .HasColumnType("integer")
+                        .HasColumnName("seat");
+
                     b.Property<Guid?>("SeriesId")
                         .HasColumnType("uuid")
                         .HasColumnName("series_id");
@@ -117,6 +125,12 @@ namespace Api.Data.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("status");
 
+                    b.Property<string>("Team")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("team");
+
                     b.Property<Guid>("ToUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("to_user_id");
@@ -126,6 +140,9 @@ namespace Api.Data.Migrations
 
                     b.HasIndex("FromUserId")
                         .HasDatabaseName("ix_invitation_from_user_id");
+
+                    b.HasIndex("GroupId")
+                        .HasDatabaseName("ix_invitation_group_id");
 
                     b.HasIndex("ToUserId", "Status")
                         .HasDatabaseName("ix_invitation_to_user_id_status");
@@ -435,6 +452,10 @@ namespace Api.Data.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("status");
 
+                    b.Property<int>("TeamSize")
+                        .HasColumnType("integer")
+                        .HasColumnName("team_size");
+
                     b.Property<string>("WinExpression")
                         .IsRequired()
                         .HasColumnType("jsonb")
@@ -450,6 +471,8 @@ namespace Api.Data.Migrations
                     b.ToTable("series", null, t =>
                         {
                             t.HasCheckConstraint("ck_series_best_of", "best_of IN (1,3,5,7,9,11)");
+
+                            t.HasCheckConstraint("ck_series_team_size", "team_size IN (1,2)");
                         });
                 });
 
@@ -480,6 +503,10 @@ namespace Api.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("rounds_won");
 
+                    b.Property<int>("Seat")
+                        .HasColumnType("integer")
+                        .HasColumnName("seat");
+
                     b.Property<Guid>("SeriesId")
                         .HasColumnType("uuid")
                         .HasColumnName("series_id");
@@ -507,9 +534,9 @@ namespace Api.Data.Migrations
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_series_player_user_id");
 
-                    b.HasIndex("SeriesId", "Slot")
+                    b.HasIndex("SeriesId", "Slot", "Seat")
                         .IsUnique()
-                        .HasDatabaseName("ix_series_player_series_id_slot");
+                        .HasDatabaseName("ix_series_player_series_id_slot_seat");
 
                     b.ToTable("series_player", (string)null);
                 });

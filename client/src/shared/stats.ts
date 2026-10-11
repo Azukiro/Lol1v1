@@ -37,6 +37,8 @@ export interface StatsSeries {
     opponentWins: number;
     winnerSlot: string | null;
     createdAt: string;
+    /** 2v2 : exclues des face-à-face (adversaires multiples). */
+    teamSize?: number;
   };
   rounds: StatsRound[];
   myBans: number[];
@@ -264,7 +266,7 @@ export interface OpponentSummary {
 
 export function opponents(entries: StatsSeries[]): OpponentSummary[] {
   const groups = new Map<string, StatsSeries[]>();
-  for (const e of entries) groups.set(e.series.opponentRiotId, [...(groups.get(e.series.opponentRiotId) ?? []), e]);
+  for (const e of entries.filter(isDuel)) groups.set(e.series.opponentRiotId, [...(groups.get(e.series.opponentRiotId) ?? []), e]);
   return [...groups.entries()]
     .map(([riotId, list]) => {
       const latest = chronological(list).at(-1)!;
@@ -333,8 +335,13 @@ function side(list: StatsPlayerRound[]): SideStats {
   };
 }
 
+/** Série 1v1 : seules celles-ci comptent dans les face-à-face. */
+function isDuel(e: StatsSeries): boolean {
+  return (e.series.teamSize ?? 1) === 1;
+}
+
 export function headToHead(entries: StatsSeries[], riotId: string): HeadToHead | null {
-  const list = entries.filter((e) => e.series.opponentRiotId === riotId);
+  const list = entries.filter((e) => isDuel(e) && e.series.opponentRiotId === riotId);
   const opponent = opponents(list)[0];
   if (!opponent) return null;
   const all = rounds(list);

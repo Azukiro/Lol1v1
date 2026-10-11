@@ -7,6 +7,8 @@ namespace Api.Domain;
 public sealed class SeriesConfig
 {
     [JsonPropertyName("bestOf")] public int BestOf { get; set; }
+    /// <summary>Joueurs par équipe : 1 (1v1, défaut) ou 2 (2v2).</summary>
+    [JsonPropertyName("teamSize")] public int TeamSize { get; set; } = 1;
     [JsonPropertyName("championMode")] public ChampionMode ChampionMode { get; set; }
     [JsonPropertyName("spellMode")] public SpellMode SpellMode { get; set; }
     /// <summary>Ignorée en mode labo « objectifs secrets » (chaque joueur a la sienne).</summary>
@@ -19,6 +21,7 @@ public sealed class SeriesConfig
         SeriesRules.ValidateBestOf(BestOf);
         if (!Enum.IsDefined(ChampionMode)) throw new DomainException("Mode de champion inconnu.");
         if (!Enum.IsDefined(SpellMode)) throw new DomainException("Mode de sorts inconnu.");
+        SeriesRules.ValidateTeamSize(TeamSize, ChampionMode, Lab is not null);
         if (Lab is not null) Lab.Validate();
         else Api.Domain.WinExpression.Validate(WinExpression);
     }
@@ -47,6 +50,19 @@ public static class SeriesRules
     public static void ValidateBestOf(int bestOf)
     {
         if (!AllowedBestOf.Contains(bestOf)) throw new DomainException("Le BO doit être impair, entre 1 et 11.");
+    }
+
+    public static readonly int[] AllowedTeamSizes = [1, 2];
+
+    /// <summary>
+    /// 2v2 : modes Miroir et Aléatoire seulement (decks et bans restent des duels), pas de labo.
+    /// </summary>
+    public static void ValidateTeamSize(int teamSize, ChampionMode mode, bool lab)
+    {
+        if (!AllowedTeamSizes.Contains(teamSize)) throw new DomainException("Format attendu : 1v1 ou 2v2.");
+        if (teamSize == 1) return;
+        if (mode is not (ChampionMode.MIRROR or ChampionMode.RANDOM)) throw new DomainException("En 2v2, seuls les modes Miroir et Aléatoire sont disponibles.");
+        if (lab) throw new DomainException("Les modes du labo se jouent en 1v1.");
     }
 
     public static int WinsNeeded(int bestOf) => (bestOf + 1) / 2;

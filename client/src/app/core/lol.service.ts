@@ -81,8 +81,16 @@ export class LolService {
     return this.require().lcu.friends();
   }
 
-  createLobby(opponentPuuid: string, lobbyName: string): Promise<void> {
-    return this.require().lcu.createLobby(opponentPuuid, lobbyName);
+  createLobby(inviteePuuids: string[], lobbyName: string, teamSize = 1): Promise<void> {
+    return this.require().lcu.createLobby(inviteePuuids, lobbyName, teamSize);
+  }
+
+  invite(puuids: string[]): Promise<void> {
+    return this.require().lcu.invite(puuids);
+  }
+
+  switchTeam(): Promise<void> {
+    return this.require().lcu.switchTeam();
   }
 
   prepareChampSelect(championId: number, spells: [number, number] | null, lock: boolean): Promise<boolean> {

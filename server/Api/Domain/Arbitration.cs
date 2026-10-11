@@ -57,11 +57,15 @@ public static class Arbitration
         }
     }
 
-    public static ArbitrationOutcome Evaluate(WinNode expression, IReadOnlyList<ObservedEvent> events, DateTimeOffset now) =>
-        Evaluate(_ => expression, events, now);
+    public static ArbitrationOutcome Evaluate(WinNode expression, IReadOnlyList<ObservedEvent> events, DateTimeOffset now, int csTolerance = CsTolerance) =>
+        Evaluate(_ => expression, events, now, csTolerance);
 
-    /// <summary>Variante à expression propre à chaque joueur (mode labo « objectifs secrets »).</summary>
-    public static ArbitrationOutcome Evaluate(Func<Slot, WinNode> expressionOf, IReadOnlyList<ObservedEvent> events, DateTimeOffset now)
+    /// <summary>
+    /// Variante à expression propre à chaque joueur (mode labo « objectifs secrets »).
+    /// Les slots sont des équipes : en 2v2, chaque client remonte les faits de son équipe (SELF) et de l'équipe adverse
+    /// (OPPONENT), CS cumulés ; <paramref name="csTolerance"/> s'élargit avec le nombre de joueurs dont les CS sont sommés.
+    /// </summary>
+    public static ArbitrationOutcome Evaluate(Func<Slot, WinNode> expressionOf, IReadOnlyList<ObservedEvent> events, DateTimeOffset now, int csTolerance = CsTolerance)
     {
         var outcome = new ArbitrationOutcome();
         var singleSourceTimes = new HashSet<double>();
@@ -97,7 +101,7 @@ public static class Arbitration
         foreach (var self in events.Where(e => e.Type == ObservationType.CS && e.Reporter == e.Subject && e.Value is not null))
         {
             var views = events.Where(e => e.Type == ObservationType.CS && e.Reporter != e.Subject && e.Subject == self.Subject && e.Value is not null).ToList();
-            var corroborated = views.Any(v => v.Value >= self.Value - CsTolerance);
+            var corroborated = views.Any(v => v.Value >= self.Value - csTolerance);
             if (corroborated)
                 outcome.Confirmed.Add(new ConfirmedEvent(ObservationType.CS, self.EventId, self.EventTime, self.Subject, self.Value, false));
             else if (now - self.ReceivedAt < ConfirmationDelay)

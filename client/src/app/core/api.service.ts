@@ -98,6 +98,10 @@ export class ApiService {
   invite(toRiotId: string, config: SeriesConfig) {
     return this.post<Invitation>('/invitations', { toRiotId, config });
   }
+  /** 2v2 : coéquipier + deux adversaires, la série démarre quand les trois ont accepté. */
+  inviteTeams(teammateRiotId: string, opponentRiotIds: [string, string], config: SeriesConfig) {
+    return this.post<Invitation>('/invitations', { teammateRiotId, opponentRiotIds, config: { ...config, teamSize: 2 } });
+  }
   accept(id: string) {
     return this.post<Invitation>(`/invitations/${id}/accept`);
   }

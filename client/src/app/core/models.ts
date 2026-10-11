@@ -37,6 +37,8 @@ export interface PlayerRef {
 
 export interface SeriesConfig {
   bestOf: number;
+  /** Joueurs par équipe : 1 (1v1, défaut) ou 2 (2v2). */
+  teamSize?: number;
   championMode: ChampionMode;
   spellMode: SpellMode;
   /** Absente en mode labo « objectifs secrets ». */
@@ -66,6 +68,14 @@ export interface Invitation {
   createdAt: string;
   expiresAt: string;
   seriesId: string | null;
+  /** 2v2 : les trois invités du défi, leur équipe (A = celle du créateur) et leur réponse. */
+  group: InvitationMember[] | null;
+}
+
+export interface InvitationMember {
+  player: PlayerRef;
+  team: SlotName;
+  status: string;
 }
 
 export interface SeriesSummary {
@@ -84,6 +94,9 @@ export interface SeriesSummary {
   winnerSlot: SlotName | null;
   createdAt: string;
   finishedAt: string | null;
+  /** 2v2 : opponentName réunit les deux adversaires, partnerName est le coéquipier. */
+  teamSize: number;
+  partnerName: string | null;
 }
 
 export interface HistoryPlayerRound {
@@ -118,7 +131,10 @@ export interface HistoryEntry {
 }
 
 export interface Player {
+  /** Équipe (en 1v1, le joueur). */
   slot: SlotName;
+  /** Place dans l'équipe (0 = capitaine) : en miroir 2v2, même place = même champion. */
+  seat: number;
   userId: string;
   displayName: string;
   riotId: string;
@@ -148,6 +164,8 @@ export interface SpellTokenState {
 
 export interface Assignment {
   slot: SlotName;
+  userId: string;
+  seat: number;
   championId: number | null;
   spell1Id: number | null;
   spell2Id: number | null;
@@ -207,6 +225,9 @@ export interface SeriesState {
   winExpressionLabel: string;
   winnerSlot: SlotName | null;
   mySlot: SlotName;
+  myUserId: string;
+  /** Joueurs par équipe : 1 ou 2. Slots A / B = équipes, progression live et score par équipe. */
+  teamSize: number;
   creatorSlot: SlotName;
   createdAt: string;
   finishedAt: string | null;
@@ -245,6 +266,23 @@ export const SPELL_MODE_LABELS: Record<SpellMode, string> = {
   DECK_COMPOSED: 'Deck composé',
   DECK_RANDOM: 'Deck aléatoire',
 };
+
+/** Mon attribution dans une manche (en 2v2, mon coéquipier partage mon slot). */
+export function myAssignment(s: SeriesState, round: Round | null | undefined): Assignment | undefined {
+  return round?.assignments.find((a) => a.userId === s.myUserId);
+}
+
+/** Joueurs d'une équipe, par place. */
+export function teamPlayers(s: SeriesState, slot: SlotName): Player[] {
+  return s.players.filter((p) => p.slot === slot).sort((a, b) => a.seat - b.seat);
+}
+
+/** Nom d'équipe : pseudo en 1v1, « Pseudo1 & Pseudo2 » en 2v2. */
+export function teamName(s: SeriesState, slot: SlotName): string {
+  return teamPlayers(s, slot)
+    .map((p) => p.displayName)
+    .join(' & ');
+}
 
 export function formatGameTime(seconds: number | null | undefined): string {
   if (seconds == null) return '—';

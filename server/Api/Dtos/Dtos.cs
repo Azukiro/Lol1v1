@@ -20,11 +20,15 @@ public sealed record PresetsResponse(List<PresetDto> Server, List<PresetDto> Min
 public sealed record CreatePresetRequest(string Name, PresetConfig Config);
 
 // ---- Invitations ----
-public sealed record CreateInvitationRequest(string ToRiotId, SeriesConfig Config);
+/// <summary>1v1 : ToRiotId. 2v2 (Config.TeamSize = 2) : TeammateRiotId + deux OpponentRiotIds.</summary>
+public sealed record CreateInvitationRequest(string? ToRiotId, SeriesConfig Config, string? TeammateRiotId = null, string[]? OpponentRiotIds = null);
+/// <summary>Group : en 2v2, les trois invités du défi avec leur équipe et leur réponse (null en 1v1).</summary>
 public sealed record InvitationDto(
     Guid Id, string Status, SeriesConfig Config, string ConfigLabel,
     PlayerSearchResult From, PlayerSearchResult To,
-    DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, Guid? SeriesId);
+    DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, Guid? SeriesId,
+    List<InvitationMemberDto>? Group = null);
+public sealed record InvitationMemberDto(PlayerSearchResult Player, string Team, string Status);
 
 // ---- Séries ----
 public sealed record PoolRequest(int[] ChampionIds, int[]? FreeChampionIds);
@@ -34,7 +38,9 @@ public sealed record SpellBudgetRequest(Dictionary<int, int> Tokens);
 public sealed record SeriesSummaryDto(
     Guid Id, string Status, int BestOf, string ChampionMode, string SpellMode, string WinExpressionLabel,
     string MySlot, string OpponentName, string OpponentRiotId, int? OpponentProfileIconId, int MyWins, int OpponentWins,
-    string? WinnerSlot, DateTimeOffset CreatedAt, DateTimeOffset? FinishedAt);
+    string? WinnerSlot, DateTimeOffset CreatedAt, DateTimeOffset? FinishedAt,
+    /// <summary>2v2 : OpponentName réunit les deux adversaires, PartnerName est le coéquipier.</summary>
+    int TeamSize = 1, string? PartnerName = null);
 
 /// <summary>Série de l'historique, avec le récapitulatif de chaque manche jouée.</summary>
 /// <summary>MyBans : champions que j'ai bannis ; OpponentBans : ceux que l'adversaire m'a bannis (visibles une fois révélés).</summary>
@@ -59,7 +65,11 @@ public sealed record SeriesStateDto
     public WinNode? WinExpression { get; init; }
     public string WinExpressionLabel { get; init; } = "";
     public string? WinnerSlot { get; init; }
+    /// <summary>Mon équipe (en 1v1, mon slot).</summary>
     public string MySlot { get; init; } = "";
+    public Guid MyUserId { get; init; }
+    /// <summary>Joueurs par équipe : 1 ou 2.</summary>
+    public int TeamSize { get; init; } = 1;
     public string CreatorSlot { get; init; } = "A";
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? FinishedAt { get; init; }
@@ -79,7 +89,7 @@ public sealed record RulesDto(int MinDeckSize, int BansPerPlayer, int SpellBudge
 public sealed record PlayerDto(
     string Slot, Guid UserId, string DisplayName, string RiotId, string Puuid, int? ProfileIconId, int RoundsWon,
     int PoolSize, int FreeCount, DateTimeOffset? PoolUpdatedAt, bool DeckLocked, int DeckSize,
-    bool SpellBudgetLocked, bool BansSubmitted);
+    bool SpellBudgetLocked, bool BansSubmitted, int Seat = 0);
 
 public sealed record DeckEntryDto(int ChampionId, bool Banned, bool Consumed);
 public sealed record SpellTokenDto(int SpellId, int Initial, int Left);
@@ -97,7 +107,7 @@ public sealed record OpponentDataDto(
     int[]? BansOnMe,
     List<SpellTokenDto>? SpellTokens);
 
-public sealed record AssignmentDto(string Slot, int? ChampionId, int? Spell1Id, int? Spell2Id, bool Submitted, bool Revealed, bool Conform);
+public sealed record AssignmentDto(string Slot, int? ChampionId, int? Spell1Id, int? Spell2Id, bool Submitted, bool Revealed, bool Conform, Guid UserId, int Seat = 0);
 
 public sealed record RoundDto(
     Guid Id, int Number, int Attempt, string Status, string? VoidReason, long? LolGameId,
@@ -107,6 +117,7 @@ public sealed record RoundDto(
 
 public sealed record WinningConditionDto(string Label, string? Condition, int? Threshold, double? EventTime, bool SingleSource);
 
+/// <summary>Progression par équipe (slot).</summary>
 public sealed record LiveDto(
     Dictionary<string, PlayerProgressDto> Progress,
     List<ValidatedEventDto> Events,

@@ -178,7 +178,7 @@ export class PickPhaseComponent {
           <div class="card cyan stack">
             <h3>Lancement automatique</h3>
             @if (s.teamSize > 1) {
-              <p class="muted small">Partie personnalisée Abîme hurlant {{ s.teamSize }}v{{ s.teamSize }} en blind pick : lobby créé, ton coéquipier invité puis {{ opponentsName() }} une fois qu'il est dans ton équipe. Sélection démarrée quand les 4 sont placés, champion verrouillé.</p>
+              <p class="muted small">Partie personnalisée Abîme hurlant {{ s.teamSize }}v{{ s.teamSize }} en blind pick : lobby créé, les trois autres joueurs invités ensemble et placés chacun dans son équipe. Sélection démarrée quand les 4 sont placés, champion verrouillé.</p>
             } @else {
               <p class="muted small">Partie personnalisée Abîme hurlant 1v1 en blind pick : lobby créé, {{ opp().displayName }} invité, sélection démarrée dès qu'il rejoint, champion verrouillé.</p>
             }

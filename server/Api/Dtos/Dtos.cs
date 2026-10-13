@@ -20,9 +20,13 @@ public sealed record PresetsResponse(List<PresetDto> Server, List<PresetDto> Min
 public sealed record CreatePresetRequest(string Name, PresetConfig Config);
 
 // ---- Invitations ----
-/// <summary>1v1 : ToRiotId. 2v2 (Config.TeamSize = 2) : TeammateRiotId + deux OpponentRiotIds.</summary>
-public sealed record CreateInvitationRequest(string? ToRiotId, SeriesConfig Config, string? TeammateRiotId = null, string[]? OpponentRiotIds = null);
-/// <summary>Group : en 2v2, les trois invités du défi avec leur équipe et leur réponse (null en 1v1).</summary>
+/// <summary>
+/// 1v1 : ToRiotId. 2v2 (Config.TeamSize = 2) : trois PlayerRiotIds, équipes tirées au sort au démarrage de la série
+/// (ancien format TeammateRiotId + OpponentRiotIds accepté : mêmes trois joueurs, équipes tirées au sort aussi).
+/// </summary>
+public sealed record CreateInvitationRequest(string? ToRiotId, SeriesConfig Config, string? TeammateRiotId = null, string[]? OpponentRiotIds = null,
+    string[]? PlayerRiotIds = null);
+/// <summary>Group : en 2v2, les trois invités du défi avec leur réponse (null en 1v1). Team n'a pas de sens avant le tirage.</summary>
 public sealed record InvitationDto(
     Guid Id, string Status, SeriesConfig Config, string ConfigLabel,
     PlayerSearchResult From, PlayerSearchResult To,

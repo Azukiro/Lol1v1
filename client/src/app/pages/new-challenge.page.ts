@@ -24,12 +24,12 @@ const CONDITIONS: { code: ConditionCode; label: string; hint: string }[] = [
   { code: 'CS', label: 'CS', hint: 'Le premier à atteindre ce nombre de minions.' },
 ];
 
-/** Rôles du 2v2, dans l'ordre de saisie. */
+/** Champs du 2v2, dans l'ordre de saisie (les équipes sont tirées au sort au démarrage de la série). */
 type TeamRole = 'teammate' | 'opponent' | 'opponent2';
 const TEAM_ROLES: { id: TeamRole; label: string }[] = [
-  { id: 'teammate', label: 'Coéquipier' },
-  { id: 'opponent', label: 'Adversaire 1' },
-  { id: 'opponent2', label: 'Adversaire 2' },
+  { id: 'teammate', label: 'Joueur 2' },
+  { id: 'opponent', label: 'Joueur 3' },
+  { id: 'opponent2', label: 'Joueur 4' },
 ];
 
 /** Modes jouables en 2v2 (les decks et bans restent des duels). */
@@ -94,14 +94,14 @@ const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
             @if (teamSize() > 1) {
               <div class="team-fields">
                 @for (r of teamRoles; track r.id) {
-                  <label class="team-field" [class.active]="activeRole() === r.id" [class.mate]="r.id === 'teammate'">
+                  <label class="team-field" [class.active]="activeRole() === r.id">
                     <span class="kicker">{{ r.label }}</span>
                     <input class="input" placeholder="Pseudo#TAG" [ngModel]="roleValue(r.id)" (ngModelChange)="setRole(r.id, $event)" (focus)="activeRole.set(r.id)"
                       [name]="r.id" autocomplete="off" />
                   </label>
                 }
               </div>
-              <p class="muted small hint">Toi et ton coéquipier contre les deux adversaires. La série démarre quand les trois ont accepté.</p>
+              <p class="muted small hint">Équipes tirées au sort quand les trois ont accepté : ton coéquipier sera l'un d'eux.</p>
             } @else {
               <input class="input opp-input" placeholder="Pseudo#TAG" [ngModel]="opponent()" (ngModelChange)="opponent.set($event)" name="opp" autocomplete="off" />
             }
@@ -208,7 +208,11 @@ const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
         <aside>
           <div class="card cyan recap">
             <div class="kicker">Récapitulatif</div>
-            <h3>{{ myTeamName() }} <span class="muted">vs</span> {{ opponentName() }}</h3>
+            @if (teamSize() > 1) {
+              <h3>{{ myTeamName() }} <span class="muted">· équipes au hasard</span></h3>
+            } @else {
+              <h3>{{ myTeamName() }} <span class="muted">vs</span> {{ opponentName() }}</h3>
+            }
             <ul class="summary">
               <li><span class="muted">Format</span><strong>{{ teamSize() > 1 ? '2v2 · ' : '' }}BO{{ bestOf() }}</strong><span class="muted small">premier à {{ winsNeeded() }}</span></li>
               <li><span class="muted">Champions</span><strong>{{ modeLabel[mode()] }}</strong></li>
@@ -269,7 +273,6 @@ const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
     .team-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
     .team-field { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: #0a0d13; transition: border-color 0.15s; }
     .team-field .kicker { color: var(--pink); }
-    .team-field.mate .kicker { color: var(--cyan); }
     .team-field.active { border-color: #3a465c; }
     .team-field .input { width: 100%; }
     .team-note { margin: -4px 0 12px; }
@@ -350,7 +353,7 @@ export class NewChallengePage implements OnInit {
   readonly presetParam = input<string | undefined>(undefined, { alias: 'preset' });
   /** Format choisi au lancement rapide (?bo=5). */
   readonly bestOfParam = input<string | undefined>(undefined, { alias: 'bo' });
-  /** Revanche 2v2 : ?format=2v2&teammate=…&opponent=…&opponent2=…. */
+  /** Revanche 2v2 : ?format=2v2&teammate=…&opponent=…&opponent2=… (les trois autres joueurs, équipes retirées au sort). */
   readonly formatParam = input<string | undefined>(undefined, { alias: 'format' });
   readonly teammateParam = input<string | undefined>(undefined, { alias: 'teammate' });
   readonly opponent2Param = input<string | undefined>(undefined, { alias: 'opponent2' });
@@ -403,8 +406,7 @@ export class NewChallengePage implements OnInit {
   protected readonly blocker = computed(() => {
     if (this.teamSize() > 1) {
       const ids = [this.teammate(), this.opponent(), this.opponent2()].map((x) => x.trim());
-      if (!this.teammate().includes('#')) return 'Choisis ton coéquipier (Pseudo#TAG).';
-      if (!this.opponent().includes('#') || !this.opponent2().includes('#')) return 'Choisis deux adversaires (Pseudo#TAG).';
+      if (ids.some((x) => !x.includes('#'))) return 'Choisis trois joueurs (Pseudo#TAG).';
       if (new Set(ids.map((x) => x.toLowerCase())).size !== 3) return 'Trois joueurs différents.';
       if (!this.modeAllowed(this.mode())) return 'En 2v2 : mode Miroir ou Aléatoire.';
     } else if (!this.opponent().includes('#')) return 'Choisis un adversaire (Pseudo#TAG).';
@@ -412,13 +414,14 @@ export class NewChallengePage implements OnInit {
   });
 
   protected opponentName() {
-    const name = (id: string) => id.split('#')[0] || '?';
-    return this.teamSize() > 1 ? `${name(this.opponent())} & ${name(this.opponent2())}` : name(this.opponent());
+    return this.opponent().split('#')[0] || '?';
   }
 
+  /** Moi en 1v1 ; en 2v2, les quatre joueurs (équipes pas encore tirées). */
   protected myTeamName() {
     const me = this.auth.user()?.displayName ?? '';
-    return this.teamSize() > 1 ? `${me} & ${this.teammate().split('#')[0] || '?'}` : me;
+    if (this.teamSize() === 1) return me;
+    return [me, ...TEAM_ROLES.map((r) => this.roleValue(r.id).split('#')[0] || '?')].join(', ');
   }
 
   protected modeAllowed(mode: ChampionMode) {
@@ -636,8 +639,8 @@ export class NewChallengePage implements OnInit {
     try {
       const config = { bestOf: this.bestOf(), championMode: this.mode(), spellMode: this.spellMode(), winExpression: expr };
       if (this.teamSize() > 1) {
-        await this.api.inviteTeams(this.teammate().trim(), [this.opponent().trim(), this.opponent2().trim()], config);
-        this.toast.success(`Défi 2v2 envoyé aux trois joueurs. Il démarre quand tous ont accepté (expire dans 24 h).`);
+        await this.api.inviteTeams([this.teammate().trim(), this.opponent().trim(), this.opponent2().trim()], config);
+        this.toast.success(`Défi 2v2 envoyé aux trois joueurs. Équipes tirées au sort quand tous ont accepté (expire dans 24 h).`);
       } else {
         await this.api.invite(this.opponent().trim(), config);
         this.toast.success(`Défi envoyé à ${this.opponent()}. Il expire dans 24 h.`);

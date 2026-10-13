@@ -199,12 +199,12 @@ public sealed class InvitationsController(AppDbContext db, SeriesService seriesS
         var me = await db.Users.Include(u => u.RiotAccount).FirstAsync(u => u.Id == userId);
         if (me.RiotAccount is null) throw new AppException("Lie d'abord ton compte Riot.");
 
-        // Invités et leur place : en 2v2, coéquipier en A (place 1), adversaires en B (places 0 et 1).
-        var seats = req.Config.TeamSize == 1
-            ? [(req.ToRiotId, Slot.B, 0)]
-            : new List<(string?, Slot, int)> { (req.TeammateRiotId, Slot.A, 1) }
-                .Concat((req.OpponentRiotIds ?? []).Select((id, i) => ((string?)id, Slot.B, i))).ToList();
-        if (req.Config.TeamSize == 2 && (req.OpponentRiotIds?.Length ?? 0) != 2) throw new AppException("Choisis un coéquipier et deux adversaires.");
+        // Invités : en 2v2, trois joueurs sans équipe, les équipes sont tirées au sort au démarrage de la série.
+        var guests = req.Config.TeamSize == 1
+            ? [req.ToRiotId]
+            : req.PlayerRiotIds ?? new[] { req.TeammateRiotId }.Concat(req.OpponentRiotIds ?? []).Where(id => id is not null).ToArray();
+        if (guests.Length != 2 * req.Config.TeamSize - 1) throw new AppException("Choisis trois joueurs.");
+        var seats = guests.Select((id, i) => (id, Slot.B, i)).ToList();
 
         var targets = new List<(RiotAccount Account, Slot Team, int Seat)>();
         foreach (var (riotId, team, seat) in seats)
@@ -247,14 +247,18 @@ public sealed class InvitationsController(AppDbContext db, SeriesService seriesS
             : [invitation];
         invitation.Status = InvitationStatus.ACCEPTED;
 
-        // 2v2 : la série démarre quand les trois invités ont accepté.
+        // 2v2 : la série démarre quand les trois invités ont accepté, équipes tirées au sort à ce moment.
         if (members.All(m => m.Status == InvitationStatus.ACCEPTED))
         {
             var userIds = members.Select(m => m.ToUserId).Append(invitation.FromUserId).ToList();
             var users = await db.Users.Include(u => u.RiotAccount).Where(u => userIds.Contains(u.Id)).ToListAsync();
             if (users.Any(u => u.RiotAccount is null)) throw new AppException("Tous les joueurs doivent avoir lié leur compte Riot.");
             SeatedPlayer Seated(Guid uid, Slot slot, int seat) { var u = users.First(x => x.Id == uid); return new(u, u.RiotAccount!, slot, seat); }
-            var players = members.Select(m => Seated(m.ToUserId, m.Team, m.Seat)).Prepend(Seated(invitation.FromUserId, Slot.A, 0)).ToList();
+            var ordered = members.OrderBy(m => m.Team).ThenBy(m => m.Seat).ToList();
+            var seats = config.TeamSize == 1
+                ? new[] { (Slot: Slot.B, Seat: 0) }
+                : DrawService.DrawGuestSeats(config.TeamSize, DrawService.Rng(DrawService.NewSeed(), "teams"));
+            var players = ordered.Select((m, i) => Seated(m.ToUserId, seats[i].Slot, seats[i].Seat)).Prepend(Seated(invitation.FromUserId, Slot.A, 0)).ToList();
             var series = seriesService.Create(config, players);
             foreach (var m in members) m.SeriesId = series.Id;
         }

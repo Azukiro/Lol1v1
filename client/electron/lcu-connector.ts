@@ -5,6 +5,7 @@
  */
 import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as https from 'node:https';
 import * as path from 'node:path';
@@ -242,11 +243,12 @@ export class LcuConnector extends EventEmitter {
   }
 
   /**
-   * Partie personnalisée Abîme hurlant (map 12), blind pick, teamSize joueurs par équipe.
-   * Invite les joueurs donnés (en 2v2, d'abord le coéquipier seul : voir GameTrackerService).
+   * Partie personnalisée Abîme hurlant (map 12), blind pick, teamSize places par équipe, puis invite les joueurs donnés.
+   * Lobby à places libres (2v2 : voir GameTrackerService) : protégé par un mot de passe, les invités n'en ont pas besoin.
    */
   async createLobby(inviteePuuids: string[], lobbyName: string, teamSize = 1): Promise<void> {
     const queue = await this.customAramBlindQueue();
+    const lobbyPassword = inviteePuuids.length + 1 < 2 * teamSize ? randomBytes(6).toString('hex') : '';
     const create = (name: string) =>
       this.request('POST', '/lol-lobby/v2/lobby', {
         queueId: queue.id,
@@ -261,7 +263,7 @@ export class LcuConnector extends EventEmitter {
             maxPlayerCount: 2 * teamSize,
           },
           lobbyName: name,
-          lobbyPassword: '',
+          lobbyPassword,
         },
         isCustom: true,
       });
@@ -417,6 +419,7 @@ export function normalizeChampSelect(session: ChampSelectSession): ChampSelectSt
 
 interface LobbyMember {
   puuid?: string;
+  summonerId?: number;
 }
 
 export interface LobbySession {
@@ -424,9 +427,14 @@ export interface LobbySession {
   gameConfig?: { customTeam100?: LobbyMember[]; customTeam200?: LobbyMember[]; customSpectators?: LobbyMember[] };
 }
 
-/** Joueurs présents dans le lobby, toutes équipes confondues, et composition des équipes 100 / 200 (partie perso). */
+/**
+ * Joueurs présents dans le lobby, toutes équipes confondues, et composition des équipes 100 / 200 (partie perso).
+ * Puuid absent d'une entrée d'équipe : retrouvé par summonerId dans la liste des membres.
+ */
 export function normalizeLobby(session: LobbySession): LobbyState {
-  const ids = (list: LobbyMember[] | undefined) => (list ?? []).map((m) => m.puuid).filter((p): p is string => !!p);
+  const bySummoner = new Map((session.members ?? []).filter((m) => m.summonerId && m.puuid).map((m) => [m.summonerId, m.puuid]));
+  const ids = (list: LobbyMember[] | undefined) =>
+    (list ?? []).map((m) => m.puuid || bySummoner.get(m.summonerId)).filter((p): p is string => !!p);
   const team100 = ids(session.gameConfig?.customTeam100);
   const team200 = ids(session.gameConfig?.customTeam200);
   const all = [...ids(session.members), ...team100, ...team200, ...ids(session.gameConfig?.customSpectators)];

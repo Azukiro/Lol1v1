@@ -99,9 +99,9 @@ import { describe } from '../../shared/rules-engine';
                 @if (inv.group) {
                   <div class="group">
                     @for (m of inv.group; track m.player.userId) {
-                      <span class="member" [class.mate]="m.team === 'A'" [title]="statusLabel(m.status)">
+                      <span class="member" [title]="statusLabel(m.status)">
                         <span class="dot" [class.ok]="m.status === 'ACCEPTED'" [class.wait]="m.status === 'PENDING'" [class.ko]="m.status === 'DECLINED'"></span>
-                        {{ m.player.displayName }}<span class="muted"> · {{ m.team === 'A' ? 'équipe ' + inv.from.displayName : 'adversaire' }}</span>
+                        {{ m.player.displayName }}
                       </span>
                     }
                   </div>
@@ -136,9 +136,9 @@ import { describe } from '../../shared/rules-engine';
                 @if (inv.group) {
                   <div class="group">
                     @for (m of inv.group; track m.player.userId) {
-                      <span class="member" [class.mate]="m.team === 'A'" [title]="statusLabel(m.status)">
+                      <span class="member" [title]="statusLabel(m.status)">
                         <span class="dot" [class.ok]="m.status === 'ACCEPTED'" [class.wait]="m.status === 'PENDING'" [class.ko]="m.status === 'DECLINED'"></span>
-                        {{ m.player.displayName }}<span class="muted"> · {{ m.team === 'A' ? 'équipe ' + inv.from.displayName : 'adversaire' }}</span>
+                        {{ m.player.displayName }}
                       </span>
                     }
                   </div>
@@ -268,7 +268,6 @@ import { describe } from '../../shared/rules-engine';
     .actions { gap: 8px; }
     .group { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 12px; }
     .member { display: inline-flex; align-items: center; gap: 6px; }
-    .member.mate { color: var(--cyan); }
     .waiting { white-space: nowrap; }
     .chips { gap: 6px; }
     .grow { flex: 1; min-width: 0; }
@@ -430,17 +429,10 @@ export class HomePage implements OnInit, OnDestroy {
     }
   }
 
-  /** « X te défie » en 1v1 ; en 2v2, précise si je suis son coéquipier ou son adversaire. */
+  /** « X te défie » en 1v1 ; en 2v2, équipes tirées au sort au démarrage de la série. */
   protected inviteTitle(inv: Invitation) {
-    const mine = inv.group?.find((m) => m.player.userId === this.auth.user()?.id);
-    if (!mine) return `${inv.from.displayName} te défie`;
-    if (mine.team === 'A') {
-      const opponents = inv.group!.filter((m) => m.team === 'B').map((m) => m.player.displayName);
-      return `${inv.from.displayName} t'appelle en renfort contre ${opponents.join(' & ')}`;
-    }
-    const mate = inv.group!.find((m) => m.team === 'B' && m.player.userId !== mine.player.userId);
-    const partner = inv.group!.find((m) => m.team === 'A');
-    return `${inv.from.displayName} & ${partner?.player.displayName ?? '?'} vous défient, toi et ${mate?.player.displayName ?? '?'}`;
+    if (!inv.group) return `${inv.from.displayName} te défie`;
+    return `${inv.from.displayName} lance un 2v2 · équipes tirées au sort`;
   }
 
   protected acceptedCount(inv: Invitation) {

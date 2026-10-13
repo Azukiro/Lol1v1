@@ -53,7 +53,10 @@ public class Invitation
     public InvitationStatus Status { get; set; } = InvitationStatus.PENDING;
     /// <summary>2v2 : invitations d'un même défi (coéquipier + 2 adversaires), null en 1v1.</summary>
     public Guid? GroupId { get; set; }
-    /// <summary>2v2 : équipe (A = celle du créateur) et place du joueur invité.</summary>
+    /// <summary>
+    /// 2v2 : ordre de l'invité (Team B, Seat 0..2). Les équipes de la série sont tirées au sort quand tous ont
+    /// accepté (anciennes invitations : coéquipier choisi en A, ignoré au tirage).
+    /// </summary>
     public Slot Team { get; set; } = Slot.B;
     public int Seat { get; set; }
     public Guid? SeriesId { get; set; }

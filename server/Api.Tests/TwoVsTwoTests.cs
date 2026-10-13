@@ -20,10 +20,10 @@ public class TwoVsTwoTests
         Assert.True(condition());
     }
 
-    private static async Task<JsonObject> Invite(TestPlayer creator, TestPlayer mate, TestPlayer o1, TestPlayer o2, object config)
+    private static async Task<JsonObject> Invite(TestPlayer creator, TestPlayer g1, TestPlayer g2, TestPlayer g3, object config)
     {
         var res = await creator.Http.PostAsJsonAsync("/api/v1/invitations",
-            new { config, teammateRiotId = mate.RiotId, opponentRiotIds = new[] { o1.RiotId, o2.RiotId } });
+            new { config, playerRiotIds = new[] { g1.RiotId, g2.RiotId, g3.RiotId } });
         return (await res.EnsureSuccessStatusCode().Content.ReadFromJsonAsync<JsonObject>())!;
     }
 
@@ -34,17 +34,22 @@ public class TwoVsTwoTests
         return list!.Single(i => i.To.RiotId == p.RiotId).Id.ToString();
     }
 
-    private static async Task<Guid> StartSeries(TestPlayer a1, TestPlayer a2, TestPlayer b1, TestPlayer b2, object config)
+    /// <summary>Démarre la série ; renvoie les joueurs rangés par équipe tirée au sort : A0 (créateur), A1, B0, B1.</summary>
+    private static async Task<(Guid Id, TestPlayer[] Seats)> StartSeries(TestPlayer creator, TestPlayer g1, TestPlayer g2, TestPlayer g3, object config)
     {
-        await Invite(a1, a2, b1, b2, config);
+        await Invite(creator, g1, g2, g3, config);
         string? seriesId = null;
-        foreach (var p in new[] { a2, b1, b2 })
+        foreach (var p in new[] { g1, g2, g3 })
         {
             var accepted = await (await p.Http.PostAsync($"/api/v1/invitations/{await MyInvitation(p)}/accept", null))
                 .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<JsonObject>();
             seriesId = accepted!["seriesId"]?.GetValue<string>();
         }
-        return Guid.Parse(seriesId!);
+        var id = Guid.Parse(seriesId!);
+        var all = new[] { creator, g1, g2, g3 };
+        var seats = (await creator.State(id)).Players.OrderBy(p => p.Slot).ThenBy(p => p.Seat)
+            .Select(p => all.Single(t => t.RiotId == p.RiotId)).ToArray();
+        return (id, seats);
     }
 
     [Fact]
@@ -66,7 +71,6 @@ public class TwoVsTwoTests
         var mine = await a1.Http.GetFromJsonAsync<List<InvitationDto>>("/api/v1/invitations", ApiJson.Options);
         var single = Assert.Single(mine!);
         Assert.Equal(["ACCEPTED", "PENDING", "PENDING"], single.Group!.Select(m => m.Status));
-        Assert.Equal(["A", "B", "B"], single.Group!.Select(m => m.Team));
 
         // Un refus annule le défi pour tout le monde.
         (await b1.Http.PostAsync($"/api/v1/invitations/{await MyInvitation(b1)}/decline", null)).EnsureSuccessStatusCode();
@@ -83,29 +87,56 @@ public class TwoVsTwoTests
         await using var b1 = await TestPlayer.CreateAsync(factory, "Vorn");
 
         var deck = await a1.Http.PostAsJsonAsync("/api/v1/invitations",
-            new { config = Config("DECK", TeamKills, 3), teammateRiotId = a2.RiotId, opponentRiotIds = new[] { b1.RiotId, "Ghost#EUW" } });
+            new { config = Config("DECK", TeamKills, 3), playerRiotIds = new[] { a2.RiotId, b1.RiotId, "Ghost#EUW" } });
         Assert.Equal(HttpStatusCode.BadRequest, deck.StatusCode);
 
         var twice = await a1.Http.PostAsJsonAsync("/api/v1/invitations",
-            new { config = Config("MIRROR", TeamKills), teammateRiotId = a2.RiotId, opponentRiotIds = new[] { b1.RiotId, a2.RiotId } });
+            new { config = Config("MIRROR", TeamKills), playerRiotIds = new[] { a2.RiotId, b1.RiotId, a2.RiotId } });
         Assert.Equal(HttpStatusCode.BadRequest, twice.StatusCode);
+
+        var missing = await a1.Http.PostAsJsonAsync("/api/v1/invitations",
+            new { config = Config("MIRROR", TeamKills), playerRiotIds = new[] { a2.RiotId, b1.RiotId } });
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+    }
+
+    private static string Name(TestPlayer p) => p.RiotId.Split('#')[0];
+
+    [Fact]
+    public async Task Teams_are_drawn_at_random_with_the_creator_as_team_A_captain()
+    {
+        var mates = new HashSet<string>();
+        for (var i = 0; i < 12 && mates.Count < 2; i++)
+        {
+            await using var factory = new ApiFactory();
+            await using var p1 = await TestPlayer.CreateAsync(factory, "Kaelis");
+            await using var p2 = await TestPlayer.CreateAsync(factory, "Mira");
+            await using var p3 = await TestPlayer.CreateAsync(factory, "Vorn");
+            await using var p4 = await TestPlayer.CreateAsync(factory, "Thane");
+            var (_, seats) = await StartSeries(p1, p2, p3, p4, Config("MIRROR", TeamKills));
+            Assert.Same(p1, seats[0]);
+            Assert.Equal(4, seats.Distinct().Count());
+            mates.Add(seats[1].RiotId);
+        }
+        // Sur 12 tirages, le coéquipier du créateur n'est pas toujours le même (probabilité d'échec : 3 × (1/3)^12).
+        Assert.True(mates.Count >= 2);
     }
 
     [Fact]
     public async Task Mirror_2v2_team_kills_win_the_round()
     {
         await using var factory = new ApiFactory();
-        await using var a1 = await TestPlayer.CreateAsync(factory, "Kaelis");
-        await using var a2 = await TestPlayer.CreateAsync(factory, "Mira");
-        await using var b1 = await TestPlayer.CreateAsync(factory, "Vorn");
-        await using var b2 = await TestPlayer.CreateAsync(factory, "Thane");
-        var id = await StartSeries(a1, a2, b1, b2, Config("MIRROR", TeamKills));
+        await using var p1 = await TestPlayer.CreateAsync(factory, "Kaelis");
+        await using var p2 = await TestPlayer.CreateAsync(factory, "Mira");
+        await using var p3 = await TestPlayer.CreateAsync(factory, "Vorn");
+        await using var p4 = await TestPlayer.CreateAsync(factory, "Thane");
+        var (id, seats) = await StartSeries(p1, p2, p3, p4, Config("MIRROR", TeamKills));
+        var (a1, a2, b1, b2) = (seats[0], seats[1], seats[2], seats[3]);
 
-        await a1.PutPool(id, [1, 2, 3, 4, 5]);
-        await a2.PutPool(id, [2, 3, 4, 5]);
-        await b1.PutPool(id, [3, 4, 5, 9]);
-        Assert.Equal("SETUP", (await a1.State(id)).Status);
-        await b2.PutPool(id, [3, 4, 8]);
+        await p1.PutPool(id, [1, 2, 3, 4, 5]);
+        await p2.PutPool(id, [2, 3, 4, 5]);
+        await p3.PutPool(id, [3, 4, 5, 9]);
+        Assert.Equal("SETUP", (await p1.State(id)).Status);
+        await p4.PutPool(id, [3, 4, 8]);
 
         var state = await b2.State(id);
         Assert.Equal("IN_PROGRESS", state.Status);
@@ -124,7 +155,7 @@ public class TwoVsTwoTests
         var order = a1.Events.First(e => e.Name == "LaunchLobby").Payload!.Value;
         Assert.Equal(3, order.GetProperty("guests").GetArrayLength());
 
-        foreach (var p in new[] { a1, a2, b1, b2 })
+        foreach (var p in seats)
             await p.Hub.InvokeAsync("ReportGameStarted", id, 77L, (int?)null, (int[]?)null);
 
         // Un kill chacun pour l'équipe A : 2 kills d'équipe. Vus par un joueur de chaque équipe.
@@ -140,11 +171,11 @@ public class TwoVsTwoTests
         Assert.Equal(210.5, state.Rounds[0].WinningCondition!.EventTime);
         Assert.All(state.Players.Where(p => p.Slot == "A"), p => Assert.Equal(1, p.RoundsWon));
         var finished = b1.Events.First(e => e.Name == "SeriesFinished").Payload!.Value;
-        Assert.Equal("Kaelis & Mira", finished.GetProperty("winnerName").GetString());
+        Assert.Equal($"{Name(a1)} & {Name(a2)}", finished.GetProperty("winnerName").GetString());
 
         var summary = (await b1.Http.GetFromJsonAsync<List<SeriesSummaryDto>>("/api/v1/series", ApiJson.Options))!.Single();
-        Assert.Equal("Kaelis & Mira", summary.OpponentName);
-        Assert.Equal("Thane", summary.PartnerName);
+        Assert.Equal($"{Name(a1)} & {Name(a2)}", summary.OpponentName);
+        Assert.Equal(Name(b2), summary.PartnerName);
         Assert.Equal(2, summary.TeamSize);
     }
 
@@ -152,12 +183,13 @@ public class TwoVsTwoTests
     public async Task Random_2v2_draws_four_different_champions_and_void_needs_the_other_team()
     {
         await using var factory = new ApiFactory();
-        await using var a1 = await TestPlayer.CreateAsync(factory, "Kaelis");
-        await using var a2 = await TestPlayer.CreateAsync(factory, "Mira");
-        await using var b1 = await TestPlayer.CreateAsync(factory, "Vorn");
-        await using var b2 = await TestPlayer.CreateAsync(factory, "Thane");
-        var id = await StartSeries(a1, a2, b1, b2, Config("RANDOM", TeamKills, 3));
-        foreach (var p in new[] { a1, a2, b1, b2 }) await p.PutPool(id, [1, 2, 3, 4, 5]);
+        await using var p1 = await TestPlayer.CreateAsync(factory, "Kaelis");
+        await using var p2 = await TestPlayer.CreateAsync(factory, "Mira");
+        await using var p3 = await TestPlayer.CreateAsync(factory, "Vorn");
+        await using var p4 = await TestPlayer.CreateAsync(factory, "Thane");
+        var (id, seats) = await StartSeries(p1, p2, p3, p4, Config("RANDOM", TeamKills, 3));
+        var (a1, a2, _, b2) = (seats[0], seats[1], seats[2], seats[3]);
+        foreach (var p in seats) await p.PutPool(id, [1, 2, 3, 4, 5]);
 
         var state = await a1.State(id);
         var r1 = state.Rounds.Single();

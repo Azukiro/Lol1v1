@@ -52,11 +52,20 @@ function lobbyTeams(s: SeriesState, lobby: LobbyState | null): Record<SlotName, 
   return null;
 }
 
-/** Tous les joueurs de la série sont dans le lobby, chacun dans l'équipe de son slot. */
+/**
+ * Places par équipe du lobby LoL. En 2v2, une de plus que nécessaire : les invités arrivent dans n'importe quel ordre,
+ * un joueur mal placé trouve toujours une place libre dans son équipe (sans marge, deux joueurs mal placés
+ * dans deux équipes pleines se bloqueraient l'un l'autre).
+ */
+function lobbyTeamSize(s: SeriesState): number {
+  return s.teamSize === 1 ? 1 : s.teamSize + 1;
+}
+
+/** Tous les joueurs de la série sont dans le lobby, chacun dans l'équipe de son slot, et personne d'autre. */
 function lobbyComplete(s: SeriesState, lobby: LobbyState | null): boolean {
   if (s.teamSize === 1) return guestsOf(s).every((p) => lobby?.puuids.includes(p.puuid));
   const teams = lobbyTeams(s, lobby);
-  return !!teams && s.players.every((p) => teams[p.slot].includes(p.puuid));
+  return !!teams && s.players.every((p) => teams[p.slot].includes(p.puuid)) && teams.A.length === s.teamSize && teams.B.length === s.teamSize;
 }
 
 /**
@@ -92,8 +101,6 @@ export class GameTrackerService {
   /** Tentative de manche (id:attempt) déjà traitée par chaque automatisme, pour ne le déclencher qu'une fois. */
   private autoLobbyKey: string | null = null;
   private autoSelectKey: string | null = null;
-  /** 2v2 : adversaires invités une fois le coéquipier placé (évite deux joueurs mal placés bloqués l'un par l'autre). */
-  private autoInviteKey: string | null = null;
   private teamSwitchKey = '';
   private readonly spellFixes = new Map<string, number>();
   private spellFixTimer: ReturnType<typeof setTimeout> | null = null;
@@ -153,23 +160,6 @@ export class GameTrackerService {
       untracked(() => void this.launchRound(s.id, round.id).catch((e) => this.toast.error(`Lobby non créé : ${errorMessage(e)}. Utilise « Lancer la manche ».`)));
     });
 
-    // Créateur 2v2 : adversaires invités dès que le coéquipier a rejoint mon équipe (elle est alors pleine,
-    // les adversaires arrivent forcément dans l'autre).
-    effect(() => {
-      const s = this.activeSeries();
-      const round = this.currentRound();
-      const lobby = this.lol.lobby();
-      if (!s || s.teamSize === 1 || !round || round.status !== 'LOBBY' || !this.isCreator(s)) return;
-      if (this.lol.gameflow().phase !== 'Lobby') return;
-      const teams = lobbyTeams(s, lobby);
-      if (!teams || !teamPlayers(s, 'A').every((p) => teams.A.includes(p.puuid))) return;
-      const missing = teamPlayers(s, 'B').filter((p) => !lobby!.puuids.includes(p.puuid));
-      const key = `${round.id}:${round.attempt}`;
-      if (!missing.length || this.autoInviteKey === key) return;
-      this.autoInviteKey = key;
-      untracked(() => void this.lol.invite(missing.map((p) => p.puuid)).catch((e) => this.toast.error(`Adversaires non invités : ${errorMessage(e)}. Utilise « Lancer la manche ».`)));
-    });
-
     // Créateur : sélection démarrée dès que tout le monde est dans le lobby (et, en 2v2, dans la bonne équipe).
     effect(() => {
       const s = this.activeSeries();
@@ -206,7 +196,7 @@ export class GameTrackerService {
       const me = s.players.find((p) => p.userId === s.myUserId);
       const teams = lobbyTeams(s, lobby);
       if (!me || !teams || !lobby!.puuids.includes(me.puuid) || teams[me.slot].includes(me.puuid)) return;
-      if (teams[me.slot].length >= s.teamSize) return;
+      if (teams[me.slot].length >= lobbyTeamSize(s)) return;
       const key = `${round.id}:${lobby!.team100.join()}|${lobby!.team200.join()}`;
       if (this.teamSwitchKey === key) return;
       this.teamSwitchKey = key;
@@ -354,7 +344,7 @@ export class GameTrackerService {
 
   /**
    * US-4.2 : le créateur crée le lobby Abîme hurlant blind pick et invite l'adversaire.
-   * En 2v2, seul le coéquipier est invité d'abord ; les adversaires le sont une fois qu'il a rejoint l'équipe.
+   * En 2v2, les trois autres joueurs sont invités ensemble ; chacun rejoint ensuite l'équipe de son slot.
    */
   async launchLobby() {
     // L'événement LaunchLobby peut arriver juste après la réponse à RequestLaunch.
@@ -369,14 +359,13 @@ export class GameTrackerService {
       this.toast.info(`Lobby créé, invitation envoyée à ${order.opponentRiotId}. La sélection démarre dès qu'il rejoint.`);
       return;
     }
-    const mates = (order.guests ?? []).filter((g) => g.slot === 'A');
-    this.autoInviteKey = null;
+    const guests = order.guests ?? [];
     await this.lol.createLobby(
-      mates.map((g) => g.puuid),
+      guests.map((g) => g.puuid),
       `Duel ${teamSize}v${teamSize} manche ${round?.number ?? 1}`,
-      teamSize,
+      s ? lobbyTeamSize(s) : teamSize + 1,
     );
-    this.toast.info(`Lobby ${teamSize}v${teamSize} créé : ${mates.map((g) => g.riotId).join(', ')} invité. Les adversaires suivent dès qu'il a rejoint ton équipe.`);
+    this.toast.info(`Lobby ${teamSize}v${teamSize} créé, invitations envoyées à ${guests.map((g) => g.riotId).join(', ')}. La sélection démarre quand chacun est dans son équipe.`);
   }
 
   /** Événements qui demandent une action du joueur (ou qui concluent une manche) : app au premier plan. */
@@ -426,7 +415,6 @@ export class GameTrackerService {
         // La manche rejouée relance lobby, sélection et verrouillage automatiques.
         this.autoLobbyKey = null;
         this.autoSelectKey = null;
-        this.autoInviteKey = null;
         this.preparedRoundId = null;
         break;
       case 'RoundDisputed':

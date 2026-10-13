@@ -17,6 +17,18 @@ public static class DrawService
         return new Random(BitConverter.ToInt32(hash, 0));
     }
 
+    /// <summary>
+    /// Équipes tirées au sort : places (équipe, place) des invités, dans leur ordre. Le créateur garde
+    /// la place 0 de l'équipe A (c'est lui qui crée le lobby), son coéquipier est l'un des invités au hasard.
+    /// </summary>
+    public static (Slot Slot, int Seat)[] DrawGuestSeats(int teamSize, Random rng)
+    {
+        var seats = Enumerable.Range(1, teamSize - 1).Select(s => (Slot.A, s))
+            .Concat(Enumerable.Range(0, teamSize).Select(s => (Slot.B, s))).ToArray();
+        rng.Shuffle(seats);
+        return seats;
+    }
+
     /// <summary>Miroir : un champion de l'intersection des pools, jamais rejoué dans la série.</summary>
     public static int DrawMirror(string seed, int roundNumber, IEnumerable<int> poolA, IEnumerable<int> poolB, IEnumerable<int> alreadyPlayed)
     {

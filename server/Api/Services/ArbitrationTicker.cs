@@ -5,8 +5,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Api.Services;
 
 /// <summary>
-/// Réévalue toutes les 2 s les manches en jeu : une observation vue par un seul client
-/// est validée « source unique » une fois le délai de confirmation écoulé.
+/// Réévalue toutes les 2 s les manches en jeu : une observation que l'équipe adverse n'a pas confirmée
+/// une fois le délai de confirmation écoulé met la manche en litige.
 /// </summary>
 public sealed class ArbitrationTicker(IServiceScopeFactory scopes, ILogger<ArbitrationTicker> logger) : BackgroundService
 {

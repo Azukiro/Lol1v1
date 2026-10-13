@@ -6,8 +6,11 @@
  */
 import { CS_STEP, emptyFacts, Facts } from './rules-engine';
 
-/** CLOCK : temps de jeu, envoyé seulement en mode labo (temps limite). */
-export type ObservationType = 'KILL' | 'FIRST_BLOOD' | 'TURRET' | 'CS' | 'CLOCK';
+/**
+ * CLOCK : temps de jeu, envoyé seulement en mode labo (temps limite).
+ * DENIAL : démenti d'un événement adverse introuvable dans nos données (payload.raw = type démenti).
+ */
+export type ObservationType = 'KILL' | 'FIRST_BLOOD' | 'TURRET' | 'CS' | 'CLOCK' | 'DENIAL';
 export type Subject = 'SELF' | 'OPPONENT';
 
 export interface Observation {
@@ -184,4 +187,66 @@ export function localFacts(data: LiveGameData): { self: Facts; opponent: Facts }
   result.self.csSamples.push({ value: teamCs(allies), time });
   result.opponent.csSamples.push({ value: teamCs(enemies), time });
   return result;
+}
+
+/** Demande de vérification du serveur : événement déclaré par l'équipe adverse seule. Subject relatif à ce client. */
+export interface VerifyClaim {
+  type: 'KILL' | 'FIRST_BLOOD' | 'TURRET' | 'CS';
+  eventTime: number;
+  subject: Subject;
+  value?: number | null;
+}
+
+/** Écart maximal d'horodatage avec l'événement déclaré (même tolérance que le serveur). */
+const SAME_EVENT_TOLERANCE = 0.3;
+
+/**
+ * Cherche dans nos propres données de jeu l'événement que l'autre équipe déclare.
+ * Renvoie l'observation qui le confirme (même format que extractObservations), ou null s'il est introuvable pour l'instant.
+ * CS : on renvoie toujours notre vue actuelle des CS de l'équipe concernée, le serveur juge l'écart.
+ */
+export function verifyClaim(data: LiveGameData, claim: VerifyClaim): Observation | null {
+  const { self, allies, enemies } = findTeams(data);
+  if (!self) return null;
+  const team = claim.subject === 'SELF' ? allies : enemies;
+  const time = data.gameData?.gameTime ?? 0;
+  if (claim.type === 'CS') {
+    const value = teamCs(team);
+    return { type: 'CS', eventId: `check-${Math.round(time * 1000)}`, eventTime: time, payload: { subject: claim.subject, value } };
+  }
+  const inTeam = (name: string | undefined) => team.some((p) => nameMatches(name, p));
+  const match = (data.events?.Events ?? []).find((e) => {
+    if (Math.abs(e.EventTime - claim.eventTime) > SAME_EVENT_TOLERANCE) return false;
+    switch (claim.type) {
+      case 'KILL':
+        return e.EventName === 'ChampionKill' && inTeam(e.KillerName);
+      case 'FIRST_BLOOD':
+        return e.EventName === 'FirstBlood' && inTeam(e.Recipient);
+      case 'TURRET': {
+        const owner = turretOwner(e.TurretKilled);
+        if (e.EventName !== 'TurretKilled' || !owner || !self.team) return false;
+        return (owner === self.team ? 'OPPONENT' : 'SELF') === claim.subject;
+      }
+      default:
+        return false;
+    }
+  });
+  if (!match) return null;
+  const id = `t${Math.round(match.EventTime * 1000)}`;
+  return {
+    type: claim.type,
+    eventId: claim.type === 'KILL' ? `${id}-${claim.subject}` : id,
+    eventTime: match.EventTime,
+    payload: { subject: claim.subject, raw: match.KillerName ?? match.Recipient ?? match.TurretKilled },
+  };
+}
+
+/** Démenti envoyé quand l'événement reste introuvable dans nos données. */
+export function denial(claim: VerifyClaim): Observation {
+  return {
+    type: 'DENIAL',
+    eventId: `deny-${claim.type}-t${Math.round(claim.eventTime * 1000)}-${claim.subject}`,
+    eventTime: claim.eventTime,
+    payload: { subject: claim.subject, raw: claim.type },
+  };
 }

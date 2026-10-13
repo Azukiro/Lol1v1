@@ -7,7 +7,7 @@ import type { LobbyState } from '../../shared/ipc';
 import { ReferenceService } from './reference.service';
 import { ToastService } from './toast.service';
 import { evaluate, Facts } from '../../shared/rules-engine';
-import { extractObservations, LiveGameData, localFacts } from '../../shared/live-events';
+import { denial, extractObservations, LiveGameData, localFacts, verifyClaim, VerifyClaim } from '../../shared/live-events';
 import { labObservations } from '../../shared/lab';
 
 export interface LaunchOrder {
@@ -18,6 +18,16 @@ export interface LaunchOrder {
   teamSize?: number;
   /** Invités du créateur avec leur équipe (A = la sienne). */
   guests?: { puuid: string; riotId: string; slot: SlotName }[];
+}
+
+/** Temps laissé à nos données de jeu pour montrer un événement adverse avant de le démentir (serveur : 20 s). */
+const VERIFY_WINDOW_MS = 12_000;
+
+interface PendingVerification {
+  seriesId: string;
+  roundId: string;
+  claim: VerifyClaim;
+  deadline: number;
 }
 
 /** Créateur de la série : capitaine de l'équipe A, il crée le lobby et invite les autres. */
@@ -89,6 +99,8 @@ export class GameTrackerService {
   private spellFixTimer: ReturnType<typeof setTimeout> | null = null;
   private lastChampSelectKey = '';
   private poolSentFor = new Set<string>();
+  /** Événements adverses à vérifier dans nos propres données de jeu (demandés par le serveur). */
+  private verifications: PendingVerification[] = [];
 
   constructor() {
     // Pool remonté automatiquement au démarrage de la série et à chaque nouvelle manche.
@@ -279,6 +291,7 @@ export class GameTrackerService {
       if (round.status !== 'IN_GAME') return;
       const observations = s.winExpression ? extractObservations(data, this.seen) : labObservations(data, this.seen);
       for (const o of observations) this.hub.reportObservation(s.id, o);
+      untracked(() => this.processVerifications());
     });
 
     // Fin de partie côté LoL : on retire l'overlay.
@@ -312,6 +325,27 @@ export class GameTrackerService {
       await this.hub.invoke('RequestLaunch', seriesId);
     }
     await this.launchLobby();
+  }
+
+  /**
+   * Répond aux demandes de vérification avec nos propres données : confirmation si l'événement y figure,
+   * démenti s'il n'y apparaît pas dans la fenêtre. Sans données (partie quittée), on ne répond pas : le serveur tranche au délai.
+   */
+  private processVerifications() {
+    const data = this.lol.liveData() as LiveGameData | null;
+    const round = this.currentRound();
+    const now = Date.now();
+    this.verifications = this.verifications.filter((v) => {
+      if (round?.id !== v.roundId || round.status !== 'IN_GAME') return false;
+      const confirmation = data ? verifyClaim(data, v.claim) : null;
+      if (confirmation) {
+        this.hub.reportObservation(v.seriesId, confirmation);
+        return false;
+      }
+      if (now < v.deadline) return true;
+      if (data && v.claim.type !== 'CS') this.hub.reportObservation(v.seriesId, denial(v.claim));
+      return false;
+    });
   }
 
   private isCreator(s: SeriesState): boolean {
@@ -366,6 +400,15 @@ export class GameTrackerService {
     switch (name) {
       case 'LaunchLobby':
         this.launchOrder.set({ seriesId, ...payload });
+        break;
+      case 'VerifyEvent':
+        this.verifications.push({
+          seriesId,
+          roundId: payload.roundId,
+          claim: { type: payload.type, eventTime: payload.eventTime, subject: payload.subject, value: payload.value },
+          deadline: Date.now() + VERIFY_WINDOW_MS,
+        });
+        this.processVerifications();
         break;
       case 'AssignmentReady':
         // Pas de hideOverlay ici : la manche suivante est créée dans la foulée de RoundResolved,

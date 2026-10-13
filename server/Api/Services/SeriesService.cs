@@ -383,8 +383,16 @@ public sealed class SeriesService(
             "OPPONENT" => Opponent(series, me).Id,
             _ => null,
         };
-        if (type is ObservationType.KILL or ObservationType.FIRST_BLOOD or ObservationType.TURRET or ObservationType.CS && subject is null)
+        if (type is ObservationType.KILL or ObservationType.FIRST_BLOOD or ObservationType.TURRET or ObservationType.CS or ObservationType.DENIAL && subject is null)
             throw new AppException("Bénéficiaire (subject) requis : SELF ou OPPONENT.");
+        // Démenti : le type démenti est transmis dans payload.raw.
+        ObservationType? denied = null;
+        if (type == ObservationType.DENIAL)
+        {
+            if (!Enum.TryParse<ObservationType>(report.Payload?.Raw, out var d) || d is not (ObservationType.KILL or ObservationType.FIRST_BLOOD or ObservationType.TURRET))
+                throw new AppException("Démenti : type démenti invalide.");
+            denied = d;
+        }
 
         var obs = new Observation
         {
@@ -395,16 +403,46 @@ public sealed class SeriesService(
             EventTime = report.EventTime,
             Payload = JsonSerializer.Serialize(report.Payload ?? new ObservationPayload(null, null, null), Json),
             SubjectPlayerId = subject,
-            Value = report.Payload?.Value,
+            Value = denied is { } dt ? (int)dt : report.Payload?.Value,
             ReceivedAt = clock.GetUtcNow(),
         };
         round.Observations.Add(obs);
         db.Observations.Add(obs);
+        RequestVerification(series, round, me, obs);
         Arbitrate(series, round);
         return Task.CompletedTask;
     });
 
-    /// <summary>Réévaluation périodique (validation « source unique » après le délai).</summary>
+    /// <summary>
+    /// Un événement déclaré par une seule équipe est soumis aux clients de l'équipe adverse (VerifyEvent) :
+    /// chacun le cherche dans ses propres données de jeu et le remonte s'il le trouve, ou le dément (DENIAL).
+    /// Sans réponse dans <see cref="Arbitration.ConfirmationDelay"/>, la manche passe en litige.
+    /// </summary>
+    private void RequestVerification(Series series, Round round, SeriesPlayer me, Observation obs)
+    {
+        if (obs.SubjectPlayerId is not { } subjectId) return;
+        var subject = SlotOf(series, subjectId);
+        // CS : seule l'auto-déclaration est à corroborer (la vue adverse sert de confirmation).
+        if (obs.Type == ObservationType.CS ? subject != me.Slot : obs.Type is not (ObservationType.KILL or ObservationType.FIRST_BLOOD or ObservationType.TURRET))
+            return;
+        var other = me.Slot.Other();
+        var alreadySeen = round.Observations.Any(o => SlotOf(series, o.ReportedByPlayerId) == other && o.Type == obs.Type && o.SubjectPlayerId is { } s && SlotOf(series, s) == subject
+            && (obs.Type == ObservationType.CS
+                ? o.Value >= obs.Value - Arbitration.CsTolerance * series.TeamSize
+                : Math.Abs(o.EventTime - obs.EventTime) <= Arbitration.SameEventTolerance));
+        if (alreadySeen) return;
+        foreach (var p in series.Players.Where(p => p.Slot == other))
+            notifier.Enqueue(series, NotifierEvent.To(p.UserId, "VerifyEvent", new
+            {
+                roundId = round.Id,
+                type = obs.Type.ToString(),
+                eventTime = obs.EventTime,
+                subject = subject == p.Slot ? "SELF" : "OPPONENT",
+                value = obs.Value,
+            }));
+    }
+
+    /// <summary>Réévaluation périodique (événement non confirmé par l'équipe adverse après le délai → litige).</summary>
     public async Task TickAsync(Guid seriesId)
     {
         using var _ = await locks.AcquireAsync(seriesId);
@@ -413,7 +451,7 @@ public sealed class SeriesService(
         if (round is null || round.Status != RoundStatus.IN_GAME || round.Observations.Count == 0) return;
         var before = round.Status;
         Arbitrate(series, round);
-        // Une observation « source unique » vient-elle d'atteindre le délai de confirmation ? → état à pousser.
+        // Une observation vient-elle d'atteindre le délai de confirmation ? → état à pousser.
         var now = clock.GetUtcNow();
         var justConfirmed = round.Observations.Any(o =>
             now - o.ReceivedAt >= Arbitration.ConfirmationDelay && now - o.ReceivedAt < Arbitration.ConfirmationDelay + ArbitrationTicker.Interval + TimeSpan.FromSeconds(1));
@@ -442,7 +480,7 @@ public sealed class SeriesService(
         if (outcome.Winner is { } winner)
         {
             var sat = outcome.WinningSatisfaction!;
-            var cond = new WinningConditionDto(WinExpression.Describe(sat.Trigger), sat.Trigger.Condition, sat.Trigger.Threshold, sat.Time, outcome.WinnerSingleSource);
+            var cond = new WinningConditionDto(WinExpression.Describe(sat.Trigger), sat.Trigger.Condition, sat.Trigger.Threshold, sat.Time, false);
             ValidateRound(series, round, Captain(series, winner), cond);
         }
     }
@@ -465,7 +503,7 @@ public sealed class SeriesService(
         {
             var objective = SecretObjectives.Get(objectives.IdOf(winner));
             ValidateRound(series, round, series.Players.First(p => p.Slot == winner),
-                new WinningConditionDto($"Objectif secret · {objective.Label}", null, null, outcome.WinningSatisfaction.Time, outcome.WinnerSingleSource));
+                new WinningConditionDto($"Objectif secret · {objective.Label}", null, null, outcome.WinningSatisfaction.Time, false));
             return;
         }
         var gameClock = Math.Max(GameClock(round), outcome.WinningSatisfaction?.Time ?? 0);
@@ -514,7 +552,7 @@ public sealed class SeriesService(
     private ArbitrationOutcome Evaluate(Series series, Round round)
     {
         var events = round.Observations
-            .Where(o => o.SubjectPlayerId is not null && o.Type is ObservationType.KILL or ObservationType.FIRST_BLOOD or ObservationType.TURRET or ObservationType.CS)
+            .Where(o => o.SubjectPlayerId is not null && o.Type is ObservationType.KILL or ObservationType.FIRST_BLOOD or ObservationType.TURRET or ObservationType.CS or ObservationType.DENIAL)
             .Select(o => new ObservedEvent(SlotOf(series, o.ReportedByPlayerId), o.Type, o.EventId, o.EventTime,
                 SlotOf(series, o.SubjectPlayerId!.Value), o.Value, o.ReceivedAt))
             .ToList();
@@ -895,7 +933,7 @@ public sealed class SeriesService(
                         outcome.Satisfactions.GetValueOrDefault(s)?.Time);
                 }),
                 outcome.Confirmed.Where(e => e.Type != ObservationType.CS).OrderByDescending(e => e.EventTime)
-                    .Select(e => new ValidatedEventDto(e.Type.ToString(), e.Subject.ToString(), e.EventTime, e.Value, e.SingleSource)).ToList(),
+                    .Select(e => new ValidatedEventDto(e.Type.ToString(), e.Subject.ToString(), e.EventTime, e.Value, false)).ToList(),
                 outcome.EarliestPendingTime is not null,
                 outcome.Contradictions);
         }

@@ -11,7 +11,8 @@ public enum RoundStatus { ASSIGNMENT, LOBBY, CHAMP_SELECT, IN_GAME, VOIDED, DISP
 
 public enum InvitationStatus { PENDING, ACCEPTED, DECLINED, EXPIRED }
 
-public enum ObservationType { KILL, FIRST_BLOOD, TURRET, CS, CHAMP_LOCK, SPELLS, CLOCK }
+/// <summary>DENIAL : démenti d'un événement adverse après vérification (Value = type démenti).</summary>
+public enum ObservationType { KILL, FIRST_BLOOD, TURRET, CS, CHAMP_LOCK, SPELLS, CLOCK, DENIAL }
 
 public enum Slot { A, B }
 

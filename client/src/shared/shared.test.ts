@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { describe, evaluate, emptyFacts, validate, WinNode } from './rules-engine';
-import { extractObservations, LiveGameData, localFacts, turretOwner } from './live-events';
+import { denial, extractObservations, LiveGameData, localFacts, turretOwner, verifyClaim } from './live-events';
 import { banStats, championHighlights, championStats, headToHead, modeStats, opponentHighlights, opponents, overview, StatsSeries, winConditions, winRate } from './stats';
 import { labObservations, progress } from './lab';
 
@@ -73,6 +73,22 @@ test('live events: kills, first blood, turrets mapped to SELF / OPPONENT and ded
   assert.equal(turretOwner('Turret_T2_L_03_A'), 'CHAOS');
   assert.equal(turretOwner('Turret_TOrder_L1_P3_2250400266_0'), 'ORDER');
   assert.equal(turretOwner('Turret_TChaos_L1_P3_1234_0'), 'CHAOS');
+});
+
+test('live events: opponent claims are confirmed only from our own game data', () => {
+  // Vu depuis Vorn : Kaelis (adversaire) a bien tué à 95 s, mais pas à 200 s (kill forgé).
+  const data: LiveGameData = {
+    ...game({ Events: [{ EventID: 2, EventName: 'ChampionKill', EventTime: 95, KillerName: 'Kaelis', VictimName: 'Vorn' }] }, 40, 12),
+    activePlayer: { riotId: 'Vorn#EUW' },
+  };
+  const real = verifyClaim(data, { type: 'KILL', eventTime: 95.1, subject: 'OPPONENT' });
+  assert.deepEqual(real, { type: 'KILL', eventId: 't95000-OPPONENT', eventTime: 95, payload: { subject: 'OPPONENT', raw: 'Kaelis' } });
+  assert.equal(verifyClaim(data, { type: 'KILL', eventTime: 200, subject: 'OPPONENT' }), null);
+  // Bonne heure, mauvais bénéficiaire : pas une confirmation.
+  assert.equal(verifyClaim(data, { type: 'KILL', eventTime: 95, subject: 'SELF' }), null);
+  // CS : notre vue actuelle de l'équipe concernée.
+  assert.equal(verifyClaim(data, { type: 'CS', eventTime: 400, subject: 'OPPONENT', value: 200 })?.payload.value, 40);
+  assert.deepEqual(denial({ type: 'KILL', eventTime: 200, subject: 'OPPONENT' }).payload, { subject: 'OPPONENT', raw: 'KILL' });
 });
 
 test('live events: current turret naming (Turret_TOrder_…) counts for the destroying team', () => {

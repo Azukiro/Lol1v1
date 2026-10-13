@@ -160,7 +160,6 @@ public class ArbitrationTests
         var o = Arbitration.Evaluate(Expr, events, T0.AddSeconds(1));
         Assert.Equal(Slot.A, o.Winner);
         Assert.Equal(312.4, o.WinningSatisfaction!.Time);
-        Assert.False(o.WinnerSingleSource);
     }
 
     [Fact]
@@ -174,7 +173,7 @@ public class ArbitrationTests
         };
         var o = Arbitration.Evaluate(expr, events, T0.AddSeconds(30));
         Assert.Equal(1, o.Facts[Slot.B].Kills);
-        Assert.False(o.Confirmed.Single().SingleSource);
+        Assert.Single(o.Confirmed);
         Assert.Null(o.Winner);
     }
 
@@ -194,13 +193,44 @@ public class ArbitrationTests
     }
 
     [Fact]
-    public void Single_source_waits_for_delay()
+    public void Event_seen_by_one_team_only_is_disputed_after_delay()
     {
+        // Faux kill injecté par un client (Live Client API simulée) : l'adversaire ne le voit jamais.
         var events = new List<ObservedEvent> { E(Slot.B, ObservationType.TURRET, "9", 400, Slot.B) };
-        Assert.Null(Arbitration.Evaluate(Expr, events, T0.AddSeconds(5)).Winner);
-        var o = Arbitration.Evaluate(Expr, events, T0.AddSeconds(11));
-        Assert.Equal(Slot.B, o.Winner);
-        Assert.True(o.WinnerSingleSource);
+        var pending = Arbitration.Evaluate(Expr, events, T0.AddSeconds(5));
+        Assert.Null(pending.Winner);
+        Assert.False(pending.Disputed);
+        var o = Arbitration.Evaluate(Expr, events, T0.AddSeconds(21));
+        Assert.Null(o.Winner);
+        Assert.True(o.Disputed);
+    }
+
+    [Fact]
+    public void Event_denied_by_opponent_is_disputed_immediately()
+    {
+        var events = new List<ObservedEvent>
+        {
+            E(Slot.A, ObservationType.KILL, "t100000-SELF", 100, Slot.A),
+            E(Slot.A, ObservationType.KILL, "t200000-SELF", 200, Slot.A),
+            E(Slot.B, ObservationType.KILL, "t100000-OPPONENT", 100, Slot.A),
+            E(Slot.B, ObservationType.DENIAL, "deny", 200, Slot.A, (int)ObservationType.KILL, receivedSec: 3),
+        };
+        var o = Arbitration.Evaluate(Expr, events, T0.AddSeconds(3));
+        Assert.True(o.Disputed);
+        Assert.Null(o.Winner);
+        Assert.Contains("démenti", o.Contradictions.Single());
+    }
+
+    [Fact]
+    public void Denial_by_own_team_does_not_count()
+    {
+        // Un démenti ne compte que venant de l'équipe adverse ; ici A « dément » son propre kill, B le confirme.
+        var events = new List<ObservedEvent>
+        {
+            E(Slot.A, ObservationType.KILL, "1", 100, Slot.A), E(Slot.B, ObservationType.KILL, "1", 100, Slot.A),
+            E(Slot.A, ObservationType.DENIAL, "deny", 100, Slot.A, (int)ObservationType.KILL),
+        };
+        Assert.False(Arbitration.Evaluate(Expr, events, T0).Disputed);
     }
 
     [Fact]
@@ -235,7 +265,9 @@ public class ArbitrationTests
             E(Slot.B, ObservationType.TURRET, "4", 290, Slot.B, receivedSec: 0),
         };
         Assert.Null(Arbitration.Evaluate(Expr, events, T0.AddSeconds(2)).Winner);
-        Assert.Equal(Slot.B, Arbitration.Evaluate(Expr, events, T0.AddSeconds(12)).Winner);
+        // A confirme la tour de B après la demande de vérification : elle est antérieure, B l'emporte.
+        events.Add(E(Slot.A, ObservationType.TURRET, "4", 290, Slot.B, receivedSec: 3));
+        Assert.Equal(Slot.B, Arbitration.Evaluate(Expr, events, T0.AddSeconds(3)).Winner);
     }
 
     [Fact]
@@ -249,7 +281,10 @@ public class ArbitrationTests
         Assert.Equal(Slot.A, Arbitration.Evaluate(expr, [self, view], T0.AddSeconds(1)).Winner);
 
         var lowView = E(Slot.B, ObservationType.CS, "cs-A-20", 650, Slot.A, 20, receivedSec: 15);
-        Assert.True(Arbitration.Evaluate(expr, [self, lowView], T0.AddSeconds(16)).Disputed);
+        Assert.False(Arbitration.Evaluate(expr, [self, lowView], T0.AddSeconds(16)).Disputed);
+        Assert.True(Arbitration.Evaluate(expr, [self, lowView], T0.AddSeconds(21)).Disputed);
+        // Aucune vue adverse : plus de validation « source unique ».
+        Assert.True(Arbitration.Evaluate(expr, [self], T0.AddSeconds(21)).Disputed);
     }
 
     [Fact]

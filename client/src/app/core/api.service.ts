@@ -1,6 +1,6 @@
 import { HttpClient, HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
 import { inject, Injectable, signal } from '@angular/core';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timeout } from 'rxjs';
 import { AuthResponse, ChampionRef, HistoryEntry, Invitation, PresetConfig, Preset, RiotAccount, SeriesConfig, SeriesState, SeriesSummary, SpellRef, User } from './models';
 
 /** URL de l'API : fournie par Electron (API_URL), sinon localhost. */
@@ -66,8 +66,10 @@ export class ApiService {
   login(email: string, password: string) {
     return this.post<AuthResponse>('/auth/login', { email, password });
   }
-  me() {
-    return this.get<User>('/me');
+  /** waitMs : abandonne après ce délai (erreur TimeoutError, pas HttpErrorResponse). */
+  me(waitMs?: number) {
+    const req = this.http.get<User>(this.url('/me'));
+    return firstValueFrom(waitMs ? req.pipe(timeout(waitMs)) : req);
   }
   linkRiot(account: Omit<RiotAccount, 'riotId'>) {
     return this.post<RiotAccount>('/riot-accounts/link', account);
@@ -150,8 +152,10 @@ export class AuthService {
       this.ready.set(true);
       return;
     }
+    // Délai borné : l'interface ne s'affiche qu'après restore(), un serveur muet laissait un écran noir.
+    // Le jeton est conservé hors 401 : la session revient au prochain lancement.
     try {
-      this.user.set(await this.api.me());
+      this.user.set(await this.api.me(8000));
     } catch (e) {
       if (e instanceof HttpErrorResponse && e.status === 401) writeToken(null);
     } finally {

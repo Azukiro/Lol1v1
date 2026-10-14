@@ -1,6 +1,6 @@
-import { Component, computed, inject, input, OnInit, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, OnInit, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { ApiService, AuthService, errorMessage } from '../core/api.service';
 import { OpponentsService, OpponentSuggestion } from '../core/opponents.service';
 import { ChampionMode, MODE_LABELS, Preset, PresetConfig, SpellMode, SPELL_MODE_LABELS } from '../core/models';
@@ -54,13 +54,19 @@ const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
 
 @Component({
   selector: 'app-new-challenge',
-  imports: [FormsModule, SelectComponent, AvatarComponent],
+  imports: [FormsModule, RouterLink, SelectComponent, AvatarComponent],
   template: `
     <div class="page">
       <header class="page-head">
         <div>
-          <div class="kicker">Créer une série</div>
-          <h1>Nouveau défi</h1>
+          @if (teamSize() > 1) {
+            <div class="kicker yellow">Labo · Expérimental</div>
+            <h1>Défi 2v2</h1>
+            <p class="muted">Mode en test : il peut changer ou disparaître. <a class="link" routerLink="/labo">Retour au labo</a></p>
+          } @else {
+            <div class="kicker">Créer une série</div>
+            <h1>Nouveau défi</h1>
+          }
         </div>
       </header>
 
@@ -86,10 +92,6 @@ const SPELL_MODES: { id: SpellMode; label: string; hint: string }[] = [
           <section class="block">
             <div class="block-head">
               <h3>{{ teamSize() > 1 ? 'Joueurs' : 'Adversaire' }}</h3>
-              <div class="seg" role="radiogroup" aria-label="Mode de jeu">
-                <button role="radio" [attr.aria-checked]="teamSize() === 1" [class.on]="teamSize() === 1" (click)="setTeamSize(1)">1v1</button>
-                <button role="radio" [attr.aria-checked]="teamSize() === 2" [class.on]="teamSize() === 2" (click)="setTeamSize(2)">2v2</button>
-              </div>
             </div>
             @if (teamSize() > 1) {
               <div class="team-fields">
@@ -353,14 +355,14 @@ export class NewChallengePage implements OnInit {
   readonly presetParam = input<string | undefined>(undefined, { alias: 'preset' });
   /** Format choisi au lancement rapide (?bo=5). */
   readonly bestOfParam = input<string | undefined>(undefined, { alias: 'bo' });
-  /** Revanche 2v2 : ?format=2v2&teammate=…&opponent=…&opponent2=… (les trois autres joueurs, équipes retirées au sort). */
+  /** 2v2 (mode labo) : ?format=2v2, plus ?teammate=…&opponent=…&opponent2=… en revanche (équipes retirées au sort). */
   readonly formatParam = input<string | undefined>(undefined, { alias: 'format' });
   readonly teammateParam = input<string | undefined>(undefined, { alias: 'teammate' });
   readonly opponent2Param = input<string | undefined>(undefined, { alias: 'opponent2' });
 
   protected readonly teamRoles = TEAM_ROLES;
-  /** Joueurs par équipe : 1 (1v1) ou 2 (2v2). */
-  protected readonly teamSize = signal(1);
+  /** Joueurs par équipe : 1 (1v1) ou 2 (2v2, ouvert depuis le labo). Suit l'URL : le composant est réutilisé entre /new et /new?format=2v2. */
+  protected readonly teamSize = computed(() => (this.formatParam() === '2v2' ? 2 : 1));
   protected readonly teammate = signal('');
   protected readonly opponent2 = signal('');
   /** 2v2 : champ que remplit un clic sur une suggestion. */
@@ -432,9 +434,10 @@ export class NewChallengePage implements OnInit {
     return (this.teamSize() > 1 && TEAM_HINTS[m.id]) || m.hint;
   }
 
-  protected setTeamSize(size: number) {
-    this.teamSize.set(size);
-    if (!this.modeAllowed(this.mode())) this.edit(this.mode, 'MIRROR');
+  constructor() {
+    effect(() => {
+      if (this.teamSize() > 1 && !TEAM_MODES.includes(untracked(this.mode))) untracked(() => this.edit(this.mode, 'MIRROR'));
+    });
   }
 
   private roleSignal(role: TeamRole) {
@@ -480,8 +483,7 @@ export class NewChallengePage implements OnInit {
 
   async ngOnInit() {
     this.opponent.set(this.opponentParam() ?? '');
-    if (this.formatParam() === '2v2') {
-      this.setTeamSize(2);
+    if (this.teamSize() > 1) {
       this.teammate.set(this.teammateParam() ?? '');
       this.opponent2.set(this.opponent2Param() ?? '');
     }

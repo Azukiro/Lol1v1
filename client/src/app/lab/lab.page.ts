@@ -44,6 +44,13 @@ import { LabObjective, LabTier, ObjectiveTier, TIER_LABELS } from './lab.models'
                   l'adversaire. Le premier qui remplit le sien gagne la manche.</span
                 >
               </button>
+              <button class="option-card" (click)="openTwoVsTwo()">
+                <strong>2v2</strong>
+                <span
+                  >Défi à quatre, équipes tirées au sort quand tous ont accepté. Miroir ou Aléatoire,
+                  conditions de victoire comptées par équipe.</span
+                >
+              </button>
             </div>
             <ul class="rules muted small">
               <li>
@@ -193,7 +200,13 @@ import { LabObjective, LabTier, ObjectiveTier, TIER_LABELS } from './lab.models'
     }
     .options {
       display: grid;
-      grid-template-columns: minmax(0, 420px);
+      grid-template-columns: repeat(2, minmax(0, 420px));
+      gap: 12px;
+    }
+    @media (max-width: 900px) {
+      .options {
+        grid-template-columns: minmax(0, 1fr);
+      }
     }
     .rules {
       margin: 12px 0 0;
@@ -347,6 +360,11 @@ export class LabPage implements OnInit {
         /* facultatif */
       }
     }
+  }
+
+  /** Le 2v2 réutilise le formulaire de défi (conditions de victoire), en format 2v2. */
+  protected openTwoVsTwo() {
+    void this.router.navigate(['/new'], { queryParams: { format: '2v2' } });
   }
 
   async tryDraw() {

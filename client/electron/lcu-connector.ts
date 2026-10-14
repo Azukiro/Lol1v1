@@ -5,11 +5,12 @@
  */
 import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as https from 'node:https';
 import * as path from 'node:path';
 import WebSocket from 'ws';
-import type { ChampSelectState, GameflowState, LcuIdentity, LcuPool, LcuStatus } from '../src/shared/ipc';
+import type { ChampSelectState, GameflowState, LcuIdentity, LcuPool, LcuStatus, LobbyState, LolFriend } from '../src/shared/ipc';
 
 interface Credentials {
   port: number;
@@ -72,6 +73,7 @@ export class LcuConnector extends EventEmitter {
   private identity: LcuIdentity | undefined;
   private timer: NodeJS.Timeout | null = null;
   private lastError: string | undefined;
+  private lobbyState: LobbyState | null = null;
 
   start(): void {
     void this.tick();
@@ -85,6 +87,11 @@ export class LcuConnector extends EventEmitter {
 
   status(): LcuStatus {
     return { connected: !!this.creds && !!this.identity, identity: this.identity, error: this.lastError };
+  }
+
+  /** Dernier lobby connu (null hors lobby). */
+  lobby(): LobbyState | null {
+    return this.lobbyState;
   }
 
   private async tick(): Promise<void> {
@@ -109,6 +116,7 @@ export class LcuConnector extends EventEmitter {
       this.openSocket();
       this.emit('status', this.status());
       void this.refreshGameflow();
+      void this.refreshLobby();
     } catch (e) {
       this.creds = null;
       this.setError(`Client LoL en cours de démarrage (${(e as Error).message})`);
@@ -171,14 +179,14 @@ export class LcuConnector extends EventEmitter {
   // ---------------------------------------------------------------- Lecture
 
   private async loadIdentity(): Promise<LcuIdentity> {
-    const s = await this.request<{ puuid: string; gameName: string; tagLine: string; summonerId: number }>('GET', '/lol-summoner/v1/current-summoner');
+    const s = await this.request<{ puuid: string; gameName: string; tagLine: string; summonerId: number; profileIconId: number }>('GET', '/lol-summoner/v1/current-summoner');
     let region = '';
     try {
       region = (await this.request<{ region: string }>('GET', '/riotclient/region-locale')).region ?? '';
     } catch {
       /* région facultative */
     }
-    return { puuid: s.puuid, gameName: s.gameName, tagLine: s.tagLine, summonerId: s.summonerId, region };
+    return { puuid: s.puuid, gameName: s.gameName, tagLine: s.tagLine, summonerId: s.summonerId, region, profileIconId: s.profileIconId };
   }
 
   /** Champions possédés + rotation gratuite. */
@@ -196,32 +204,133 @@ export class LcuConnector extends EventEmitter {
     return { owned, free };
   }
 
+  /** Liste d'amis du client LoL (chat Riot). */
+  async friends(): Promise<LolFriend[]> {
+    const list = await this.request<
+      { puuid: string; gameName: string; gameTag: string; availability: string; groupName: string; product: string; icon: number; lol?: { gameStatus?: string } }[]
+    >('GET', '/lol-chat/v1/friends');
+    return list
+      .filter((f) => f.puuid && f.gameName)
+      .map((f) => ({
+        puuid: f.puuid,
+        gameName: f.gameName,
+        tagLine: f.gameTag,
+        availability: f.availability ?? 'offline',
+        gameStatus: f.product === 'league_of_legends' ? (f.lol?.gameStatus ?? '') : '',
+        groupName: f.groupName ?? '',
+        icon: f.icon,
+      }));
+  }
+
   // ---------------------------------------------------------------- Lobby
 
-  /** Partie personnalisée Abîme hurlant (map 12), 1 joueur par équipe, blind pick (mutator 1). */
-  async createLobby(opponentPuuid: string, lobbyName: string): Promise<void> {
-    await this.request('POST', '/lol-lobby/v2/lobby', {
-      customGameLobby: {
-        configuration: {
-          gameMode: 'ARAM',
-          gameMutator: '',
-          gameServerRegion: '',
-          mapId: 12,
-          mutators: { id: 1 },
-          spectatorPolicy: 'AllAllowed',
-          teamSize: 1,
+  /**
+   * File personnalisée « Abîme hurlant (partie personnalisée aveugle) ».
+   * Le client exige désormais un queueId pour créer un lobby perso (sinon : INVALID_LOBBY).
+   */
+  private async customAramBlindQueue(): Promise<{ id: number; gameTypeConfigId: number }> {
+    const fallback = { id: 3200, gameTypeConfigId: 19 };
+    try {
+      const queues = await this.request<
+        { id: number; mapId: number; gameMode: string; category: string; queueAvailability: string; gameTypeConfig?: { id: number } }[]
+      >('GET', '/lol-game-queues/v1/queues');
+      const custom = queues.filter((q) => q.category === 'Custom' && q.mapId === 12 && q.gameMode === 'ARAM' && q.queueAvailability === 'Available');
+      const blind = custom.find((q) => q.id === fallback.id) ?? custom.find((q) => q.gameTypeConfig?.id === fallback.gameTypeConfigId);
+      return blind ? { id: blind.id, gameTypeConfigId: blind.gameTypeConfig?.id ?? fallback.gameTypeConfigId } : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  /**
+   * Partie personnalisée Abîme hurlant (map 12), blind pick, teamSize places par équipe, puis invite les joueurs donnés.
+   * Lobby à places libres (2v2 : voir GameTrackerService) : protégé par un mot de passe, les invités n'en ont pas besoin.
+   */
+  async createLobby(inviteePuuids: string[], lobbyName: string, teamSize = 1): Promise<void> {
+    const queue = await this.customAramBlindQueue();
+    const lobbyPassword = inviteePuuids.length + 1 < 2 * teamSize ? randomBytes(6).toString('hex') : '';
+    const create = (name: string) =>
+      this.request('POST', '/lol-lobby/v2/lobby', {
+        queueId: queue.id,
+        customGameLobby: {
+          configuration: {
+            gameMode: 'ARAM',
+            mapId: 12,
+            mutators: { id: queue.gameTypeConfigId },
+            gameTypeConfig: { id: queue.gameTypeConfigId },
+            spectatorPolicy: 'AllAllowed',
+            teamSize,
+            maxPlayerCount: 2 * teamSize,
+          },
+          lobbyName: name,
+          lobbyPassword,
         },
-        lobbyName,
-        lobbyPassword: '',
-      },
-      isCustom: true,
-    });
-    const opponent = await this.request<{ summonerId: number }>('GET', `/lol-summoner/v2/summoners/puuid/${encodeURIComponent(opponentPuuid)}`);
-    await this.request('POST', '/lol-lobby/v2/lobby/invitations', [{ toSummonerId: opponent.summonerId }]);
+        isCustom: true,
+      });
+    // Le filtre de noms de Riot refuse parfois un nom (INVALID_LOBBY_NAME) : on retombe sur des noms neutres.
+    const names = [lobbyName, 'Duel ARAM', 'Duel'];
+    for (const [i, name] of names.entries()) {
+      try {
+        await create(name);
+        break;
+      } catch (e) {
+        if (i === names.length - 1 || !String(e).includes('INVALID_LOBBY_NAME')) throw e;
+      }
+    }
+    await this.invite(inviteePuuids);
+  }
+
+  /** Invite des joueurs dans le lobby courant. */
+  async invite(puuids: string[]): Promise<void> {
+    if (!puuids.length) return;
+    const ids = await Promise.all(
+      puuids.map((puuid) => this.request<{ summonerId: number }>('GET', `/lol-summoner/v2/summoners/puuid/${encodeURIComponent(puuid)}`)),
+    );
+    await this.request('POST', '/lol-lobby/v2/lobby/invitations', ids.map((s) => ({ toSummonerId: s.summonerId })));
+  }
+
+  /** Partie perso : passe le joueur local dans l'autre équipe (place libre requise). */
+  async switchTeam(): Promise<void> {
+    await this.request('POST', '/lol-lobby/v1/lobby/custom/switch-teams');
   }
 
   async startChampSelect(): Promise<void> {
     await this.request('POST', '/lol-lobby/v1/lobby/custom/start-champ-select');
+  }
+
+  /** Accepte l'invitation en attente envoyée par ce joueur. Retourne false s'il n'y en a pas. */
+  async acceptInvitationFrom(puuid: string): Promise<boolean> {
+    const invitations = await this.request<{ invitationId: string; fromSummonerId: number; state: string }[]>('GET', '/lol-lobby/v2/received-invitations');
+    const pending = invitations.filter((i) => i.state === 'Pending');
+    if (!pending.length) return false;
+    const from = await this.request<{ summonerId: number }>('GET', `/lol-summoner/v2/summoners/puuid/${encodeURIComponent(puuid)}`);
+    const invitation = pending.find((i) => i.fromSummonerId === from.summonerId);
+    if (!invitation) return false;
+    await this.request('POST', `/lol-lobby/v2/received-invitations/${encodeURIComponent(invitation.invitationId)}/accept`);
+    return true;
+  }
+
+  // ---------------------------------------------------------------- Sélection des champions
+
+  /**
+   * Prépare la sélection : règle les sorts, survole le champion attribué puis le verrouille si lock.
+   * Retourne false si la phase de pick du joueur n'est pas encore ouverte.
+   */
+  async prepareChampSelect(championId: number, spells: [number, number] | null, lock = false): Promise<boolean> {
+    const session = await this.request<ChampSelectSession>('GET', '/lol-champ-select/v1/session');
+    const pick = (session.actions ?? [])
+      .flat()
+      .find((a) => a.actorCellId === session.localPlayerCellId && a.type === 'pick' && !a.completed);
+    if (!pick) return false;
+    if (spells) await this.request('PATCH', '/lol-champ-select/v1/session/my-selection', { spell1Id: spells[0], spell2Id: spells[1] });
+    if (pick.championId !== championId) await this.request('PATCH', `/lol-champ-select/v1/session/actions/${pick.id}`, { championId });
+    if (lock) await this.request('POST', `/lol-champ-select/v1/session/actions/${pick.id}/complete`);
+    return true;
+  }
+
+  /** Règle les sorts d'invocateur, y compris après le verrouillage du champion (modifiables jusqu'à la fin de la sélection). */
+  async setSummonerSpells(spells: [number, number]): Promise<void> {
+    await this.request('PATCH', '/lol-champ-select/v1/session/my-selection', { spell1Id: spells[0], spell2Id: spells[1] });
   }
 
   // ---------------------------------------------------------------- Événements
@@ -234,7 +343,13 @@ export class LcuConnector extends EventEmitter {
     });
     this.ws = ws;
     ws.on('open', () => {
-      for (const evt of ['OnJsonApiEvent_lol-gameflow_v1_gameflow-phase', 'OnJsonApiEvent_lol-champ-select_v1_session']) {
+      for (const evt of [
+        'OnJsonApiEvent_lol-gameflow_v1_gameflow-phase',
+        'OnJsonApiEvent_lol-champ-select_v1_session',
+        'OnJsonApiEvent_lol-chat_v1_friends',
+        'OnJsonApiEvent_lol-lobby_v2_lobby',
+        'OnJsonApiEvent_lol-lobby_v2_received-invitations',
+      ]) {
         ws.send(JSON.stringify([5, evt]));
       }
     });
@@ -244,6 +359,9 @@ export class LcuConnector extends EventEmitter {
         if (!Array.isArray(msg) || msg[0] !== 8) return;
         const { uri, data, eventType } = msg[2] as { uri: string; data: unknown; eventType: string };
         if (uri === '/lol-gameflow/v1/gameflow-phase') void this.refreshGameflow(data as string);
+        else if (uri.startsWith('/lol-chat/v1/friends')) this.emit('friendsChanged');
+        else if (uri === '/lol-lobby/v2/lobby') this.setLobby(eventType === 'Delete' ? null : normalizeLobby(data as LobbySession));
+        else if (uri === '/lol-lobby/v2/received-invitations') this.emit('invitationsChanged');
         else if (uri === '/lol-champ-select/v1/session') {
           this.emit('champSelect', eventType === 'Delete' ? null : normalizeChampSelect(data as ChampSelectSession));
         }
@@ -255,6 +373,19 @@ export class LcuConnector extends EventEmitter {
       if (this.ws === ws) this.ws = null;
     });
     ws.on('error', () => ws.close());
+  }
+
+  private async refreshLobby(): Promise<void> {
+    try {
+      this.setLobby(normalizeLobby(await this.request<LobbySession>('GET', '/lol-lobby/v2/lobby')));
+    } catch {
+      this.setLobby(null); // 404 hors lobby
+    }
+  }
+
+  private setLobby(lobby: LobbyState | null) {
+    this.lobbyState = lobby;
+    this.emit('lobby', lobby);
   }
 
   private async refreshGameflow(phase?: string): Promise<void> {
@@ -275,7 +406,7 @@ export class LcuConnector extends EventEmitter {
 export interface ChampSelectSession {
   localPlayerCellId: number;
   myTeam: { cellId: number; championId: number; championPickIntent: number; spell1Id: number; spell2Id: number }[];
-  actions: { actorCellId: number; championId: number; completed: boolean; type: string }[][];
+  actions: { id: number; actorCellId: number; championId: number; completed: boolean; type: string }[][];
 }
 
 export function normalizeChampSelect(session: ChampSelectSession): ChampSelectState | null {
@@ -284,4 +415,28 @@ export function normalizeChampSelect(session: ChampSelectSession): ChampSelectSt
   const pick = (session.actions ?? []).flat().find((a) => a.actorCellId === session.localPlayerCellId && a.type === 'pick');
   const championId = me.championId || pick?.championId || me.championPickIntent || 0;
   return { championId, locked: !!pick?.completed && championId > 0, spells: [me.spell1Id, me.spell2Id] };
+}
+
+interface LobbyMember {
+  puuid?: string;
+  summonerId?: number;
+}
+
+export interface LobbySession {
+  members?: LobbyMember[];
+  gameConfig?: { customTeam100?: LobbyMember[]; customTeam200?: LobbyMember[]; customSpectators?: LobbyMember[] };
+}
+
+/**
+ * Joueurs présents dans le lobby, toutes équipes confondues, et composition des équipes 100 / 200 (partie perso).
+ * Puuid absent d'une entrée d'équipe : retrouvé par summonerId dans la liste des membres.
+ */
+export function normalizeLobby(session: LobbySession): LobbyState {
+  const bySummoner = new Map((session.members ?? []).filter((m) => m.summonerId && m.puuid).map((m) => [m.summonerId, m.puuid]));
+  const ids = (list: LobbyMember[] | undefined) =>
+    (list ?? []).map((m) => m.puuid || bySummoner.get(m.summonerId)).filter((p): p is string => !!p);
+  const team100 = ids(session.gameConfig?.customTeam100);
+  const team200 = ids(session.gameConfig?.customTeam200);
+  const all = [...ids(session.members), ...team100, ...team200, ...ids(session.gameConfig?.customSpectators)];
+  return { puuids: [...new Set(all)], team100, team200 };
 }

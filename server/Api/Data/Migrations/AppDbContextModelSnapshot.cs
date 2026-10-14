@@ -107,6 +107,14 @@ namespace Api.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("from_user_id");
 
+                    b.Property<Guid?>("GroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("group_id");
+
+                    b.Property<int>("Seat")
+                        .HasColumnType("integer")
+                        .HasColumnName("seat");
+
                     b.Property<Guid?>("SeriesId")
                         .HasColumnType("uuid")
                         .HasColumnName("series_id");
@@ -117,6 +125,12 @@ namespace Api.Data.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("status");
 
+                    b.Property<string>("Team")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("team");
+
                     b.Property<Guid>("ToUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("to_user_id");
@@ -126,6 +140,9 @@ namespace Api.Data.Migrations
 
                     b.HasIndex("FromUserId")
                         .HasDatabaseName("ix_invitation_from_user_id");
+
+                    b.HasIndex("GroupId")
+                        .HasDatabaseName("ix_invitation_group_id");
 
                     b.HasIndex("ToUserId", "Status")
                         .HasDatabaseName("ix_invitation_to_user_id_status");
@@ -206,6 +223,10 @@ namespace Api.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("linked_at");
 
+                    b.Property<int?>("ProfileIconId")
+                        .HasColumnType("integer")
+                        .HasColumnName("profile_icon_id");
+
                     b.Property<string>("Puuid")
                         .IsRequired()
                         .HasColumnType("text")
@@ -273,6 +294,10 @@ namespace Api.Data.Migrations
                     b.Property<DateTimeOffset?>("EndedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("ended_at");
+
+                    b.Property<string>("LabState")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("lab_state");
 
                     b.Property<long?>("LolGameId")
                         .HasColumnType("bigint")
@@ -411,6 +436,10 @@ namespace Api.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("finished_at");
 
+                    b.Property<string>("LabConfig")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("lab_config");
+
                     b.Property<string>("SpellMode")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -422,6 +451,10 @@ namespace Api.Data.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)")
                         .HasColumnName("status");
+
+                    b.Property<int>("TeamSize")
+                        .HasColumnType("integer")
+                        .HasColumnName("team_size");
 
                     b.Property<string>("WinExpression")
                         .IsRequired()
@@ -438,6 +471,8 @@ namespace Api.Data.Migrations
                     b.ToTable("series", null, t =>
                         {
                             t.HasCheckConstraint("ck_series_best_of", "best_of IN (1,3,5,7,9,11)");
+
+                            t.HasCheckConstraint("ck_series_team_size", "team_size IN (1,2)");
                         });
                 });
 
@@ -468,6 +503,10 @@ namespace Api.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("rounds_won");
 
+                    b.Property<int>("Seat")
+                        .HasColumnType("integer")
+                        .HasColumnName("seat");
+
                     b.Property<Guid>("SeriesId")
                         .HasColumnType("uuid")
                         .HasColumnName("series_id");
@@ -495,9 +534,9 @@ namespace Api.Data.Migrations
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_series_player_user_id");
 
-                    b.HasIndex("SeriesId", "Slot")
+                    b.HasIndex("SeriesId", "Slot", "Seat")
                         .IsUnique()
-                        .HasDatabaseName("ix_series_player_series_id_slot");
+                        .HasDatabaseName("ix_series_player_series_id_slot_seat");
 
                     b.ToTable("series_player", (string)null);
                 });
@@ -562,6 +601,41 @@ namespace Api.Data.Migrations
                         .HasDatabaseName("ix_user_email");
 
                     b.ToTable("user", (string)null);
+                });
+
+            modelBuilder.Entity("Api.Data.UserPreset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Config")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("config");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_user_preset");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_user_preset_user_id");
+
+                    b.ToTable("user_preset", (string)null);
                 });
 
             modelBuilder.Entity("Api.Data.Ban", b =>
@@ -687,6 +761,16 @@ namespace Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_spell_token_series_player_series_player_id");
+                });
+
+            modelBuilder.Entity("Api.Data.UserPreset", b =>
+                {
+                    b.HasOne("Api.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_user_preset_user_user_id");
                 });
 
             modelBuilder.Entity("Api.Data.Round", b =>

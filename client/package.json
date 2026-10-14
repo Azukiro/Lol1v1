@@ -1,5 +1,5 @@
 {
-  "name": "lol1v1",
+  "name": "duelyst",
   "version": "0.1.0",
   "scripts": {
     "ng": "ng",
@@ -43,8 +43,8 @@
     "typescript": "~5.9.2",
     "wait-on": "^9.5.1"
   },
-  "productName": "LoL 1v1",
-  "description": "Séries de 1v1 League of Legends entre amis, arbitrées automatiquement.",
+  "productName": "Duelyst",
+  "description": "Séries de duels 1v1 entre amis, arbitrées automatiquement.",
   "author": "Lucas",
   "main": "dist-electron/electron/main.js"
 }

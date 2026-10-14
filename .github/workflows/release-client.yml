@@ -1,13 +1,21 @@
 name: Release client Windows
 
-# Pousser un tag vX.Y.Z (même version que client/package.json) publie l'installeur
-# en brouillon dans GitHub Releases ; le publier active la mise à jour automatique.
+# Chaque push sur dev qui touche au client publie une nouvelle version 0.1.<n°>
+# dans GitHub Releases. Les apps installées la détectent, la téléchargent en arrière-plan
+# et l'installent à la fermeture (ou tout de suite via « Redémarrer »).
 on:
   push:
-    tags: ['v*']
+    branches: [dev]
+    paths: ['client/**', '.github/workflows/release-client.yml']
+  workflow_dispatch:
 
 permissions:
   contents: write   # le GITHUB_TOKEN intégré suffit pour publier la Release (pas de PAT nécessaire)
+  packages: write   # image ghcr.io de l'installeur
+
+concurrency:
+  group: release-client
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -23,7 +31,66 @@ jobs:
           cache: npm
           cache-dependency-path: client/package-lock.json
       - run: npm ci
+      # Version strictement croissante : la mise à jour automatique compare les numéros de version.
+      # Une seule Release en brouillon est créée d'abord : electron-builder y dépose tous ses fichiers
+      # (sinon ses envois parallèles créent plusieurs Releases pour le même tag), puis on la publie.
+      - name: Version et Release brouillon
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="0.1.$((${{ github.run_number }} + 100))"
+          npm version "$VERSION" --no-git-tag-version
+          gh release create "v$VERSION" --draft --title "$VERSION" --target "$GITHUB_SHA" --notes "Version automatique depuis dev (${GITHUB_SHA::7})."
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - run: npm test
       - run: npm run release
         env:
           API_URL: ${{ vars.API_URL }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publier la Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "v${{ steps.version.outputs.version }}" --draft=false --latest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher
+          path: |
+            client/release/*.exe
+            client/release/*.exe.blockmap
+            client/release/latest.yml
+          if-no-files-found: error
+
+  # Image « scratch » qui ne contient que l'installeur : le Dockerfile du serveur la copie dans /app/updates.
+  image:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: launcher
+          path: launcher
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Construire et pousser l'image
+        working-directory: launcher
+        run: |
+          printf 'FROM scratch\nCOPY . /\n' > ../Dockerfile.launcher
+          IMAGE=ghcr.io/azukiro/duelyst-launcher
+          VERSION=$(sed -n 's/^version: //p' latest.yml)
+          docker build -f ../Dockerfile.launcher -t "$IMAGE:latest" -t "$IMAGE:$VERSION" \
+            --label org.opencontainers.image.source=https://github.com/${{ github.repository }} .
+          docker push --all-tags "$IMAGE"
+      # Deploy hook Render (Settings > Deploy Hook), à ranger dans le secret RENDER_DEPLOY_HOOK.
+      - name: Redéployer l'API
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then echo "::warning::RENDER_DEPLOY_HOOK absent, redéploiement manuel nécessaire"; exit 0; fi
+          curl -fsS -X POST "$HOOK"

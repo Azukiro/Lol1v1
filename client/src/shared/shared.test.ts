@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { describe, evaluate, emptyFacts, validate, WinNode } from './rules-engine';
-import { extractObservations, LiveGameData, localFacts, turretOwner } from './live-events';
+import { denial, extractObservations, LiveGameData, localFacts, turretOwner, verifyClaim } from './live-events';
+import { banStats, championHighlights, championStats, headToHead, modeStats, opponentHighlights, opponents, overview, StatsSeries, winConditions, winRate } from './stats';
+import { labObservations, progress } from './lab';
 
 const expr: WinNode = { op: 'OR', children: [{ condition: 'KILLS', threshold: 2 }, { condition: 'FIRST_TOWER' }] };
 
@@ -14,6 +16,23 @@ test('rules engine: OR = earliest, AND = latest', () => {
   assert.equal(describe(expr), 'Kills ≥ 2 OU Première tour');
   assert.equal(validate({ condition: 'KILLS' }), 'Kills : seuil > 0 requis.');
   assert.equal(validate(expr), null);
+});
+
+test('rules engine: redundant parts of a rule are rejected', () => {
+  const k = (n: number): WinNode => ({ condition: 'KILLS', threshold: n });
+  const tower: WinNode = { condition: 'FIRST_TOWER' };
+  const cs: WinNode = { condition: 'CS', threshold: 50 };
+  // Autorisé : une même condition dans deux groupes différents.
+  assert.equal(validate({ op: 'OR', children: [{ op: 'AND', children: [k(1), cs] }, { op: 'AND', children: [tower, cs] }] }), null);
+  // Absorbé : Tour suffit déjà.
+  assert.match(validate({ op: 'OR', children: [tower, { op: 'AND', children: [k(2), tower] }] })!, /ne sert à rien/);
+  // Seuil plus faible au même niveau.
+  assert.match(validate({ op: 'OR', children: [k(1), k(3)] })!, /Kills ≥ 3 ne sert à rien/);
+  assert.match(validate({ op: 'AND', children: [k(1), k(3)] })!, /Kills ≥ 1 ne sert à rien/);
+  // Doublon dans un groupe.
+  assert.match(validate({ op: 'OR', children: [tower, { op: 'AND', children: [k(1), k(2)] }] })!, /deux fois/);
+  // ET de OU : (Tour OU CS) est absorbé par Tour.
+  assert.match(validate({ op: 'AND', children: [tower, { op: 'OR', children: [tower, cs] }] })!, /l’impose déjà/);
 });
 
 const game = (events: LiveGameData['events'], selfCs = 0, oppCs = 0): LiveGameData => ({
@@ -37,29 +56,193 @@ test('live events: kills, first blood, turrets mapped to SELF / OPPONENT and ded
     ],
   });
   const seen = new Set<string>();
-  const obs = extractObservations(data, expr, seen);
+  const obs = extractObservations(data, seen);
   assert.deepEqual(
     obs.map((o) => [o.type, o.eventId, o.payload.subject]),
     [
-      ['FIRST_BLOOD', '1', 'SELF'],
-      ['KILL', '2', 'SELF'],
-      ['TURRET', '4', 'OPPONENT'],
+      ['FIRST_BLOOD', 't95000', 'SELF'],
+      ['KILL', 't95000-SELF', 'SELF'],
+      ['TURRET', 't300000', 'OPPONENT'],
     ],
   );
-  assert.equal(extractObservations(data, expr, seen).length, 0);
+  assert.equal(extractObservations(data, seen).length, 0);
 
   const facts = localFacts(data);
   assert.equal(facts.self.killTimes.length, 1);
   assert.equal(facts.opponent.firstTowerTime, 300);
   assert.equal(turretOwner('Turret_T2_L_03_A'), 'CHAOS');
+  assert.equal(turretOwner('Turret_TOrder_L1_P3_2250400266_0'), 'ORDER');
+  assert.equal(turretOwner('Turret_TChaos_L1_P3_1234_0'), 'CHAOS');
 });
 
-test('live events: CS thresholds and opponent view', () => {
-  const csExpr: WinNode = { condition: 'CS', threshold: 50 };
+test('live events: opponent claims are confirmed only from our own game data', () => {
+  // Vu depuis Vorn : Kaelis (adversaire) a bien tué à 95 s, mais pas à 200 s (kill forgé).
+  const data: LiveGameData = {
+    ...game({ Events: [{ EventID: 2, EventName: 'ChampionKill', EventTime: 95, KillerName: 'Kaelis', VictimName: 'Vorn' }] }, 40, 12),
+    activePlayer: { riotId: 'Vorn#EUW' },
+  };
+  const real = verifyClaim(data, { type: 'KILL', eventTime: 95.1, subject: 'OPPONENT' });
+  assert.deepEqual(real, { type: 'KILL', eventId: 't95000-OPPONENT', eventTime: 95, payload: { subject: 'OPPONENT', raw: 'Kaelis' } });
+  assert.equal(verifyClaim(data, { type: 'KILL', eventTime: 200, subject: 'OPPONENT' }), null);
+  // Bonne heure, mauvais bénéficiaire : pas une confirmation.
+  assert.equal(verifyClaim(data, { type: 'KILL', eventTime: 95, subject: 'SELF' }), null);
+  // CS : notre vue actuelle de l'équipe concernée.
+  assert.equal(verifyClaim(data, { type: 'CS', eventTime: 400, subject: 'OPPONENT', value: 200 })?.payload.value, 40);
+  assert.deepEqual(denial({ type: 'KILL', eventTime: 200, subject: 'OPPONENT' }).payload, { subject: 'OPPONENT', raw: 'KILL' });
+});
+
+test('live events: current turret naming (Turret_TOrder_…) counts for the destroying team', () => {
+  const data: LiveGameData = {
+    activePlayer: { riotId: 'Azuki#EUW' },
+    allPlayers: [
+      { riotId: 'Azuki#EUW', riotIdGameName: 'Azuki', team: 'CHAOS', scores: { creepScore: 40 } },
+      { riotId: 'Azran#EUW', riotIdGameName: 'Azran', team: 'ORDER', scores: { creepScore: 30 } },
+    ],
+    events: { Events: [{ EventID: 8, EventName: 'TurretKilled', EventTime: 183.3, KillerName: 'Azuki', TurretKilled: 'Turret_TOrder_L1_P3_2250400266_0' }] },
+    gameData: { gameTime: 200 },
+  };
+  const obs = extractObservations(data, new Set()).filter((o) => o.type !== 'CS');
+  assert.deepEqual(obs.map((o) => [o.type, o.payload.subject]), [['TURRET', 'SELF']]);
+  assert.equal(localFacts(data).self.firstTowerTime, 183.3);
+});
+
+test('live events: renumbered EventIDs after a reconnection are not mistaken for duplicates', () => {
   const seen = new Set<string>();
-  assert.deepEqual(extractObservations(game({ Events: [] }, 49, 38), csExpr, seen).map((o) => o.eventId), ['view-30']);
-  assert.deepEqual(extractObservations(game({ Events: [] }, 52, 41), csExpr, seen).map((o) => [o.eventId, o.payload.value]), [
+  const kill = (id: number, t: number, killer: string) => ({ EventID: id, EventName: 'ChampionKill', EventTime: t, KillerName: killer, VictimName: 'x' });
+  extractObservations(game({ Events: [kill(1, 35.5, 'Kaelis')] }), seen);
+  // Après reconnexion le client repart à EventID 1 : ce nouveau kill doit être remonté.
+  const obs = extractObservations(game({ Events: [kill(1, 430.9, 'Kaelis')] }), seen);
+  assert.deepEqual(obs.map((o) => [o.type, o.eventTime]), [['KILL', 430.9]]);
+});
+
+test('live events: CS steps reported whatever the rule, with opponent view', () => {
+  const seen = new Set<string>();
+  assert.deepEqual(extractObservations(game({ Events: [] }, 29, 38), seen).map((o) => o.eventId), ['self-10', 'self-20', 'view-30']);
+  assert.deepEqual(extractObservations(game({ Events: [] }, 52, 41), seen).map((o) => [o.eventId, o.payload.value]), [
+    ['self-30', 52],
+    ['self-40', 52],
     ['self-50', 52],
     ['view-40', 41],
   ]);
+});
+
+const statsSeries = (id: string, opponent: string, results: boolean[], champs: number[], createdAt: string, mode = 'MIRROR'): StatsSeries => {
+  const wins = results.filter(Boolean).length;
+  const losses = results.length - wins;
+  const needed = Math.max(wins, losses);
+  return {
+    series: {
+      id, status: 'FINISHED', bestOf: needed * 2 - 1, championMode: mode, spellMode: 'FREE', mySlot: 'A',
+      opponentName: opponent, opponentRiotId: `${opponent}#EUW`, opponentProfileIconId: null,
+      myWins: wins, opponentWins: losses, winnerSlot: wins > losses ? 'A' : 'B', createdAt,
+    },
+    rounds: results.map((won, i) => ({
+      number: i + 1, winnerSlot: won ? 'A' : 'B', winningCondition: won ? 'KILLS' : 'FIRST_TOWER', winningTime: 300 + i * 10,
+      startedAt: null, endedAt: null,
+      me: { championId: champs[i], kills: won ? 2 : 0, cs: 40, firstBlood: won, firstTower: false },
+      opponent: { championId: 100 + champs[i], kills: won ? 0 : 1, cs: 50, firstBlood: !won, firstTower: !won },
+    })),
+    myBans: [], opponentBans: [7],
+  };
+};
+
+test('stats: overview, champions, comebacks and head-to-head', () => {
+  const entries = [
+    statsSeries('1', 'Vorn', [false, true, true], [1, 1, 2], '2026-10-01T10:00:00Z'),
+    statsSeries('2', 'Vorn', [true, true], [1, 1], '2026-10-02T10:00:00Z'),
+    statsSeries('3', 'Mira', [false, false], [3, 3], '2026-10-03T10:00:00Z', 'DECK'),
+  ];
+  const o = overview(entries);
+  assert.deepEqual(o.series, { played: 3, wins: 2 });
+  assert.deepEqual(o.rounds, { played: 7, wins: 4 });
+  assert.deepEqual(o.streak, { wins: false, count: 1 });
+  assert.equal(o.comebacks, 1);
+
+  const champs = championStats(entries);
+  assert.equal(champs[0].championId, 1);
+  assert.equal(champs[0].played, 4);
+  assert.equal(winRate(champs[0]), 75);
+  assert.equal(champs[0].fastestWin, 300);
+  const h = championHighlights(champs);
+  assert.equal(h.best?.championId, 1);
+  assert.equal(h.worst, null); // champion 3 : 2 manches, sous l'échantillon minimal
+
+  assert.deepEqual(banStats(entries).againstMe, [{ championId: 7, count: 3 }]);
+  assert.deepEqual(winConditions(entries, true), [{ condition: 'KILLS', count: 4, percent: 100 }]);
+  assert.equal(modeStats(entries, (e) => e.series.championMode)[0].key, 'MIRROR');
+
+  const vorn = headToHead(entries, 'Vorn#EUW')!;
+  assert.deepEqual(vorn.opponent.series, { played: 2, wins: 2 });
+  assert.deepEqual(vorn.opponent.streak, { wins: true, count: 2 });
+  assert.equal(vorn.me.avgKills, 8 / 5);
+  assert.equal(vorn.theirChampions[0].championId, 101);
+  const hl = opponentHighlights(opponents(entries));
+  assert.equal(hl.favorite?.riotId, 'Vorn#EUW');
+  assert.equal(hl.nemesis, null);
+});
+
+test('lab: generic CS steps and game clock, whatever the objective', () => {
+  const seen = new Set<string>();
+  const first = labObservations({ ...game({ Events: [] }, 23, 15), gameData: { gameTime: 65 } }, seen);
+  assert.deepEqual(
+    first.map((o) => [o.type, o.eventId]),
+    [
+      ['CS', 'self-10'],
+      ['CS', 'self-20'],
+      ['CS', 'view-10'],
+      ['CLOCK', 't-2'],
+    ],
+  );
+  assert.equal(labObservations({ ...game({ Events: [] }, 23, 15), gameData: { gameTime: 70 } }, seen).length, 0);
+});
+
+test('lab: progress = count / threshold, OR = max, AND = mean; every tower counts', () => {
+  const data = game(
+    {
+      Events: [
+        { EventID: 1, EventName: 'TurretKilled', EventTime: 300, TurretKilled: 'Turret_T2_C_05_A' },
+        { EventID: 2, EventName: 'TurretKilled', EventTime: 420, TurretKilled: 'Turret_T2_C_04_A' },
+        { EventID: 3, EventName: 'ChampionKill', EventTime: 200, KillerName: 'Kaelis' },
+      ],
+    },
+    60,
+  );
+  const self = localFacts(data).self;
+  assert.deepEqual(self.towerTimes, [300, 420]);
+  assert.equal(evaluate({ condition: 'TOWERS', threshold: 2 }, self), 420);
+  assert.equal(progress({ condition: 'KILLS', threshold: 2 }, self), 0.5);
+  assert.equal(progress({ op: 'AND', children: [{ condition: 'KILLS', threshold: 2 }, { condition: 'CS', threshold: 120 }] }, self), 0.5);
+  assert.equal(progress({ op: 'OR', children: [{ condition: 'KILLS', threshold: 2 }, { condition: 'TOWERS', threshold: 2 }] }, self), 1);
+  assert.equal(describe({ condition: 'TOWERS', threshold: 2 }), 'Tours ≥ 2');
+});
+
+test('live events 2v2: teammate kills count for my team, CS summed per team', () => {
+  const data: LiveGameData = {
+    activePlayer: { riotId: 'Kaelis#EUW' },
+    allPlayers: [
+      { riotId: 'Kaelis#EUW', riotIdGameName: 'Kaelis', team: 'ORDER', scores: { creepScore: 20 } },
+      { riotId: 'Mira#EUW', riotIdGameName: 'Mira', team: 'ORDER', scores: { creepScore: 10 } },
+      { riotId: 'Vorn#EUW', riotIdGameName: 'Vorn', team: 'CHAOS', scores: { creepScore: 30 } },
+      { riotId: 'Thane#EUW', riotIdGameName: 'Thane', team: 'CHAOS', scores: { creepScore: 10 } },
+    ],
+    events: {
+      Events: [
+        { EventID: 1, EventName: 'ChampionKill', EventTime: 50, KillerName: 'Mira', VictimName: 'Vorn' },
+        { EventID: 2, EventName: 'ChampionKill', EventTime: 80, KillerName: 'Thane', VictimName: 'Kaelis' },
+      ],
+    },
+    gameData: { gameTime: 400 },
+  };
+  const obs = extractObservations(data, new Set());
+  assert.deepEqual(
+    obs.filter((o) => o.type === 'KILL').map((o) => [o.eventTime, o.payload.subject]),
+    [
+      [50, 'SELF'],
+      [80, 'OPPONENT'],
+    ],
+  );
+  assert.deepEqual(obs.filter((o) => o.type === 'CS').map((o) => o.eventId), ['self-10', 'self-20', 'self-30', 'view-40']);
+  const facts = localFacts(data);
+  assert.equal(facts.self.killTimes.length, 1);
+  assert.equal(facts.opponent.csSamples[0].value, 40);
 });

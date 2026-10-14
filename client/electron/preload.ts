@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
-import type { Lol1v1Bridge } from '../src/shared/ipc';
+import type { DuelystBridge } from '../src/shared/ipc';
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   const listener = (_e: IpcRendererEvent, payload: T) => cb(payload);
@@ -10,17 +10,27 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 // Rempli au démarrage de l'interface via loadConfig() (le preload sandboxé n'a pas accès à l'environnement).
 const config = { apiUrl: '', version: '' };
 
-const bridge: Lol1v1Bridge & { loadConfig(): Promise<{ apiUrl: string; version: string }> } = {
+const bridge: DuelystBridge & { loadConfig(): Promise<{ apiUrl: string; version: string }> } = {
   config,
   loadConfig: () => ipcRenderer.invoke('config'),
   lcu: {
     status: () => ipcRenderer.invoke('lcu:status'),
     pool: () => ipcRenderer.invoke('lcu:pool'),
-    createLobby: (puuid, name) => ipcRenderer.invoke('lcu:createLobby', puuid, name),
+    friends: () => ipcRenderer.invoke('lcu:friends'),
+    createLobby: (puuids, name, teamSize) => ipcRenderer.invoke('lcu:createLobby', puuids, name, teamSize),
+    invite: (puuids) => ipcRenderer.invoke('lcu:invite', puuids),
+    switchTeam: () => ipcRenderer.invoke('lcu:switchTeam'),
     startChampSelect: () => ipcRenderer.invoke('lcu:startChampSelect'),
+    acceptInvitationFrom: (puuid) => ipcRenderer.invoke('lcu:acceptInvitationFrom', puuid),
+    setSummonerSpells: (spells) => ipcRenderer.invoke('lcu:setSummonerSpells', spells),
+    prepareChampSelect: (championId, spells, lock) => ipcRenderer.invoke('lcu:prepareChampSelect', championId, spells, lock),
+    lobby: () => ipcRenderer.invoke('lcu:lobby'),
     onStatus: (cb) => subscribe('lcu:status', cb),
     onGameflow: (cb) => subscribe('lcu:gameflow', cb),
     onChampSelect: (cb) => subscribe('lcu:champSelect', cb),
+    onLobby: (cb) => subscribe('lcu:lobby', cb),
+    onInvitationsChanged: (cb) => subscribe('lcu:invitationsChanged', () => cb()),
+    onFriendsChanged: (cb) => subscribe('lcu:friendsChanged', () => cb()),
   },
   live: {
     onData: (cb) => subscribe('live:data', cb),
@@ -30,6 +40,19 @@ const bridge: Lol1v1Bridge & { loadConfig(): Promise<{ apiUrl: string; version: 
     hide: () => ipcRenderer.invoke('overlay:hide'),
   },
   notify: (title, body) => ipcRenderer.invoke('notify', title, body),
+  attention: () => ipcRenderer.invoke('window:attention'),
+  window: {
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
+    close: () => ipcRenderer.invoke('window:close'),
+    isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+    onMaximized: (cb) => subscribe('window:maximized', cb),
+  },
+  update: {
+    status: () => ipcRenderer.invoke('update:status'),
+    install: () => ipcRenderer.invoke('update:install'),
+    onStatus: (cb) => subscribe('update:status', cb),
+  },
 };
 
-contextBridge.exposeInMainWorld('lol1v1', bridge);
+contextBridge.exposeInMainWorld('duelyst', bridge);

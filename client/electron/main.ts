@@ -38,7 +38,9 @@ function createMainWindow() {
     minWidth: 1024,
     minHeight: 680,
     backgroundColor: '#0b0e14',
-    title: 'LoL 1v1',
+    title: `Duelyst v${app.getVersion()}`,
+    // Barre de titre dessinée par l'app (TitleBarComponent) : pas de cadre Windows.
+    frame: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -47,12 +49,16 @@ function createMainWindow() {
       sandbox: true,
     },
   });
+  // Garde « Duelyst vX.Y.Z » au lieu du <title> de la page.
+  mainWindow.on('page-title-updated', (e) => e.preventDefault());
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url);
     return { action: 'deny' };
   });
   if (isDev) void mainWindow.loadURL(DEV_URL);
   else void mainWindow.loadFile(path.join(__dirname, '..', '..', 'dist', 'client', 'browser', 'index.html'));
+  mainWindow.on('maximize', () => send('window:maximized', true));
+  mainWindow.on('unmaximize', () => send('window:maximized', false));
   mainWindow.on('closed', () => {
     mainWindow = null;
     overlayWindow?.close();
@@ -64,13 +70,16 @@ function createMainWindow() {
  * Jamais d'injection dans le processus du jeu. Nécessite le jeu en « fenêtré sans bordure ».
  */
 function showOverlay(data: OverlayData) {
+  // Bandeau compact en haut au centre, sous la barre de score du jeu : la fenêtre ne couvre que le bandeau.
   const { bounds } = screen.getPrimaryDisplay();
+  const width = 440;
+  const height = 92;
   if (!overlayWindow || overlayWindow.isDestroyed()) {
     overlayWindow = new BrowserWindow({
-      x: bounds.x,
-      y: bounds.y,
-      width: bounds.width,
-      height: bounds.height,
+      x: bounds.x + Math.round((bounds.width - width) / 2),
+      y: bounds.y + Math.round(bounds.height * 0.09),
+      width,
+      height,
       transparent: true,
       frame: false,
       resizable: false,
@@ -94,20 +103,60 @@ function hideOverlay() {
   overlayWindow = null;
 }
 
+/** Ramène l'app au premier plan (Windows bloque le vol de focus : passage temporaire « toujours devant »). */
+function bringToFront() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.setAlwaysOnTop(true);
+  mainWindow.focus();
+  mainWindow.moveTop();
+  setTimeout(() => mainWindow?.setAlwaysOnTop(false), 300);
+  mainWindow.flashFrame(true);
+  mainWindow.once('focus', () => mainWindow?.flashFrame(false));
+}
+
 function registerIpc() {
   ipcMain.handle('config', () => ({ apiUrl, version: app.getVersion() }));
+  ipcMain.handle('update:status', () => (updateReady ? { state: 'ready', version: updateReady } : null));
+  // Installation silencieuse puis relance de l'app.
+  ipcMain.handle('update:install', () => autoUpdater.quitAndInstall(true, true));
   ipcMain.handle('lcu:status', () => lcu.status());
   ipcMain.handle('lcu:pool', () => lcu.pool());
-  ipcMain.handle('lcu:createLobby', (_e, puuid: string, name: string) => lcu.createLobby(puuid, name));
+  ipcMain.handle('lcu:friends', () => lcu.friends());
+  ipcMain.handle('lcu:createLobby', (_e, puuids: string[], name: string, teamSize: number) => lcu.createLobby(puuids, name, teamSize));
+  ipcMain.handle('lcu:invite', (_e, puuids: string[]) => lcu.invite(puuids));
+  ipcMain.handle('lcu:switchTeam', () => lcu.switchTeam());
   ipcMain.handle('lcu:startChampSelect', () => lcu.startChampSelect());
+  ipcMain.handle('lcu:setSummonerSpells', (_e, spells: [number, number]) => lcu.setSummonerSpells(spells));
+  ipcMain.handle('lcu:prepareChampSelect', (_e, championId: number, spells: [number, number] | null, lock: boolean) =>
+    lcu.prepareChampSelect(championId, spells, lock),
+  );
+  ipcMain.handle('lcu:acceptInvitationFrom', (_e, puuid: string) => lcu.acceptInvitationFrom(puuid));
+  ipcMain.handle('lcu:lobby', () => lcu.lobby());
   ipcMain.handle('overlay:show', (_e, data: OverlayData) => showOverlay(data));
   ipcMain.handle('overlay:hide', () => hideOverlay());
+  ipcMain.handle('window:attention', () => bringToFront());
+  ipcMain.handle('window:minimize', () => mainWindow?.minimize());
+  ipcMain.handle('window:toggleMaximize', () => (mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize()));
+  ipcMain.handle('window:close', () => mainWindow?.close());
+  ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized() ?? false);
   ipcMain.handle('notify', (_e, title: string, body: string) => {
     if (Notification.isSupported()) new Notification({ title, body, urgency: 'critical' }).show();
   });
 
   lcu.on('status', (s) => send('lcu:status', s));
   lcu.on('champSelect', (c) => send('lcu:champSelect', c));
+  lcu.on('lobby', (l) => send('lcu:lobby', l));
+  lcu.on('invitationsChanged', () => send('lcu:invitationsChanged', null));
+  // Les changements de statut d'amis arrivent en rafale : un seul signal par seconde.
+  let friendsTimer: NodeJS.Timeout | null = null;
+  lcu.on('friendsChanged', () => {
+    friendsTimer ??= setTimeout(() => {
+      friendsTimer = null;
+      send('lcu:friendsChanged', null);
+    }, 1000);
+  });
   lcu.on('gameflow', (g: { phase: string }) => {
     send('lcu:gameflow', g);
     // Le poller ne tourne que pendant la partie.
@@ -117,13 +166,40 @@ function registerIpc() {
   live.on('data', (d) => send('live:data', d));
 }
 
-app.setAppUserModelId('fr.lol1v1.app');
-app.whenReady().then(() => {
-  registerIpc();
-  createMainWindow();
-  lcu.start();
-  if (!isDev) void autoUpdater.checkForUpdatesAndNotify().catch(() => undefined);
-});
+/**
+ * Mise à jour automatique depuis <API>/updates (voir electron-builder.yml) : vérification au démarrage puis toutes les 30 min,
+ * téléchargement en arrière-plan, installation silencieuse à la fermeture (ou tout de suite via l'interface).
+ */
+let updateReady: string | null = null;
+
+function startAutoUpdate() {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('update-available', (info) => send('update:status', { state: 'downloading', version: info.version }));
+  autoUpdater.on('update-downloaded', (info) => {
+    updateReady = info.version;
+    send('update:status', { state: 'ready', version: info.version });
+  });
+  autoUpdater.on('error', () => undefined); // hors ligne, serveur indisponible… on réessaiera au prochain passage
+  const check = () => void autoUpdater.checkForUpdates().catch(() => undefined);
+  check();
+  setInterval(check, 30 * 60 * 1000);
+}
+
+app.setAppUserModelId('fr.duelyst.app');
+
+// Une seule instance : un second lancement ramène la fenêtre existante puis se ferme.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => bringToFront());
+  app.whenReady().then(() => {
+    registerIpc();
+    createMainWindow();
+    lcu.start();
+    if (!isDev) startAutoUpdate();
+  });
+}
 
 app.on('window-all-closed', () => {
   lcu.stop();

@@ -1,6 +1,7 @@
 namespace Api.Domain;
 
-public enum ChampionMode { MIRROR, RANDOM, DECK }
+/// <summary>MIRROR_DECK : chacun compose un petit deck, chaque manche tire un champion du deck commun, joué par les deux.</summary>
+public enum ChampionMode { MIRROR, RANDOM, DECK, MIRROR_DECK }
 
 public enum SpellMode { FREE, DECK_COMPOSED, DECK_RANDOM }
 
@@ -10,7 +11,8 @@ public enum RoundStatus { ASSIGNMENT, LOBBY, CHAMP_SELECT, IN_GAME, VOIDED, DISP
 
 public enum InvitationStatus { PENDING, ACCEPTED, DECLINED, EXPIRED }
 
-public enum ObservationType { KILL, FIRST_BLOOD, TURRET, CS, CHAMP_LOCK, SPELLS }
+/// <summary>DENIAL : démenti d'un événement adverse après vérification (Value = type démenti).</summary>
+public enum ObservationType { KILL, FIRST_BLOOD, TURRET, CS, CHAMP_LOCK, SPELLS, CLOCK, DENIAL }
 
 public enum Slot { A, B }
 

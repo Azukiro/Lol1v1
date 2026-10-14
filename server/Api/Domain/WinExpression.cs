@@ -29,9 +29,11 @@ public static class Conditions
     public const string Kills = "KILLS";
     public const string FirstTower = "FIRST_TOWER";
     public const string Cs = "CS";
+    /// <summary>Nombre de tours détruites : réservé au labo, absent du catalogue des séries standards.</summary>
+    public const string Towers = "TOWERS";
 
     public static readonly string[] Catalog = [FirstBlood, Kills, FirstTower, Cs];
-    public static bool NeedsThreshold(string condition) => condition is Kills or Cs;
+    public static bool NeedsThreshold(string condition) => condition is Kills or Cs or Towers;
 }
 
 /// <summary>Faits observés pour un joueur, chacun avec l'horodatage de jeu où il est devenu vrai.</summary>
@@ -41,6 +43,8 @@ public sealed class PlayerFacts
     public List<double> KillTimes { get; } = [];
     public double? FirstBloodTime { get; set; }
     public double? FirstTowerTime { get; set; }
+    /// <summary>Horodatages des tours détruites par le joueur, triés.</summary>
+    public List<double> TowerTimes { get; } = [];
     /// <summary>Paliers de CS confirmés : (valeur, EventTime).</summary>
     public List<(int Value, double Time)> CsSamples { get; } = [];
 
@@ -53,6 +57,7 @@ public sealed record Satisfaction(double Time, WinNode Trigger);
 public static class WinExpression
 {
     public const int MaxDepth = 3;
+    public const int CsStep = 10;
     public static readonly JsonSerializerOptions Json = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
     public static WinNode Parse(string json) =>
@@ -60,10 +65,47 @@ public static class WinExpression
 
     public static string Serialize(WinNode node) => JsonSerializer.Serialize(node, Json);
 
+    /// <summary><paramref name="a"/> entraîne <paramref name="b"/> : même condition, seuil au moins aussi haut.</summary>
+    private static bool Implies(WinNode a, WinNode b) => a.Condition == b.Condition && (a.Threshold ?? 0) >= (b.Threshold ?? 0);
+
+    /// <summary>
+    /// Partie inutile de la règle (« Tour OU (Kills ≥ 2 ET Tour) »), même logique que redundancy() côté client :
+    /// termes reliés par l'opérateur racine, chacun absorbé si un autre terme l'entraîne déjà.
+    /// </summary>
+    public static string? Redundancy(WinNode node)
+    {
+        if (node.IsLeaf || node.Children is null) return null;
+        var terms = new List<List<WinNode>>();
+        foreach (var child in node.Children)
+        {
+            if (child.IsLeaf) terms.Add([child]);
+            else if (child.Op == node.Op) terms.AddRange((child.Children ?? []).Select(c => new List<WinNode> { c }));
+            else if ((child.Children ?? []).Any(c => !c.IsLeaf)) return null;
+            else terms.Add(child.Children ?? []);
+        }
+        foreach (var term in terms)
+        {
+            var dup = term.GroupBy(c => c.Condition).FirstOrDefault(g => g.Count() > 1);
+            if (dup is not null) return $"{dup.Key} apparaît deux fois dans un même groupe.";
+        }
+        var or = node.Op == "OR";
+        for (var a = 0; a < terms.Count; a++)
+            for (var b = 0; b < terms.Count; b++)
+            {
+                if (a == b) continue;
+                var absorbs = terms[a].All(x => terms[b].Any(y => or ? Implies(y, x) : Implies(x, y)));
+                var identical = absorbs && terms[b].All(y => terms[a].Any(x => or ? Implies(x, y) : Implies(y, x)));
+                if (absorbs && (!identical || a < b))
+                    return "Une partie de la règle ne sert à rien : une autre condition l'englobe déjà.";
+            }
+        return null;
+    }
+
     /// <summary>Valide l'expression : profondeur ≤ 3, conditions du catalogue, seuils > 0.</summary>
     public static void Validate(WinNode? node, int depth = 1)
     {
         if (node is null) throw new DomainException("Expression de victoire manquante.");
+        if (depth == 1 && Redundancy(node) is { } useless) throw new DomainException(useless);
         if (depth > MaxDepth) throw new DomainException($"Expression trop profonde (max {MaxDepth}).");
 
         if (node.IsLeaf)
@@ -76,6 +118,9 @@ public static class WinExpression
             {
                 if (node.Threshold is null or <= 0) throw new DomainException($"{node.Condition} demande un seuil > 0.");
                 if (node.Threshold > 1000) throw new DomainException($"Seuil trop élevé pour {node.Condition}.");
+                // La Live Client Data API ne donne les CS que par dizaines, même pour le joueur local.
+                if (node.Condition == Conditions.Cs && node.Threshold % CsStep != 0)
+                    throw new DomainException($"CS : multiple de {CsStep} (le jeu ne donne les CS que par dizaines).");
             }
             else if (node.Threshold is not null)
                 throw new DomainException($"{node.Condition} ne prend pas de seuil.");
@@ -100,6 +145,7 @@ public static class WinExpression
                 Conditions.FirstBlood => facts.FirstBloodTime,
                 Conditions.FirstTower => facts.FirstTowerTime,
                 Conditions.Kills => facts.KillTimes.Count >= node.Threshold ? facts.KillTimes.Order().ElementAt(node.Threshold!.Value - 1) : null,
+                Conditions.Towers => facts.TowerTimes.Count >= node.Threshold ? facts.TowerTimes.Order().ElementAt(node.Threshold!.Value - 1) : null,
                 Conditions.Cs => facts.CsSamples.Where(s => s.Value >= node.Threshold).Select(s => (double?)s.Time).Min(),
                 _ => null,
             };
@@ -122,6 +168,7 @@ public static class WinExpression
                 Conditions.FirstBlood => "First blood",
                 Conditions.FirstTower => "Première tour",
                 Conditions.Kills => $"Kills ≥ {node.Threshold}",
+                Conditions.Towers => $"Tours ≥ {node.Threshold}",
                 Conditions.Cs => $"CS ≥ {node.Threshold}",
                 _ => node.Condition ?? "?",
             };

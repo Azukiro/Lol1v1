@@ -7,6 +7,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<User> Users => Set<User>();
     public DbSet<RiotAccount> RiotAccounts => Set<RiotAccount>();
     public DbSet<Invitation> Invitations => Set<Invitation>();
+    public DbSet<UserPreset> UserPresets => Set<UserPreset>();
     public DbSet<Series> Series => Set<Series>();
     public DbSet<SeriesPlayer> SeriesPlayers => Set<SeriesPlayer>();
     public DbSet<DeckChampion> DeckChampions => Set<DeckChampion>();
@@ -41,6 +42,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Ignore(x => x.RiotId);
         });
 
+        b.Entity<UserPreset>(e =>
+        {
+            e.ToTable("user_preset");
+            e.Property(x => x.Name).HasMaxLength(40);
+            e.Property(x => x.Config).HasColumnType("jsonb");
+            e.HasIndex(x => x.UserId);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         b.Entity<Invitation>(e =>
         {
             e.ToTable("invitation");
@@ -48,12 +58,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasOne(x => x.FromUser).WithMany().HasForeignKey(x => x.FromUserId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.ToUser).WithMany().HasForeignKey(x => x.ToUserId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => new { x.ToUserId, x.Status });
+            e.HasIndex(x => x.GroupId);
         });
 
         b.Entity<Series>(e =>
         {
-            e.ToTable("series", t => t.HasCheckConstraint("ck_series_best_of", "best_of IN (1,3,5,7,9,11)"));
+            e.ToTable("series", t =>
+            {
+                t.HasCheckConstraint("ck_series_best_of", "best_of IN (1,3,5,7,9,11)");
+                t.HasCheckConstraint("ck_series_team_size", "team_size IN (1,2)");
+            });
             e.Property(x => x.WinExpression).HasColumnType("jsonb");
+            e.Property(x => x.LabConfig).HasColumnType("jsonb");
             e.HasMany(x => x.Players).WithOne(p => p.Series).HasForeignKey(p => p.SeriesId);
             e.HasMany(x => x.Rounds).WithOne(r => r.Series).HasForeignKey(r => r.SeriesId);
             e.HasMany(x => x.Bans).WithOne().HasForeignKey(x => x.SeriesId);
@@ -63,7 +79,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.ToTable("series_player");
             e.Property(x => x.PoolSnapshot).HasColumnType("jsonb");
-            e.HasIndex(x => new { x.SeriesId, x.Slot }).IsUnique();
+            e.HasIndex(x => new { x.SeriesId, x.Slot, x.Seat }).IsUnique();
             e.HasIndex(x => x.UserId);
             e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.RiotAccount).WithMany().HasForeignKey(x => x.RiotAccountId).OnDelete(DeleteBehavior.Restrict);
@@ -93,6 +109,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.ToTable("round");
             e.Property(x => x.WinningCondition).HasColumnType("jsonb");
+            e.Property(x => x.LabState).HasColumnType("jsonb");
             e.HasIndex(x => new { x.SeriesId, x.Number, x.Attempt }).IsUnique();
             e.HasIndex(x => x.Status);
             e.HasMany(x => x.Assignments).WithOne().HasForeignKey(x => x.RoundId);

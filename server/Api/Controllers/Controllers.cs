@@ -76,6 +76,7 @@ public sealed class UsersController(AppDbContext db) : ControllerBase
         account.TagLine = req.TagLine.Trim();
         account.RiotIdNormalized = Mapping.NormalizeRiotId(account.GameName, account.TagLine);
         account.Region = req.Region?.Trim() ?? "";
+        if (req.ProfileIconId is > 0) account.ProfileIconId = req.ProfileIconId;
         account.LinkedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
         return Mapping.ToDto(account);
@@ -89,7 +90,17 @@ public sealed class UsersController(AppDbContext db) : ControllerBase
         var key = Mapping.NormalizeRiotId(parts[0], parts[1]);
         var account = await db.RiotAccounts.Include(r => r.User).FirstOrDefaultAsync(r => r.RiotIdNormalized == key);
         if (account is null) return NotFound(new { error = "Aucun joueur lié avec ce Riot ID." });
-        return new PlayerSearchResult(account.UserId, account.User.DisplayName, account.RiotId);
+        return new PlayerSearchResult(account.UserId, account.User.DisplayName, account.RiotId, account.ProfileIconId);
+    }
+
+    /// <summary>Parmi ces PUUID (amis LoL lus via la LCU), lesquels ont un compte sur l'app.</summary>
+    [HttpPost("users/lookup")]
+    public async Task<List<RegisteredPlayer>> Lookup(LookupRequest req)
+    {
+        var puuids = (req.Puuids ?? []).Where(p => !string.IsNullOrWhiteSpace(p)).Distinct().Take(500).ToList();
+        if (puuids.Count == 0) return [];
+        var accounts = await db.RiotAccounts.Include(r => r.User).Where(r => puuids.Contains(r.Puuid)).ToListAsync();
+        return accounts.Select(a => new RegisteredPlayer(a.Puuid, a.UserId, a.User.DisplayName, a.RiotId, a.ProfileIconId)).ToList();
     }
 
     /// <summary>Adversaires récents (pour l'écran « Nouveau défi »).</summary>
@@ -102,7 +113,55 @@ public sealed class UsersController(AppDbContext db) : ControllerBase
             .Where(p => seriesIds.Contains(p.SeriesId) && p.UserId != userId)
             .OrderByDescending(p => p.Series.CreatedAt).Take(50).ToListAsync();
         return opponents.DistinctBy(p => p.UserId).Take(5)
-            .Select(p => new PlayerSearchResult(p.UserId, p.User.DisplayName, p.RiotAccount.RiotId)).ToList();
+            .Select(p => new PlayerSearchResult(p.UserId, p.User.DisplayName, p.RiotAccount.RiotId, p.RiotAccount.ProfileIconId)).ToList();
+    }
+}
+
+[ApiController]
+[Authorize]
+[Route("api/v1/presets")]
+public sealed class PresetsController(AppDbContext db) : ControllerBase
+{
+    public const int MaxPerUser = 12;
+
+    [HttpGet]
+    public async Task<PresetsResponse> List()
+    {
+        var userId = User.UserId();
+        var mine = await db.UserPresets.Where(p => p.UserId == userId).OrderBy(p => p.CreatedAt).ToListAsync();
+        return new PresetsResponse(BuiltInPresets.All.ToList(), mine.Select(ToDto).ToList());
+    }
+
+    [HttpPost]
+    public async Task<PresetDto> Create(CreatePresetRequest req)
+    {
+        var userId = User.UserId();
+        var name = req.Name?.Trim() ?? "";
+        if (name.Length is < 1 or > 40) throw new AppException("Nom : entre 1 et 40 caractères.");
+        try { req.Config.Validate(); } catch (DomainException e) { throw new AppException(e.Message); }
+        if (await db.UserPresets.CountAsync(p => p.UserId == userId) >= MaxPerUser)
+            throw new AppException($"Maximum {MaxPerUser} pré-configurations.");
+        var preset = new UserPreset { UserId = userId, Name = name, Config = JsonSerializer.Serialize(req.Config, Mapping.Json) };
+        db.UserPresets.Add(preset);
+        await db.SaveChangesAsync();
+        return ToDto(preset);
+    }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id)
+    {
+        var preset = await db.UserPresets.FirstOrDefaultAsync(p => p.Id == id && p.UserId == User.UserId())
+            ?? throw new AppException("Pré-configuration introuvable.", 404);
+        db.UserPresets.Remove(preset);
+        await db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    private static PresetDto ToDto(UserPreset p)
+    {
+        // Les anciennes configs contiennent encore bestOf : ignoré, le format se choisit au lancement.
+        var config = JsonSerializer.Deserialize<PresetConfig>(p.Config, Mapping.Json)!;
+        return new PresetDto(p.Id.ToString(), p.Name, Mapping.PresetLabel(config), config, false);
     }
 }
 
@@ -113,14 +172,23 @@ public sealed class InvitationsController(AppDbContext db, SeriesService seriesS
 {
     public static readonly TimeSpan Lifetime = TimeSpan.FromHours(24);
 
+    /// <summary>
+    /// Invitations en attente me concernant. En 2v2, un défi reste listé tant que les trois invités n'ont pas
+    /// tous accepté (y compris pour ceux qui ont déjà accepté), avec la réponse de chacun.
+    /// </summary>
     [HttpGet]
     public async Task<List<InvitationDto>> List()
     {
         var userId = User.UserId();
         await ExpireAsync();
-        var list = await Query().Where(i => (i.ToUserId == userId || i.FromUserId == userId) && i.Status == InvitationStatus.PENDING)
+        var list = await Query().Where(i => (i.ToUserId == userId || i.FromUserId == userId)
+                && (i.Status == InvitationStatus.PENDING || (i.GroupId != null && i.Status == InvitationStatus.ACCEPTED && i.SeriesId == null)))
             .OrderByDescending(i => i.CreatedAt).ToListAsync();
-        return list.Select(ToDto).ToList();
+        var groups = await GroupsOf(list);
+        // Le créateur d'un 2v2 voit une seule entrée par défi.
+        return list.Where(i => i.GroupId is null || i.ToUserId == userId || groups[i.GroupId.Value].First().Id == i.Id)
+            .Where(i => i.GroupId is null || groups[i.GroupId.Value].Any(m => m.Status == InvitationStatus.PENDING))
+            .Select(i => ToDto(i, groups)).ToList();
     }
 
     [HttpPost]
@@ -131,44 +199,72 @@ public sealed class InvitationsController(AppDbContext db, SeriesService seriesS
         var me = await db.Users.Include(u => u.RiotAccount).FirstAsync(u => u.Id == userId);
         if (me.RiotAccount is null) throw new AppException("Lie d'abord ton compte Riot.");
 
-        var parts = (req.ToRiotId ?? "").Split('#', 2);
-        if (parts.Length != 2) throw new AppException("Format attendu : Pseudo#TAG.");
-        var key = Mapping.NormalizeRiotId(parts[0], parts[1]);
-        var target = await db.RiotAccounts.Include(r => r.User).FirstOrDefaultAsync(r => r.RiotIdNormalized == key)
-            ?? throw new AppException("Aucun joueur n'a lié ce Riot ID.", 404);
-        if (target.UserId == userId) throw new AppException("Tu ne peux pas te défier toi-même.");
+        // Invités : en 2v2, trois joueurs sans équipe, les équipes sont tirées au sort au démarrage de la série.
+        var guests = req.Config.TeamSize == 1
+            ? [req.ToRiotId]
+            : req.PlayerRiotIds ?? new[] { req.TeammateRiotId }.Concat(req.OpponentRiotIds ?? []).Where(id => id is not null).ToArray();
+        if (guests.Length != 2 * req.Config.TeamSize - 1) throw new AppException("Choisis trois joueurs.");
+        var seats = guests.Select((id, i) => (id, Slot.B, i)).ToList();
 
-        var invitation = new Invitation
+        var targets = new List<(RiotAccount Account, Slot Team, int Seat)>();
+        foreach (var (riotId, team, seat) in seats)
+        {
+            var target = await FindAsync(riotId);
+            if (target.UserId == userId) throw new AppException("Tu ne peux pas te défier toi-même.");
+            if (targets.Any(t => t.Account.UserId == target.UserId)) throw new AppException($"{target.RiotId} est choisi deux fois.");
+            targets.Add((target, team, seat));
+        }
+
+        var groupId = req.Config.TeamSize > 1 ? Guid.NewGuid() : (Guid?)null;
+        var invitations = targets.Select(t => new Invitation
         {
             FromUserId = userId,
-            ToUserId = target.UserId,
+            ToUserId = t.Account.UserId,
             Config = JsonSerializer.Serialize(req.Config, Mapping.Json),
+            GroupId = groupId,
+            Team = t.Team,
+            Seat = t.Seat,
             CreatedAt = clock.GetUtcNow(),
             ExpiresAt = clock.GetUtcNow() + Lifetime,
-        };
-        db.Invitations.Add(invitation);
+        }).ToList();
+        db.Invitations.AddRange(invitations);
         await db.SaveChangesAsync();
-        var dto = ToDto(await Query().FirstAsync(i => i.Id == invitation.Id));
-        await notifier.SendToUserAsync(target.UserId, "InvitationReceived", dto);
-        return dto;
+
+        var saved = await Query().Where(i => invitations.Select(x => x.Id).Contains(i.Id)).ToListAsync();
+        var groups = await GroupsOf(saved);
+        foreach (var invitation in saved)
+            await notifier.SendToUserAsync(invitation.ToUserId, "InvitationReceived", ToDto(invitation, groups));
+        return ToDto(saved.First(i => i.Id == invitations[0].Id), groups);
     }
 
     [HttpPost("{id:guid}/accept")]
     public async Task<InvitationDto> Accept(Guid id)
     {
         var invitation = await Pending(id);
-        var from = await db.Users.Include(u => u.RiotAccount).FirstAsync(u => u.Id == invitation.FromUserId);
-        var to = await db.Users.Include(u => u.RiotAccount).FirstAsync(u => u.Id == invitation.ToUserId);
-        if (from.RiotAccount is null || to.RiotAccount is null) throw new AppException("Les deux joueurs doivent avoir lié leur compte Riot.");
-
         var config = JsonSerializer.Deserialize<SeriesConfig>(invitation.Config, Mapping.Json)!;
-        var series = seriesService.Create(config, from, from.RiotAccount, to, to.RiotAccount);
+        var members = invitation.GroupId is { } groupId
+            ? await db.Invitations.Where(i => i.GroupId == groupId).ToListAsync()
+            : [invitation];
         invitation.Status = InvitationStatus.ACCEPTED;
-        invitation.SeriesId = series.Id;
+
+        // 2v2 : la série démarre quand les trois invités ont accepté, équipes tirées au sort à ce moment.
+        if (members.All(m => m.Status == InvitationStatus.ACCEPTED))
+        {
+            var userIds = members.Select(m => m.ToUserId).Append(invitation.FromUserId).ToList();
+            var users = await db.Users.Include(u => u.RiotAccount).Where(u => userIds.Contains(u.Id)).ToListAsync();
+            if (users.Any(u => u.RiotAccount is null)) throw new AppException("Tous les joueurs doivent avoir lié leur compte Riot.");
+            SeatedPlayer Seated(Guid uid, Slot slot, int seat) { var u = users.First(x => x.Id == uid); return new(u, u.RiotAccount!, slot, seat); }
+            var ordered = members.OrderBy(m => m.Team).ThenBy(m => m.Seat).ToList();
+            var seats = config.TeamSize == 1
+                ? new[] { (Slot: Slot.B, Seat: 0) }
+                : DrawService.DrawGuestSeats(config.TeamSize, DrawService.Rng(DrawService.NewSeed(), "teams"));
+            var players = ordered.Select((m, i) => Seated(m.ToUserId, seats[i].Slot, seats[i].Seat)).Prepend(Seated(invitation.FromUserId, Slot.A, 0)).ToList();
+            var series = seriesService.Create(config, players);
+            foreach (var m in members) m.SeriesId = series.Id;
+        }
         await db.SaveChangesAsync();
-        var dto = ToDto(await Query().FirstAsync(i => i.Id == id));
-        await notifier.SendToUserAsync(invitation.FromUserId, "InvitationUpdated", dto);
-        return dto;
+        await NotifyGroupAsync(invitation);
+        return ToDto(await Query().FirstAsync(i => i.Id == id), await GroupsOf([invitation]));
     }
 
     [HttpPost("{id:guid}/decline")]
@@ -176,10 +272,35 @@ public sealed class InvitationsController(AppDbContext db, SeriesService seriesS
     {
         var invitation = await Pending(id);
         invitation.Status = InvitationStatus.DECLINED;
+        // 2v2 : un refus annule le défi pour tout le groupe.
+        if (invitation.GroupId is { } groupId)
+            foreach (var other in await db.Invitations.Where(i => i.GroupId == groupId && i.Id != id).ToListAsync())
+                other.Status = InvitationStatus.DECLINED;
         await db.SaveChangesAsync();
-        var dto = ToDto(await Query().FirstAsync(i => i.Id == id));
-        await notifier.SendToUserAsync(invitation.FromUserId, "InvitationUpdated", dto);
-        return dto;
+        await NotifyGroupAsync(invitation);
+        return ToDto(await Query().FirstAsync(i => i.Id == id), await GroupsOf([invitation]));
+    }
+
+    /// <summary>
+    /// Prévient le créateur (et en 2v2 les autres invités) d'une réponse. L'invitation envoyée est celle
+    /// qui vient de changer : son destinataire indique qui a répondu.
+    /// </summary>
+    private async Task NotifyGroupAsync(Invitation changed)
+    {
+        var dto = ToDto(await Query().FirstAsync(i => i.Id == changed.Id), await GroupsOf([changed]));
+        var recipients = new HashSet<Guid> { changed.FromUserId };
+        if (changed.GroupId is { } groupId)
+            recipients.UnionWith(await db.Invitations.Where(i => i.GroupId == groupId && i.Id != changed.Id).Select(i => i.ToUserId).ToListAsync());
+        foreach (var userId in recipients) await notifier.SendToUserAsync(userId, "InvitationUpdated", dto);
+    }
+
+    private async Task<RiotAccount> FindAsync(string? riotId)
+    {
+        var parts = (riotId ?? "").Split('#', 2);
+        if (parts.Length != 2) throw new AppException("Format attendu : Pseudo#TAG.");
+        var key = Mapping.NormalizeRiotId(parts[0], parts[1]);
+        return await db.RiotAccounts.Include(r => r.User).FirstOrDefaultAsync(r => r.RiotIdNormalized == key)
+            ?? throw new AppException($"Aucun joueur n'a lié le Riot ID {riotId}.", 404);
     }
 
     private async Task<Invitation> Pending(Guid id)
@@ -194,7 +315,8 @@ public sealed class InvitationsController(AppDbContext db, SeriesService seriesS
     private async Task ExpireAsync()
     {
         var now = clock.GetUtcNow();
-        var expired = await db.Invitations.Where(i => i.Status == InvitationStatus.PENDING && i.ExpiresAt < now).ToListAsync();
+        var expired = await db.Invitations.Where(i => (i.Status == InvitationStatus.PENDING || (i.GroupId != null && i.Status == InvitationStatus.ACCEPTED && i.SeriesId == null))
+            && i.ExpiresAt < now).ToListAsync();
         foreach (var i in expired) i.Status = InvitationStatus.EXPIRED;
         if (expired.Count > 0) await db.SaveChangesAsync();
     }
@@ -203,13 +325,25 @@ public sealed class InvitationsController(AppDbContext db, SeriesService seriesS
         .Include(i => i.FromUser).ThenInclude(u => u.RiotAccount)
         .Include(i => i.ToUser).ThenInclude(u => u.RiotAccount);
 
-    private static InvitationDto ToDto(Invitation i)
+    /// <summary>Membres de chaque groupe 2v2 présent dans la liste, triés par équipe puis place.</summary>
+    private async Task<Dictionary<Guid, List<Invitation>>> GroupsOf(IEnumerable<Invitation> invitations)
+    {
+        var ids = invitations.Where(i => i.GroupId is not null).Select(i => i.GroupId!.Value).Distinct().ToList();
+        if (ids.Count == 0) return [];
+        var members = await Query().Where(i => i.GroupId != null && ids.Contains(i.GroupId.Value)).ToListAsync();
+        return members.GroupBy(i => i.GroupId!.Value).ToDictionary(g => g.Key, g => g.OrderBy(i => i.Team).ThenBy(i => i.Seat).ToList());
+    }
+
+    private static PlayerSearchResult Ref(User u) => new(u.Id, u.DisplayName, u.RiotAccount?.RiotId ?? "", u.RiotAccount?.ProfileIconId);
+
+    private static InvitationDto ToDto(Invitation i, IReadOnlyDictionary<Guid, List<Invitation>> groups)
     {
         var config = JsonSerializer.Deserialize<SeriesConfig>(i.Config, Mapping.Json)!;
-        return new InvitationDto(i.Id, i.Status.ToString(), config, Mapping.ConfigLabel(config),
-            new PlayerSearchResult(i.FromUserId, i.FromUser.DisplayName, i.FromUser.RiotAccount?.RiotId ?? ""),
-            new PlayerSearchResult(i.ToUserId, i.ToUser.DisplayName, i.ToUser.RiotAccount?.RiotId ?? ""),
-            i.CreatedAt, i.ExpiresAt, i.SeriesId);
+        var group = i.GroupId is { } g && groups.TryGetValue(g, out var members)
+            ? members.Select(m => new InvitationMemberDto(Ref(m.ToUser), m.Team.ToString(), m.Status.ToString())).ToList()
+            : null;
+        return new InvitationDto(i.Id, i.Status.ToString(), config, Mapping.ConfigLabel(config), Ref(i.FromUser), Ref(i.ToUser),
+            i.CreatedAt, i.ExpiresAt, i.SeriesId, group);
     }
 }
 
@@ -220,6 +354,19 @@ public sealed class SeriesController(SeriesService series) : ControllerBase
 {
     [HttpGet]
     public Task<List<SeriesSummaryDto>> List([FromQuery] SeriesStatus? status) => series.ListAsync(User.UserId(), status);
+
+    [HttpGet("history")]
+    public Task<List<HistoryEntryDto>> History() => series.HistoryAsync(User.UserId(), finishedOnly: true, take: 50);
+
+    /// <summary>Données brutes des statistiques : toutes les séries du joueur, agrégées côté client.</summary>
+    [HttpGet("stats")]
+    public Task<List<HistoryEntryDto>> Stats() => series.HistoryAsync(User.UserId(), finishedOnly: false, take: 500);
+
+    /// <summary>Récapitulatif détaillé d'une série (même forme qu'une entrée d'historique).</summary>
+    [HttpGet("{id:guid}/recap")]
+    public async Task<HistoryEntryDto> Recap(Guid id) =>
+        (await series.HistoryAsync(User.UserId(), finishedOnly: false, take: 1, seriesId: id)).FirstOrDefault()
+        ?? throw new AppException("Série introuvable.", 404);
 
     [HttpGet("{id:guid}")]
     public Task<SeriesStateDto> Get(Guid id) => series.GetStateAsync(id, User.UserId());
@@ -271,12 +418,17 @@ public static class Mapping
 
     public static UserDto ToDto(User u) => new(u.Id, u.Email, u.DisplayName, u.RiotAccount is null ? null : ToDto(u.RiotAccount));
 
-    public static RiotAccountDto ToDto(RiotAccount r) => new(r.Puuid, r.GameName, r.TagLine, r.Region, r.RiotId);
+    public static RiotAccountDto ToDto(RiotAccount r) => new(r.Puuid, r.GameName, r.TagLine, r.Region, r.RiotId, r.ProfileIconId);
 
-    public static string ConfigLabel(SeriesConfig c)
+    public static string ConfigLabel(SeriesConfig c) =>
+        $"{(c.TeamSize > 1 ? $"{c.TeamSize}v{c.TeamSize} · " : "")}BO{c.BestOf} · {Label(c.ChampionMode, c.SpellMode, c.Lab is { } lab ? lab.Label : WinExpression.Describe(c.WinExpression!))}";
+
+    public static string PresetLabel(PresetConfig c) => Label(c.ChampionMode, c.SpellMode, WinExpression.Describe(c.WinExpression));
+
+    private static string Label(ChampionMode championMode, SpellMode spellMode, string winLabel)
     {
-        var mode = c.ChampionMode switch { ChampionMode.MIRROR => "Miroir", ChampionMode.RANDOM => "Aléatoire", _ => "Deck" };
-        var spells = c.SpellMode switch { SpellMode.FREE => "Sorts libres", SpellMode.DECK_COMPOSED => "Deck de sorts composé", _ => "Deck de sorts aléatoire" };
-        return $"BO{c.BestOf} · {mode} · {spells} · {WinExpression.Describe(c.WinExpression)}";
+        var mode = championMode switch { ChampionMode.MIRROR => "Miroir", ChampionMode.RANDOM => "Aléatoire", ChampionMode.MIRROR_DECK => "Deck miroir", _ => "Deck" };
+        var spells = spellMode switch { SpellMode.FREE => "Sorts libres", SpellMode.DECK_COMPOSED => "Deck de sorts composé", _ => "Deck de sorts aléatoire" };
+        return $"{mode} · {spells} · {winLabel}";
     }
 }

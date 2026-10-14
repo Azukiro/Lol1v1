@@ -62,7 +62,7 @@ public sealed class TestPlayer : IAsyncDisposable
         var auth = await (await http.PostAsJsonAsync("/api/v1/auth/register", new { email = $"{name}@test.fr", password = "password123", displayName = name }))
             .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<AuthResponse>();
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", auth!.Token);
-        (await http.PostAsJsonAsync("/api/v1/riot-accounts/link", new { puuid = $"puuid-{name}", gameName = name, tagLine = "EUW", region = "EUW" }))
+        (await http.PostAsJsonAsync("/api/v1/riot-accounts/link", new { puuid = $"puuid-{name}", gameName = name, tagLine = "EUW", region = "EUW", profileIconId = 29 }))
             .EnsureSuccessStatusCode();
 
         var hub = new HubConnectionBuilder()
@@ -76,7 +76,7 @@ public sealed class TestPlayer : IAsyncDisposable
             .Build();
         var player = new TestPlayer { Http = http, Hub = hub, RiotId = $"{name}#EUW" };
         foreach (var evt in new[] { "SeriesUpdated", "BansRevealed", "AssignmentReady", "PicksRevealed", "LaunchLobby", "PickWarning",
-                     "RoundVoided", "RoundResolved", "RoundDisputed", "SeriesFinished", "VoidRequested", "SeriesAborted" })
+                     "RoundVoided", "RoundResolved", "RoundDisputed", "SeriesFinished", "VoidRequested", "SeriesAborted", "SecretObjectiveRevealed", "VerifyEvent" })
             hub.On<Guid, JsonElement?>(evt, (_, payload) => player.Events.Enqueue((evt, payload)));
         hub.On<JsonElement>("InvitationReceived", p => player.Events.Enqueue(("InvitationReceived", p)));
         hub.On<JsonElement>("InvitationUpdated", p => player.Events.Enqueue(("InvitationUpdated", p)));
@@ -154,6 +154,36 @@ public class SeriesFlowTests
     }
 
     [Fact]
+    public async Task Presets_server_and_user_defined()
+    {
+        await using var factory = new ApiFactory();
+        await using var a = await TestPlayer.CreateAsync(factory, "Kaelis");
+        var bad = await a.Http.PostAsJsonAsync("/api/v1/presets", new { name = "Doublon", config = new { championMode = "MIRROR", spellMode = "FREE", winExpression = new { op = "OR", children = new object[] { new { condition = "KILLS", threshold = 1 }, new { condition = "KILLS", threshold = 2 } } } } });
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        // Format absent : il se choisit au lancement du défi.
+        var created = await (await a.Http.PostAsJsonAsync("/api/v1/presets", new { name = "Mon BO5", config = new { championMode = "DECK", spellMode = "FREE", winExpression = KillsOrTower } }))
+            .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<JsonObject>();
+        var list = await a.Http.GetFromJsonAsync<PresetsResponse>("/api/v1/presets", ApiJson.Options);
+        Assert.True(list!.Server.Count >= 3);
+        Assert.All(list.Server, p => p.Config.Validate());
+        Assert.Equal("Mon BO5", Assert.Single(list.Mine).Name);
+        (await a.Http.DeleteAsync($"/api/v1/presets/{created!["id"]}")).EnsureSuccessStatusCode();
+        Assert.Empty((await a.Http.GetFromJsonAsync<PresetsResponse>("/api/v1/presets", ApiJson.Options))!.Mine);
+    }
+
+    [Fact]
+    public async Task Lookup_returns_only_registered_friends()
+    {
+        await using var factory = new ApiFactory();
+        await using var a = await TestPlayer.CreateAsync(factory, "Kaelis");
+        await using var b = await TestPlayer.CreateAsync(factory, "Vorn");
+        var res = await (await a.Http.PostAsJsonAsync("/api/v1/users/lookup", new { puuids = new[] { "puuid-Vorn", "puuid-inconnu" } }))
+            .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<List<RegisteredPlayer>>();
+        Assert.Equal("Vorn#EUW", Assert.Single(res!).RiotId);
+        Assert.Equal(29, res![0].ProfileIconId);
+    }
+
+    [Fact]
     public async Task Mirror_bo3_played_end_to_end()
     {
         await using var factory = new ApiFactory();
@@ -191,6 +221,10 @@ public class SeriesFlowTests
         // Observation tardive ignorée.
         await b.Kill(id, "3", 330, "SELF");
 
+        // Partie de la manche 1 pas encore quittée : la signaler pour la manche 2 est ignoré.
+        await b.Hub.InvokeAsync("ReportGameStarted", id, 4242L, (int?)null, (int[]?)null);
+        Assert.Equal("LOBBY", (await a.State(id)).Rounds[1].Status);
+
         // Manche 2 : champion différent, A gagne à nouveau → série terminée 2:0.
         var r2 = state.Rounds[1];
         Assert.NotEqual(state.Rounds[0].Assignments[0].ChampionId, r2.Assignments[0].ChampionId);
@@ -207,6 +241,64 @@ public class SeriesFlowTests
         var history = await b.Http.GetFromJsonAsync<List<SeriesSummaryDto>>("/api/v1/series?status=FINISHED", ApiJson.Options);
         Assert.Single(history!);
         Assert.Equal(0, history![0].MyWins);
+
+        // Historique détaillé, vu de B : manche 1 perdue sur 2 kills de A.
+        var detailed = await b.Http.GetFromJsonAsync<List<HistoryEntryDto>>("/api/v1/series/history", ApiJson.Options);
+        var entry = Assert.Single(detailed!);
+        Assert.Equal(2, entry.Rounds.Count);
+        var round1 = entry.Rounds[0];
+        Assert.Equal("A", round1.WinnerSlot);
+        Assert.Equal(2, round1.Opponent.Kills);
+        Assert.Equal(0, round1.Me.Kills);
+        Assert.Equal(r1.Assignments[0].ChampionId, round1.Me.ChampionId);
+        Assert.True(entry.Rounds[1].Opponent.FirstTower);
+
+        var recap = await a.Http.GetFromJsonAsync<HistoryEntryDto>($"/api/v1/series/{id}/recap", ApiJson.Options);
+        Assert.Equal(2, recap!.Series.MyWins);
+        Assert.Equal(2, recap.Rounds[0].Me.Kills);
+    }
+
+    [Fact]
+    public async Task Mirror_deck_draws_from_both_decks_without_bans()
+    {
+        await using var factory = new ApiFactory();
+        await using var a = await TestPlayer.CreateAsync(factory, "Kaelis");
+        await using var b = await TestPlayer.CreateAsync(factory, "Vorn");
+        var id = await StartSeries(a, b, Config(3, "MIRROR_DECK", "FREE", KillsOrTower));
+
+        await a.PutPool(id, [1, 2, 3, 4, 5]);
+        // Pool adverse inconnu : impossible de savoir quels champions sont communs.
+        var early = await a.Http.PutAsJsonAsync($"/api/v1/series/{id}/deck", new { championIds = new[] { 1, 2 } });
+        Assert.Equal(HttpStatusCode.BadRequest, early.StatusCode);
+        await b.PutPool(id, [2, 3, 4, 5, 6]);
+        Assert.Equal(new[] { 2, 3, 4, 5 }, (await a.State(id)).Me.CommonPool);
+
+        // BO3 → 2 champions exactement, possédés par les deux.
+        var notCommon = await a.Http.PutAsJsonAsync($"/api/v1/series/{id}/deck", new { championIds = new[] { 1, 2 } });
+        Assert.Equal(HttpStatusCode.BadRequest, notCommon.StatusCode);
+        var tooMany = await a.Http.PutAsJsonAsync($"/api/v1/series/{id}/deck", new { championIds = new[] { 2, 3, 4 } });
+        Assert.Equal(HttpStatusCode.BadRequest, tooMany.StatusCode);
+        (await a.Http.PutAsJsonAsync($"/api/v1/series/{id}/deck", new { championIds = new[] { 2, 3 } })).EnsureSuccessStatusCode();
+        (await b.Http.PutAsJsonAsync($"/api/v1/series/{id}/deck", new { championIds = new[] { 3, 5 } })).EnsureSuccessStatusCode();
+
+        var state = await a.State(id);
+        Assert.Equal("IN_PROGRESS", state.Status);
+        Assert.Equal(2, state.Opponent.Deck!.Count);
+        var r1 = state.Rounds.Single();
+        Assert.Equal("LOBBY", r1.Status);
+        var first = r1.Assignments[0].ChampionId!.Value;
+        Assert.Contains(first, new[] { 2, 3, 5 });
+        Assert.Equal(first, r1.Assignments[1].ChampionId);
+
+        // Manche 1 gagnée : une seule entrée consommée sur les 4.
+        await a.Hub.InvokeAsync("ReportGameStarted", id, 4242L, first, (int[]?)null);
+        await a.Hub.InvokeAsync("ReportObservation", id, new ObservationReport("TURRET", "40", 500, new ObservationPayload("SELF", null, null)));
+        await b.Hub.InvokeAsync("ReportObservation", id, new ObservationReport("TURRET", "40", 500, new ObservationPayload("OPPONENT", null, null)));
+        await Eventually(() => a.Received("RoundResolved"));
+        state = await a.State(id);
+        Assert.Equal(1, state.Me.Deck.Count(d => d.Consumed) + state.Opponent.Deck!.Count(d => d.Consumed));
+        Assert.Equal("LOBBY", state.Rounds[1].Status);
+        Assert.Equal(state.Rounds[1].Assignments[0].ChampionId, state.Rounds[1].Assignments[1].ChampionId);
     }
 
     [Fact]
@@ -247,6 +339,12 @@ public class SeriesFlowTests
         Assert.Equal("IN_PROGRESS", state.Status);
         Assert.Equal(new[] { 11, 12, 13 }, state.Opponent.BansOnMe!.Order().ToArray());
 
+        // Statistiques : bans révélés, vus de B.
+        var stats = await b.Http.GetFromJsonAsync<List<HistoryEntryDto>>("/api/v1/series/stats", ApiJson.Options);
+        var entry = Assert.Single(stats!);
+        Assert.Equal(new[] { 1, 2, 3 }, entry.MyBans.Order().ToArray());
+        Assert.Equal(new[] { 11, 12, 13 }, entry.OpponentBans.Order().ToArray());
+
         // Pick aveugle : banni refusé, puis choix masqué jusqu'à révélation.
         await Assert.ThrowsAsync<HubException>(() => b.Hub.InvokeAsync("SubmitPick", id, 11, new[] { 4, 7 }));
         await b.Hub.InvokeAsync("SubmitPick", id, 14, new[] { 4, 7 });
@@ -274,17 +372,19 @@ public class SeriesFlowTests
         state = await a.State(id);
         Assert.Equal(3, state.Rounds.Count);
 
-        // Tentative 3 : first blood de B, source unique validée après le délai.
+        // Tentative 3 : first blood déclaré par B seul ; le serveur demande à A de le vérifier, A le confirme.
         await b.Hub.InvokeAsync("ReportGameStarted", id, 2L, 14, new[] { 7, 4 });
         await b.Hub.InvokeAsync("ReportObservation", id, new ObservationReport("FIRST_BLOOD", "1", 95.5, new ObservationPayload("SELF", null, null)));
         Assert.Equal("IN_GAME", (await a.State(id)).Rounds[2].Status);
-        factory.Clock.Advance(TimeSpan.FromSeconds(11));
-        using (var scope = factory.Services.CreateScope())
-            await scope.ServiceProvider.GetRequiredService<SeriesService>().TickAsync(id);
+        await Eventually(() => a.Received("VerifyEvent"));
+        Assert.False(b.Received("VerifyEvent"));
+        var verify = a.Events.First(e => e.Name == "VerifyEvent").Payload!.Value;
+        Assert.Equal("FIRST_BLOOD", verify.GetProperty("type").GetString());
+        Assert.Equal("OPPONENT", verify.GetProperty("subject").GetString());
+        await a.Hub.InvokeAsync("ReportObservation", id, new ObservationReport("FIRST_BLOOD", "t95500", 95.5, new ObservationPayload("OPPONENT", null, null)));
         await Eventually(() => a.Received("SeriesFinished"));
         state = await b.State(id);
         Assert.Equal("B", state.WinnerSlot);
-        Assert.True(state.Rounds[2].WinningCondition!.SingleSource);
         Assert.True(state.Me.Deck.Single(d => d.ChampionId == 14).Consumed);
         Assert.All(state.Me.SpellTokens, t => Assert.Equal(0, t.Left));
     }
@@ -318,5 +418,38 @@ public class SeriesFlowTests
         Assert.Equal("VALIDATED", state.Rounds[1].Status);
         Assert.Equal("B", state.Rounds[1].WinnerSlot);
         Assert.Equal(1, state.Players[1].RoundsWon);
+    }
+
+    [Fact]
+    public async Task Forged_kill_is_denied_or_left_unconfirmed_and_never_wins()
+    {
+        await using var factory = new ApiFactory();
+        await using var a = await TestPlayer.CreateAsync(factory, "Kaelis");
+        await using var b = await TestPlayer.CreateAsync(factory, "Vorn");
+        var id = await StartSeries(a, b, Config(3, "RANDOM", "FREE", new { condition = "KILLS", threshold = 1 }));
+        await a.PutPool(id, [1, 2, 3]);
+        await b.PutPool(id, [1, 2, 3]);
+
+        // Tentative 1 : A s'attribue un kill que le client de B ne trouve pas → démenti, litige.
+        await a.Hub.InvokeAsync("ReportGameStarted", id, 77L, (int?)null, (int[]?)null);
+        await a.Kill(id, "t60000-SELF", 60, "SELF");
+        await Eventually(() => b.Received("VerifyEvent"));
+        await b.Hub.InvokeAsync("ReportObservation", id, new ObservationReport("DENIAL", "deny-KILL-t60000", 60, new ObservationPayload("OPPONENT", null, "KILL")));
+        await Eventually(() => a.Received("RoundDisputed"));
+        var state = await a.State(id);
+        Assert.Equal("DISPUTED", state.Rounds[0].Status);
+        Assert.Null(state.Rounds[0].WinnerSlot);
+
+        // Résolu en annulation, manche rejouée : A recommence, B ne répond pas. Après le délai, litige (plus de « source unique »).
+        await a.Hub.InvokeAsync("VoteDispute", id, "A");
+        await b.Hub.InvokeAsync("VoteDispute", id, "VOID");
+        await a.Hub.InvokeAsync("ReportGameStarted", id, 78L, (int?)null, (int[]?)null);
+        await a.Kill(id, "t90000-SELF", 90, "SELF");
+        factory.Clock.Advance(TimeSpan.FromSeconds(21));
+        using (var scope = factory.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<SeriesService>().TickAsync(id);
+        state = await a.State(id);
+        Assert.Equal("DISPUTED", state.Rounds[1].Status);
+        Assert.Equal(0, state.Players[0].RoundsWon);
     }
 }

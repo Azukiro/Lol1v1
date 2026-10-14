@@ -1,4 +1,8 @@
 # Contexte de build : dossier server/
+# Installeur Windows et flux de mise à jour, publiés par .github/workflows/release-client.yml.
+ARG LAUNCHER_IMAGE=ghcr.io/azukiro/duelyst-launcher:latest
+FROM ${LAUNCHER_IMAGE} AS launcher
+
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 COPY Api/Api.csproj Api/
@@ -9,6 +13,7 @@ RUN dotnet publish Api/Api.csproj -c Release -o /app --no-restore
 FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
 COPY --from=build /app .
+COPY --from=launcher / ./updates/
 ENV ASPNETCORE_ENVIRONMENT=Production
 # Render fournit PORT ; 8080 par défaut en local.
 ENV PORT=8080

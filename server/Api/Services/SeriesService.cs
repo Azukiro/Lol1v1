@@ -1,10 +1,13 @@
 using System.Text.Json;
 using Api.Data;
 using Api.Domain;
+using Api.Domain.Lab;
 using Api.Dtos;
 using Microsoft.EntityFrameworkCore;
 
 namespace Api.Services;
+
+public sealed record SeatedPlayer(User User, RiotAccount Riot, Slot Slot, int Seat);
 
 public sealed record PoolSnapshot(int[] Owned, int[] Free)
 {
@@ -57,42 +60,93 @@ public sealed class SeriesService(
             .Where(s => s.Players.Any(p => p.UserId == userId));
         if (status is not null) query = query.Where(s => s.Status == status);
         var list = await query.OrderByDescending(s => s.CreatedAt).Take(100).ToListAsync();
+        return list.Select(s => Summary(s, userId)).ToList();
+    }
+
+    /// <summary>Séries du joueur avec champions, sorts, bans et statistiques de chaque manche jouée (tentatives annulées exclues).</summary>
+    public async Task<List<HistoryEntryDto>> HistoryAsync(Guid userId, bool finishedOnly, int take, Guid? seriesId = null)
+    {
+        var query = db.Series
+            .Include(s => s.Players).ThenInclude(p => p.User)
+            .Include(s => s.Players).ThenInclude(p => p.RiotAccount)
+            .Include(s => s.Rounds).ThenInclude(r => r.Assignments)
+            .Include(s => s.Rounds).ThenInclude(r => r.Observations)
+            .Include(s => s.Bans)
+            .Where(s => s.Players.Any(p => p.UserId == userId));
+        if (finishedOnly) query = query.Where(s => s.Status == SeriesStatus.FINISHED || s.Status == SeriesStatus.ABORTED);
+        if (seriesId is not null) query = query.Where(s => s.Id == seriesId);
+        var list = await query.OrderByDescending(s => s.CreatedAt).Take(take).AsSplitQuery().ToListAsync();
         return list.Select(s =>
         {
             var me = s.Players.First(p => p.UserId == userId);
-            var opp = s.Players.First(p => p.Id != me.Id);
-            return new SeriesSummaryDto(s.Id, s.Status.ToString(), s.BestOf, s.ChampionMode.ToString(), s.SpellMode.ToString(),
-                WinExpression.Describe(WinExpression.Parse(s.WinExpression)), me.Slot.ToString(), opp.User.DisplayName,
-                opp.RiotAccount.RiotId, me.RoundsWon, opp.RoundsWon,
-                s.WinnerPlayerId is null ? null : s.Players.First(p => p.Id == s.WinnerPlayerId).Slot.ToString(),
-                s.CreatedAt, s.FinishedAt);
+            var opp = Opponent(s, me);
+            var rounds = s.Rounds.Where(r => r.Status == RoundStatus.VALIDATED).OrderBy(r => r.Number).Select(r =>
+            {
+                var facts = Evaluate(s, r).Facts;
+                var condition = r.WinningCondition is null ? null : JsonSerializer.Deserialize<WinningConditionDto>(r.WinningCondition, Json);
+                HistoryPlayerRoundDto Player(SeriesPlayer p)
+                {
+                    var a = r.Assignments.FirstOrDefault(x => x.PlayerId == p.Id);
+                    var f = facts[p.Slot];
+                    // Sorts libres : rien n'est imposé, on affiche ceux remontés depuis la sélection.
+                    var spells = a?.Spell1Id is not null ? (a.Spell1Id, a.Spell2Id) : (a?.ReportedSpell1Id, a?.ReportedSpell2Id);
+                    return new HistoryPlayerRoundDto(a?.ChampionId, spells.Item1, spells.Item2, f.Kills, f.Cs, f.FirstBloodTime is not null, f.FirstTowerTime is not null);
+                }
+                return new HistoryRoundDto(r.Number, r.WinnerPlayerId is null ? null : SlotName(s, r.WinnerPlayerId.Value),
+                    condition?.Label, condition?.Condition, condition?.EventTime, r.StartedAt, r.EndedAt, Player(me), Player(opp));
+            }).ToList();
+            // Bans à l'aveugle : visibles seulement une fois les deux joueurs passés.
+            var revealed = s.Bans.Select(b => b.ByPlayerId).Distinct().Count() == 2;
+            List<int> Bans(Guid by) => revealed ? s.Bans.Where(b => b.ByPlayerId == by).Select(b => b.ChampionId).ToList() : [];
+            return new HistoryEntryDto(Summary(s, userId), rounds, Bans(me.Id), Bans(opp.Id));
         }).ToList();
+    }
+
+    private static SeriesSummaryDto Summary(Series s, Guid userId)
+    {
+        var me = s.Players.First(p => p.UserId == userId);
+        var opp = Opponent(s, me);
+        var partner = s.Players.FirstOrDefault(p => p.Slot == me.Slot && p.Id != me.Id);
+        return new SeriesSummaryDto(s.Id, s.Status.ToString(), s.BestOf, s.ChampionMode.ToString(), s.SpellMode.ToString(),
+            ExpressionLabel(s), me.Slot.ToString(), TeamName(s, opp.Slot),
+            opp.RiotAccount.RiotId, opp.RiotAccount.ProfileIconId, me.RoundsWon, opp.RoundsWon,
+            s.WinnerPlayerId is null ? null : s.Players.First(p => p.Id == s.WinnerPlayerId).Slot.ToString(),
+            s.CreatedAt, s.FinishedAt, s.TeamSize, partner?.User.DisplayName);
     }
 
     // =====================================================================
     // Création (à l'acceptation d'une invitation)
     // =====================================================================
 
-    public Series Create(SeriesConfig config, User creator, RiotAccount creatorRiot, User guest, RiotAccount guestRiot)
+    public Series Create(SeriesConfig config, User creator, RiotAccount creatorRiot, User guest, RiotAccount guestRiot) =>
+        Create(config, [new(creator, creatorRiot, Slot.A, 0), new(guest, guestRiot, Slot.B, 0)]);
+
+    /// <summary>Création à N joueurs : le créateur en A place 0, ses invités (coéquipier en A, adversaires en B).</summary>
+    public Series Create(SeriesConfig config, IReadOnlyList<SeatedPlayer> players)
     {
         config.Validate();
+        if (players.Count != 2 * config.TeamSize) throw new AppException($"Il faut {2 * config.TeamSize} joueurs.");
+        if (players.Select(p => p.User.Id).Distinct().Count() != players.Count) throw new AppException("Un joueur ne peut occuper qu'une place.");
         var series = new Series
         {
             BestOf = config.BestOf,
+            TeamSize = config.TeamSize,
             ChampionMode = config.ChampionMode,
             SpellMode = config.SpellMode,
-            WinExpression = WinExpression.Serialize(config.WinExpression),
+            WinExpression = config.Lab is null ? WinExpression.Serialize(config.WinExpression!) : "{}",
+            LabConfig = config.Lab is null ? null : JsonSerializer.Serialize(config.Lab, Json),
             DrawSeed = DrawService.NewSeed(),
             CreatedAt = clock.GetUtcNow(),
         };
-        series.Players.Add(new SeriesPlayer { SeriesId = series.Id, UserId = creator.Id, RiotAccountId = creatorRiot.Id, Slot = Slot.A });
-        series.Players.Add(new SeriesPlayer { SeriesId = series.Id, UserId = guest.Id, RiotAccountId = guestRiot.Id, Slot = Slot.B });
+        foreach (var p in players)
+            series.Players.Add(new SeriesPlayer { SeriesId = series.Id, UserId = p.User.Id, RiotAccountId = p.Riot.Id, Slot = p.Slot, Seat = p.Seat });
 
         if (config.SpellMode == SpellMode.DECK_RANDOM)
         {
             foreach (var p in series.Players)
             {
-                var budget = DrawService.DrawSpellBudget(series.DrawSeed, $"spells:{p.Slot}", series.BestOf, reference.AllowedSpellIds);
+                var purpose = p.Seat == 0 ? $"spells:{p.Slot}" : $"spells:{p.Slot}{p.Seat}";
+                var budget = DrawService.DrawSpellBudget(series.DrawSeed, purpose, series.BestOf, reference.AllowedSpellIds);
                 p.SpellTokens = budget.Select(kv => new SpellToken { SeriesPlayerId = p.Id, SpellId = kv.Key, QuantityInitial = kv.Value, QuantityLeft = kv.Value }).ToList();
                 p.SpellBudgetLockedAt = clock.GetUtcNow();
             }
@@ -122,11 +176,19 @@ public sealed class SeriesService(
 
     public Task SetDeckAsync(Guid seriesId, Guid userId, int[] championIds) => MutateAsync(seriesId, userId, (series, me) =>
     {
-        if (series.ChampionMode != ChampionMode.DECK) throw new AppException("Cette série n'est pas en mode deck.");
+        if (!SeriesRules.UsesDeck(series.ChampionMode)) throw new AppException("Cette série n'est pas en mode deck.");
         if (series.Status != SeriesStatus.SETUP) throw new AppException("La phase de composition est terminée.");
         if (me.DeckLockedAt is not null) throw new AppException("Ton deck est déjà validé.");
         var pool = Pool(me) ?? throw new AppException("Ton pool n'a pas encore été remonté.");
-        try { SeriesRules.ValidateDeck(series.BestOf, championIds, pool.All); }
+        try
+        {
+            if (series.ChampionMode == ChampionMode.MIRROR_DECK)
+            {
+                var common = CommonPool(series) ?? throw new AppException("Attends que ton adversaire ait remonté son pool.");
+                SeriesRules.ValidateMirrorDeck(series.BestOf, championIds, common);
+            }
+            else SeriesRules.ValidateDeck(series.BestOf, championIds, pool.All);
+        }
         catch (DomainException e) { throw new AppException(e.Message); }
         me.Deck = championIds.Select(c => new DeckChampion { SeriesPlayerId = me.Id, ChampionId = c }).ToList();
         db.DeckChampions.AddRange(me.Deck);
@@ -222,7 +284,7 @@ public sealed class SeriesService(
     {
         var round = CurrentRound(series) ?? throw new AppException("Aucune manche en cours.");
         if (round.Status is not (RoundStatus.LOBBY or RoundStatus.CHAMP_SELECT)) throw new AppException("La manche n'est pas prête à être lancée.");
-        if (me.Slot != Slot.A) throw new AppException("Seul le créateur de la série lance le lobby.");
+        if (me.Id != Creator(series).Id) throw new AppException("Seul le créateur de la série lance le lobby.");
         notifier.Enqueue(series, NotifierEvent.To(me.UserId, "LaunchLobby", LaunchPayload(series, round)));
         return Task.CompletedTask;
     });
@@ -249,6 +311,7 @@ public sealed class SeriesService(
             notifier.Enqueue(series, NotifierEvent.All("PickWarning", new
             {
                 slot = me.Slot.ToString(),
+                userId = me.UserId,
                 championOk,
                 spellsOk,
                 expectedChampionId = a.ChampionId,
@@ -262,6 +325,8 @@ public sealed class SeriesService(
     {
         var round = CurrentRound(series);
         if (round is null || round.Status is not (RoundStatus.LOBBY or RoundStatus.CHAMP_SELECT or RoundStatus.IN_GAME)) return Task.CompletedTask;
+        // Partie déjà utilisée par une manche précédente (pas encore quittée) : ce n'est pas la partie de cette manche.
+        if (lolGameId > 0 && series.Rounds.Any(r => r.Id != round.Id && r.LolGameId == lolGameId)) return Task.CompletedTask;
         var a = round.Assignments.First(x => x.PlayerId == me.Id);
         if (championId is > 0) a.ReportedChampionId = championId;
         if (spells is { Length: 2 }) { a.ReportedSpell1Id = spells[0]; a.ReportedSpell2Id = spells[1]; }
@@ -282,6 +347,16 @@ public sealed class SeriesService(
         {
             round.Status = RoundStatus.IN_GAME;
             round.StartedAt = clock.GetUtcNow();
+            if (Objectives(round) is { } objectives)
+            {
+                // Labo : chaque joueur découvre son objectif secret au chargement, après le verrouillage des champions.
+                foreach (var p in series.Players)
+                {
+                    var objective = SecretObjectives.Get(objectives.IdOf(p.Slot));
+                    notifier.Enqueue(series, NotifierEvent.To(p.UserId, "SecretObjectiveRevealed",
+                        new { roundId = round.Id, label = objective.Label, tier = objectives.Tier.ToString(), timeLimit = objectives.TimeLimit }));
+                }
+            }
         }
         return Task.CompletedTask;
     });
@@ -308,8 +383,16 @@ public sealed class SeriesService(
             "OPPONENT" => Opponent(series, me).Id,
             _ => null,
         };
-        if (type is ObservationType.KILL or ObservationType.FIRST_BLOOD or ObservationType.TURRET or ObservationType.CS && subject is null)
+        if (type is ObservationType.KILL or ObservationType.FIRST_BLOOD or ObservationType.TURRET or ObservationType.CS or ObservationType.DENIAL && subject is null)
             throw new AppException("Bénéficiaire (subject) requis : SELF ou OPPONENT.");
+        // Démenti : le type démenti est transmis dans payload.raw.
+        ObservationType? denied = null;
+        if (type == ObservationType.DENIAL)
+        {
+            if (!Enum.TryParse<ObservationType>(report.Payload?.Raw, out var d) || d is not (ObservationType.KILL or ObservationType.FIRST_BLOOD or ObservationType.TURRET))
+                throw new AppException("Démenti : type démenti invalide.");
+            denied = d;
+        }
 
         var obs = new Observation
         {
@@ -320,16 +403,46 @@ public sealed class SeriesService(
             EventTime = report.EventTime,
             Payload = JsonSerializer.Serialize(report.Payload ?? new ObservationPayload(null, null, null), Json),
             SubjectPlayerId = subject,
-            Value = report.Payload?.Value,
+            Value = denied is { } dt ? (int)dt : report.Payload?.Value,
             ReceivedAt = clock.GetUtcNow(),
         };
         round.Observations.Add(obs);
         db.Observations.Add(obs);
+        RequestVerification(series, round, me, obs);
         Arbitrate(series, round);
         return Task.CompletedTask;
     });
 
-    /// <summary>Réévaluation périodique (validation « source unique » après le délai).</summary>
+    /// <summary>
+    /// Un événement déclaré par une seule équipe est soumis aux clients de l'équipe adverse (VerifyEvent) :
+    /// chacun le cherche dans ses propres données de jeu et le remonte s'il le trouve, ou le dément (DENIAL).
+    /// Sans réponse dans <see cref="Arbitration.ConfirmationDelay"/>, la manche passe en litige.
+    /// </summary>
+    private void RequestVerification(Series series, Round round, SeriesPlayer me, Observation obs)
+    {
+        if (obs.SubjectPlayerId is not { } subjectId) return;
+        var subject = SlotOf(series, subjectId);
+        // CS : seule l'auto-déclaration est à corroborer (la vue adverse sert de confirmation).
+        if (obs.Type == ObservationType.CS ? subject != me.Slot : obs.Type is not (ObservationType.KILL or ObservationType.FIRST_BLOOD or ObservationType.TURRET))
+            return;
+        var other = me.Slot.Other();
+        var alreadySeen = round.Observations.Any(o => SlotOf(series, o.ReportedByPlayerId) == other && o.Type == obs.Type && o.SubjectPlayerId is { } s && SlotOf(series, s) == subject
+            && (obs.Type == ObservationType.CS
+                ? o.Value >= obs.Value - Arbitration.CsTolerance * series.TeamSize
+                : Math.Abs(o.EventTime - obs.EventTime) <= Arbitration.SameEventTolerance));
+        if (alreadySeen) return;
+        foreach (var p in series.Players.Where(p => p.Slot == other))
+            notifier.Enqueue(series, NotifierEvent.To(p.UserId, "VerifyEvent", new
+            {
+                roundId = round.Id,
+                type = obs.Type.ToString(),
+                eventTime = obs.EventTime,
+                subject = subject == p.Slot ? "SELF" : "OPPONENT",
+                value = obs.Value,
+            }));
+    }
+
+    /// <summary>Réévaluation périodique (événement non confirmé par l'équipe adverse après le délai → litige).</summary>
     public async Task TickAsync(Guid seriesId)
     {
         using var _ = await locks.AcquireAsync(seriesId);
@@ -338,7 +451,7 @@ public sealed class SeriesService(
         if (round is null || round.Status != RoundStatus.IN_GAME || round.Observations.Count == 0) return;
         var before = round.Status;
         Arbitrate(series, round);
-        // Une observation « source unique » vient-elle d'atteindre le délai de confirmation ? → état à pousser.
+        // Une observation vient-elle d'atteindre le délai de confirmation ? → état à pousser.
         var now = clock.GetUtcNow();
         var justConfirmed = round.Observations.Any(o =>
             now - o.ReceivedAt >= Arbitration.ConfirmationDelay && now - o.ReceivedAt < Arbitration.ConfirmationDelay + ArbitrationTicker.Interval + TimeSpan.FromSeconds(1));
@@ -352,6 +465,11 @@ public sealed class SeriesService(
 
     private void Arbitrate(Series series, Round round)
     {
+        if (Objectives(round) is { } objectives)
+        {
+            ArbitrateSecret(series, round, objectives);
+            return;
+        }
         var outcome = Evaluate(series, round);
         if (outcome.Disputed)
         {
@@ -362,19 +480,85 @@ public sealed class SeriesService(
         if (outcome.Winner is { } winner)
         {
             var sat = outcome.WinningSatisfaction!;
-            var cond = new WinningConditionDto(WinExpression.Describe(sat.Trigger), sat.Trigger.Condition, sat.Trigger.Threshold, sat.Time, outcome.WinnerSingleSource);
-            ValidateRound(series, round, series.Players.First(p => p.Slot == winner), cond);
+            var cond = new WinningConditionDto(WinExpression.Describe(sat.Trigger), sat.Trigger.Condition, sat.Trigger.Threshold, sat.Time, false);
+            ValidateRound(series, round, Captain(series, winner), cond);
         }
     }
+
+    /// <summary>
+    /// Labo « objectifs secrets » : chacun son expression. Au temps limite sans vainqueur,
+    /// la meilleure progression (faits antérieurs à la limite) l'emporte ; égalité → manche rejouée.
+    /// </summary>
+    private void ArbitrateSecret(Series series, Round round, RoundObjectives objectives)
+    {
+        var outcome = Evaluate(series, round);
+        if (outcome.Disputed)
+        {
+            round.Status = RoundStatus.DISPUTED;
+            notifier.Enqueue(series, NotifierEvent.All("RoundDisputed", new { roundId = round.Id, reasons = outcome.Contradictions }));
+            return;
+        }
+        var limit = objectives.TimeLimit;
+        if (outcome.Winner is { } winner && outcome.WinningSatisfaction!.Time <= limit)
+        {
+            var objective = SecretObjectives.Get(objectives.IdOf(winner));
+            ValidateRound(series, round, series.Players.First(p => p.Slot == winner),
+                new WinningConditionDto($"Objectif secret · {objective.Label}", null, null, outcome.WinningSatisfaction.Time, false));
+            return;
+        }
+        var gameClock = Math.Max(GameClock(round), outcome.WinningSatisfaction?.Time ?? 0);
+        if (gameClock < limit) return;
+        // Un événement antérieur à la limite attend encore sa confirmation : on attend aussi.
+        if (outcome.EarliestPendingTime is { } pending && pending <= limit) return;
+
+        var progress = new[] { Slot.A, Slot.B }.ToDictionary(s => s, s => SecretObjectives.Progress(objectives.ExpressionOf(s), outcome.Facts[s], limit));
+        static string Pct(double p) => $"{Math.Round(p * 100)} %";
+        if (Math.Abs(progress[Slot.A] - progress[Slot.B]) < 0.005)
+        {
+            VoidRound(series, round, $"Égalité au temps limite ({Pct(progress[Slot.A])} chacun)");
+            return;
+        }
+        var best = progress[Slot.A] > progress[Slot.B] ? Slot.A : Slot.B;
+        var label = SecretObjectives.Get(objectives.IdOf(best)).Label;
+        ValidateRound(series, round, series.Players.First(p => p.Slot == best),
+            new WinningConditionDto($"Temps limite · {Pct(progress[best])} contre {Pct(progress[best.Other()])} ({label})", null, null, limit, false));
+    }
+
+    /// <summary>Délai avant d'accepter l'horloge d'un seul client (l'autre envoie la sienne toutes les 30 s).</summary>
+    public static readonly TimeSpan SingleClockDelay = TimeSpan.FromSeconds(45);
+
+    /// <summary>
+    /// Temps de jeu atteint d'après les observations CLOCK : le plus petit des deux clients quand
+    /// les deux en envoient (un client ne peut pas avancer seul l'horloge). Si un seul client en envoie
+    /// (adversaire déconnecté), ses relevés comptent une fois le délai écoulé.
+    /// </summary>
+    private double GameClock(Round round)
+    {
+        var clocks = round.Observations.Where(o => o.Type == ObservationType.CLOCK).GroupBy(o => o.ReportedByPlayerId).ToList();
+        if (clocks.Count == 2) return clocks.Min(g => g.Max(o => o.EventTime));
+        var now = clock.GetUtcNow();
+        return clocks.SelectMany(g => g).Where(o => now - o.ReceivedAt >= SingleClockDelay).Select(o => o.EventTime).DefaultIfEmpty(0).Max();
+    }
+
+    private static RoundObjectives? Objectives(Round round) =>
+        round.LabState is null ? null : JsonSerializer.Deserialize<RoundObjectives>(round.LabState, Json);
+
+    private static LabConfig? Lab(Series series) =>
+        series.LabConfig is null ? null : JsonSerializer.Deserialize<LabConfig>(series.LabConfig, Json);
+
+    private static string ExpressionLabel(Series series) =>
+        Lab(series) is { } lab ? lab.Label : WinExpression.Describe(WinExpression.Parse(series.WinExpression));
 
     private ArbitrationOutcome Evaluate(Series series, Round round)
     {
         var events = round.Observations
-            .Where(o => o.SubjectPlayerId is not null && o.Type is ObservationType.KILL or ObservationType.FIRST_BLOOD or ObservationType.TURRET or ObservationType.CS)
+            .Where(o => o.SubjectPlayerId is not null && o.Type is ObservationType.KILL or ObservationType.FIRST_BLOOD or ObservationType.TURRET or ObservationType.CS or ObservationType.DENIAL)
             .Select(o => new ObservedEvent(SlotOf(series, o.ReportedByPlayerId), o.Type, o.EventId, o.EventTime,
                 SlotOf(series, o.SubjectPlayerId!.Value), o.Value, o.ReceivedAt))
             .ToList();
-        return Arbitration.Evaluate(WinExpression.Parse(series.WinExpression), events, clock.GetUtcNow());
+        if (Objectives(round) is { } objectives)
+            return Arbitration.Evaluate(objectives.ExpressionOf, events, clock.GetUtcNow());
+        return Arbitration.Evaluate(WinExpression.Parse(series.WinExpression), events, clock.GetUtcNow(), Arbitration.CsTolerance * series.TeamSize);
     }
 
     // =====================================================================
@@ -385,7 +569,8 @@ public sealed class SeriesService(
     {
         var round = CurrentRound(series) ?? throw new AppException("Aucune manche en cours.");
         if (round.Status is RoundStatus.VALIDATED or RoundStatus.VOIDED) throw new AppException("Manche déjà terminée.");
-        if (round.VoidRequestedBy is { } other && other != me.Id)
+        // Accord nécessaire de l'équipe adverse (en 1v1 : de l'adversaire).
+        if (round.VoidRequestedBy is { } other && SlotOf(series, other) != me.Slot)
         {
             VoidRound(series, round, string.IsNullOrWhiteSpace(reason) ? "Annulée d'un commun accord" : $"Annulée d'un commun accord : {reason}");
             return Task.CompletedTask;
@@ -407,7 +592,7 @@ public sealed class SeriesService(
 
         if (round.DisputeVoteA == round.DisputeVoteB && round.DisputeVoteA != "VOID")
         {
-            var winner = series.Players.First(p => p.Slot.ToString() == round.DisputeVoteA);
+            var winner = Captain(series, Enum.Parse<Slot>(round.DisputeVoteA));
             ValidateRound(series, round, winner, new WinningConditionDto("Litige résolu par vote", null, null, null, false));
         }
         else VoidRound(series, round, "Litige non résolu");
@@ -423,7 +608,7 @@ public sealed class SeriesService(
         if (series.Status != SeriesStatus.SETUP) return;
         var ready = series.Players.All(p =>
             p.PoolSnapshot is not null
-            && (series.ChampionMode != ChampionMode.DECK || p.DeckLockedAt is not null)
+            && (!SeriesRules.UsesDeck(series.ChampionMode) || p.DeckLockedAt is not null)
             && (series.SpellMode == SpellMode.FREE || p.SpellBudgetLockedAt is not null));
         if (!ready) return;
 
@@ -439,16 +624,15 @@ public sealed class SeriesService(
     private void CreateRound(Series series, int number, int attempt, Round? replayOf)
     {
         var round = new Round { SeriesId = series.Id, Number = number, Attempt = attempt, CreatedAt = clock.GetUtcNow() };
-        var a = series.Players.First(p => p.Slot == Slot.A);
-        var b = series.Players.First(p => p.Slot == Slot.B);
-        var assignA = new RoundAssignment { RoundId = round.Id, PlayerId = a.Id };
-        var assignB = new RoundAssignment { RoundId = round.Id, PlayerId = b.Id };
+        var players = series.Players.OrderBy(p => p.Slot).ThenBy(p => p.Seat).ToList();
+        var assigns = players.ToDictionary(p => p.Id, p => new RoundAssignment { RoundId = round.Id, PlayerId = p.Id });
 
         if (replayOf is not null)
         {
             // Manche rejouée avec les mêmes attributions.
-            foreach (var (target, source) in new[] { (assignA, replayOf.Assignments.First(x => x.PlayerId == a.Id)), (assignB, replayOf.Assignments.First(x => x.PlayerId == b.Id)) })
+            foreach (var p in players)
             {
+                var (target, source) = (assigns[p.Id], replayOf.Assignments.First(x => x.PlayerId == p.Id));
                 target.ChampionId = source.ChampionId;
                 target.Spell1Id = source.Spell1Id;
                 target.Spell2Id = source.Spell2Id;
@@ -458,20 +642,34 @@ public sealed class SeriesService(
         else
         {
             var validated = series.Rounds.Where(r => r.Status == RoundStatus.VALIDATED).SelectMany(r => r.Assignments).ToList();
+            IEnumerable<int> PlayedBy(SeriesPlayer p) => validated.Where(x => x.PlayerId == p.Id).Select(x => x.ChampionId ?? 0);
             try
             {
                 switch (series.ChampionMode)
                 {
+                    case ChampionMode.MIRROR when series.TeamSize > 1:
+                        // Les joueurs de même place jouent le même champion.
+                        var seats = DrawService.DrawMirrorTeams(series.DrawSeed, number, series.TeamSize, players.Select(p => Pool(p)!.All.AsEnumerable()).ToList(),
+                            validated.Select(x => x.ChampionId ?? 0));
+                        foreach (var p in players) assigns[p.Id].ChampionId = seats[p.Seat];
+                        break;
                     case ChampionMode.MIRROR:
-                        var champ = DrawService.DrawMirror(series.DrawSeed, number, Pool(a)!.All, Pool(b)!.All, validated.Select(x => x.ChampionId ?? 0));
-                        assignA.ChampionId = assignB.ChampionId = champ;
+                        var champ = DrawService.DrawMirror(series.DrawSeed, number, Pool(players[0])!.All, Pool(players[1])!.All, validated.Select(x => x.ChampionId ?? 0));
+                        foreach (var p in players) assigns[p.Id].ChampionId = champ;
+                        break;
+                    case ChampionMode.RANDOM when series.TeamSize > 1:
+                        var drawn = DrawService.DrawRandomTeams(series.DrawSeed, number, players.Select(p => (Pool(p)!.All.AsEnumerable(), PlayedBy(p))).ToList());
+                        for (var i = 0; i < players.Count; i++) assigns[players[i].Id].ChampionId = drawn[i];
                         break;
                     case ChampionMode.RANDOM:
-                        var (ca, cb) = DrawService.DrawRandom(series.DrawSeed, number, Pool(a)!.All, Pool(b)!.All,
-                            validated.Where(x => x.PlayerId == a.Id).Select(x => x.ChampionId ?? 0),
-                            validated.Where(x => x.PlayerId == b.Id).Select(x => x.ChampionId ?? 0));
-                        assignA.ChampionId = ca;
-                        assignB.ChampionId = cb;
+                        var (ca, cb) = DrawService.DrawRandom(series.DrawSeed, number, Pool(players[0])!.All, Pool(players[1])!.All, PlayedBy(players[0]), PlayedBy(players[1]));
+                        assigns[players[0].Id].ChampionId = ca;
+                        assigns[players[1].Id].ChampionId = cb;
+                        break;
+                    case ChampionMode.MIRROR_DECK:
+                        var remaining = series.Players.SelectMany(p => p.Deck).Where(d => d.ConsumedInRoundId is null).Select(d => d.ChampionId);
+                        var mirror = DrawService.DrawMirrorDeck(series.DrawSeed, number, remaining);
+                        foreach (var p in players) assigns[p.Id].ChampionId = mirror;
                         break;
                 }
             }
@@ -484,16 +682,20 @@ public sealed class SeriesService(
             }
             if (series.ChampionMode != ChampionMode.DECK && series.SpellMode == SpellMode.FREE)
             {
-                assignA.SubmittedAt = assignB.SubmittedAt = clock.GetUtcNow();
+                foreach (var a in assigns.Values) a.SubmittedAt = clock.GetUtcNow();
             }
         }
 
-        round.Assignments.AddRange([assignA, assignB]);
+        if (Lab(series) is { Mode: LabMode.SECRET_OBJECTIVES } lab)
+            round.LabState = JsonSerializer.Serialize(SecretObjectives.Draw(series.DrawSeed, number, attempt, lab.Tier), Json);
+
+        round.Assignments.AddRange(players.Select(p => assigns[p.Id]));
         series.Rounds.Add(round);
         db.Rounds.Add(round);
 
-        foreach (var (player, assign) in new[] { (a, assignA), (b, assignB) })
+        foreach (var player in players)
         {
+            var assign = assigns[player.Id];
             notifier.Enqueue(series, NotifierEvent.To(player.UserId, "AssignmentReady", new
             {
                 roundId = round.Id,
@@ -520,16 +722,27 @@ public sealed class SeriesService(
         notifier.Enqueue(series, NotifierEvent.All("PicksRevealed", new
         {
             roundId = round.Id,
-            picks = round.Assignments.Select(a => new { slot = SlotOf(series, a.PlayerId), championId = a.ChampionId, spells = new[] { a.Spell1Id, a.Spell2Id } }),
+            picks = round.Assignments.Select(a => new { slot = SlotOf(series, a.PlayerId), userId = UserOf(series, a.PlayerId), championId = a.ChampionId, spells = new[] { a.Spell1Id, a.Spell2Id } }),
         }));
-        var creator = series.Players.First(p => p.Slot == Slot.A);
-        notifier.Enqueue(series, NotifierEvent.To(creator.UserId, "LaunchLobby", LaunchPayload(series, round)));
+        notifier.Enqueue(series, NotifierEvent.To(Creator(series).UserId, "LaunchLobby", LaunchPayload(series, round)));
     }
 
+    /// <summary>Ordre de création du lobby : les invités du créateur, avec l'équipe de chacun (A = équipe LoL 100).</summary>
     private static object LaunchPayload(Series series, Round round)
     {
-        var guest = series.Players.First(p => p.Slot == Slot.B);
-        return new { roundId = round.Id, number = round.Number, attempt = round.Attempt, opponentPuuid = guest.RiotAccount.Puuid, opponentRiotId = guest.RiotAccount.RiotId };
+        var creator = Creator(series);
+        var guests = series.Players.Where(p => p.Id != creator.Id).OrderBy(p => p.Slot).ThenBy(p => p.Seat).ToList();
+        var opponent = Opponent(series, creator);
+        return new
+        {
+            roundId = round.Id,
+            number = round.Number,
+            attempt = round.Attempt,
+            teamSize = series.TeamSize,
+            opponentPuuid = opponent.RiotAccount.Puuid,
+            opponentRiotId = opponent.RiotAccount.RiotId,
+            guests = guests.Select(p => new { puuid = p.RiotAccount.Puuid, riotId = p.RiotAccount.RiotId, slot = p.Slot.ToString() }),
+        };
     }
 
     private void VoidRound(Series series, Round round, string reason)
@@ -548,6 +761,14 @@ public sealed class SeriesService(
         round.WinningCondition = JsonSerializer.Serialize(condition, Json);
         round.EndedAt = clock.GetUtcNow();
 
+        // Deck miroir : le champion tiré consomme une seule entrée (celle de A si les deux l'avaient).
+        if (series.ChampionMode == ChampionMode.MIRROR_DECK)
+        {
+            var champion = round.Assignments[0].ChampionId;
+            var entry = series.Players.OrderBy(p => p.Slot).SelectMany(p => p.Deck).FirstOrDefault(d => d.ChampionId == champion && d.ConsumedInRoundId is null);
+            if (entry is not null) entry.ConsumedInRoundId = round.Id;
+        }
+
         foreach (var a in round.Assignments)
         {
             var player = series.Players.First(p => p.Id == a.PlayerId);
@@ -565,13 +786,14 @@ public sealed class SeriesService(
                 }
             }
         }
-        winner.RoundsWon++;
+        // Le score est celui de l'équipe : chaque membre le porte.
+        foreach (var p in series.Players.Where(p => p.Slot == winner.Slot)) p.RoundsWon++;
         notifier.Enqueue(series, NotifierEvent.All("RoundResolved", new
         {
             roundId = round.Id,
             number = round.Number,
             winnerSlot = winner.Slot.ToString(),
-            winnerName = winner.User.DisplayName,
+            winnerName = TeamName(series, winner.Slot),
             condition = condition.Label,
             eventTime = condition.EventTime,
             singleSource = condition.SingleSource,
@@ -586,7 +808,7 @@ public sealed class SeriesService(
             notifier.Enqueue(series, NotifierEvent.All("SeriesFinished", new
             {
                 winnerSlot = winner.Slot.ToString(),
-                winnerName = winner.User.DisplayName,
+                winnerName = TeamName(series, winner.Slot),
                 score = new { a = series.Players.First(p => p.Slot == Slot.A).RoundsWon, b = series.Players.First(p => p.Slot == Slot.B).RoundsWon },
             }));
             return;
@@ -621,7 +843,20 @@ public sealed class SeriesService(
     private static SeriesPlayer PlayerOf(Series series, Guid userId) =>
         series.Players.FirstOrDefault(p => p.UserId == userId) ?? throw new AppException("Tu ne participes pas à cette série.", 403);
 
-    private static SeriesPlayer Opponent(Series series, SeriesPlayer me) => series.Players.First(p => p.Id != me.Id);
+    /// <summary>Adversaire direct : joueur de l'autre équipe à la même place (en 1v1, l'unique adversaire).</summary>
+    private static SeriesPlayer Opponent(Series series, SeriesPlayer me) =>
+        series.Players.Where(p => p.Slot != me.Slot).OrderBy(p => p.Seat == me.Seat ? 0 : 1).ThenBy(p => p.Seat).First();
+
+    /// <summary>Joueur de place 0 d'une équipe : il porte la victoire de son équipe (manche et série).</summary>
+    private static SeriesPlayer Captain(Series series, Slot slot) => series.Players.Where(p => p.Slot == slot).OrderBy(p => p.Seat).First();
+
+    private static SeriesPlayer Creator(Series series) => Captain(series, Slot.A);
+
+    /// <summary>Nom d'équipe affiché : pseudo en 1v1, « Pseudo1 & Pseudo2 » en 2v2.</summary>
+    private static string TeamName(Series series, Slot slot) =>
+        string.Join(" & ", series.Players.Where(p => p.Slot == slot).OrderBy(p => p.Seat).Select(p => p.User.DisplayName));
+
+    private static Guid UserOf(Series series, Guid playerId) => series.Players.First(p => p.Id == playerId).UserId;
 
     private static string SlotName(Series series, Guid playerId) => SlotOf(series, playerId).ToString();
 
@@ -633,6 +868,14 @@ public sealed class SeriesService(
 
     private static PoolSnapshot? Pool(SeriesPlayer p) =>
         p.PoolSnapshot is null ? null : JsonSerializer.Deserialize<PoolSnapshot>(p.PoolSnapshot, Json);
+
+    /// <summary>Champions jouables par les deux joueurs, null tant qu'un pool manque.</summary>
+    private static IReadOnlySet<int>? CommonPool(Series series)
+    {
+        var pools = series.Players.Select(Pool).ToList();
+        if (pools.Any(p => p is null)) return null;
+        return pools[0]!.All.Intersect(pools[1]!.All).ToHashSet();
+    }
 
     private static bool SpellsConform(Series series, RoundAssignment a)
     {
@@ -649,7 +892,8 @@ public sealed class SeriesService(
     public SeriesStateDto BuildState(Series series, SeriesPlayer me)
     {
         var opp = Opponent(series, me);
-        var expr = WinExpression.Parse(series.WinExpression);
+        var lab = Lab(series);
+        var expr = lab is null ? WinExpression.Parse(series.WinExpression) : null;
         var bothDecks = series.Players.All(p => p.DeckLockedAt is not null);
         var bansRevealed = series.Status != SeriesStatus.SETUP && series.Status != SeriesStatus.BANS;
         var myPool = Pool(me);
@@ -665,12 +909,14 @@ public sealed class SeriesService(
             r.WinnerPlayerId is null ? null : SlotName(series, r.WinnerPlayerId.Value),
             r.WinningCondition is null ? null : JsonSerializer.Deserialize<WinningConditionDto>(r.WinningCondition, Json),
             r.StartedAt, r.EndedAt,
-            r.Assignments.OrderBy(a => SlotOf(series, a.PlayerId)).Select(a =>
+            r.Assignments.Select(a => (Assignment: a, Player: series.Players.First(p => p.Id == a.PlayerId)))
+                .OrderBy(x => x.Player.Slot).ThenBy(x => x.Player.Seat).Select(x =>
             {
+                var (a, p) = x;
                 var visible = a.PlayerId == me.Id || a.RevealedAt is not null;
                 var conform = (a.ReportedChampionId is null || a.ReportedChampionId == a.ChampionId) && SpellsConform(series, a);
-                return new AssignmentDto(SlotName(series, a.PlayerId), visible ? a.ChampionId : null,
-                    visible ? a.Spell1Id : null, visible ? a.Spell2Id : null, a.SubmittedAt is not null, a.RevealedAt is not null, conform);
+                return new AssignmentDto(p.Slot.ToString(), visible ? a.ChampionId : null,
+                    visible ? a.Spell1Id : null, visible ? a.Spell2Id : null, a.SubmittedAt is not null, a.RevealedAt is not null, conform, p.UserId, p.Seat);
             }).ToList(),
             r.VoidRequestedBy is null ? null : SlotName(series, r.VoidRequestedBy.Value),
             me.Slot == Slot.A ? r.DisputeVoteA : r.DisputeVoteB)).ToList();
@@ -687,7 +933,7 @@ public sealed class SeriesService(
                         outcome.Satisfactions.GetValueOrDefault(s)?.Time);
                 }),
                 outcome.Confirmed.Where(e => e.Type != ObservationType.CS).OrderByDescending(e => e.EventTime)
-                    .Select(e => new ValidatedEventDto(e.Type.ToString(), e.Subject.ToString(), e.EventTime, e.Value, e.SingleSource)).ToList(),
+                    .Select(e => new ValidatedEventDto(e.Type.ToString(), e.Subject.ToString(), e.EventTime, e.Value, false)).ToList(),
                 outcome.EarliestPendingTime is not null,
                 outcome.Contradictions);
         }
@@ -703,22 +949,25 @@ public sealed class SeriesService(
             ChampionMode = series.ChampionMode.ToString(),
             SpellMode = series.SpellMode.ToString(),
             WinExpression = expr,
-            WinExpressionLabel = WinExpression.Describe(expr),
+            WinExpressionLabel = ExpressionLabel(series),
             WinnerSlot = series.WinnerPlayerId is null ? null : SlotName(series, series.WinnerPlayerId.Value),
             MySlot = me.Slot.ToString(),
+            MyUserId = me.UserId,
+            TeamSize = series.TeamSize,
             CreatedAt = series.CreatedAt,
             FinishedAt = series.FinishedAt,
-            Rules = new RulesDto(SeriesRules.MinDeckSize(series.BestOf), SeriesRules.BansPerPlayer, SeriesRules.SpellBudget(series.BestOf),
+            Rules = new RulesDto(SeriesRules.DeckSize(series.ChampionMode, series.BestOf), SeriesRules.BansPerPlayer, SeriesRules.SpellBudget(series.BestOf),
                 SeriesRules.SpellCap(series.BestOf), reference.AllowedSpellIds),
-            Players = series.Players.OrderBy(p => p.Slot).Select(p =>
+            Players = series.Players.OrderBy(p => p.Slot).ThenBy(p => p.Seat).Select(p =>
             {
                 var pool = Pool(p);
-                return new PlayerDto(p.Slot.ToString(), p.UserId, p.User.DisplayName, p.RiotAccount.RiotId, p.RiotAccount.Puuid, p.RoundsWon,
+                return new PlayerDto(p.Slot.ToString(), p.UserId, p.User.DisplayName, p.RiotAccount.RiotId, p.RiotAccount.Puuid, p.RiotAccount.ProfileIconId, p.RoundsWon,
                     pool?.All.Count ?? 0, pool?.Free.Length ?? 0, p.PoolUpdatedAt, p.DeckLockedAt is not null, p.Deck.Count,
-                    p.SpellBudgetLockedAt is not null, series.Bans.Any(b => b.ByPlayerId == p.Id));
+                    p.SpellBudgetLockedAt is not null, series.Bans.Any(b => b.ByPlayerId == p.Id), p.Seat);
             }).ToList(),
             Me = new MyDataDto(myPool?.Owned ?? [], myPool?.Free ?? [], Deck(me, bansRevealed), Tokens(me),
-                series.Bans.Where(b => b.ByPlayerId == me.Id).Select(b => b.ChampionId).ToArray(), deckNotInPool),
+                series.Bans.Where(b => b.ByPlayerId == me.Id).Select(b => b.ChampionId).ToArray(), deckNotInPool,
+                series.ChampionMode == ChampionMode.MIRROR_DECK && series.Status == SeriesStatus.SETUP ? CommonPool(series)?.Order().ToArray() : null),
             Opponent = new OpponentDataDto(
                 bothDecks ? Deck(opp, bansRevealed) : null,
                 bansRevealed ? series.Bans.Where(b => b.ByPlayerId == opp.Id).Select(b => b.ChampionId).ToArray() : null,
@@ -726,6 +975,37 @@ public sealed class SeriesService(
             Rounds = rounds,
             CurrentRoundId = current?.Id,
             Live = live,
+            Lab = lab is null ? null : BuildLab(series, lab, me, current),
         };
+    }
+
+    /// <summary>
+    /// Vue labo d'un joueur : son objectif dès le début de la partie, celui de l'adversaire
+    /// seulement une fois la manche terminée (jamais pendant).
+    /// </summary>
+    private LabStateDto BuildLab(Series series, LabConfig lab, SeriesPlayer me, Round? current)
+    {
+        LabRoundDto? currentDto = null;
+        if (current is not null && Objectives(current) is { } objectives)
+        {
+            var started = current.StartedAt is not null;
+            double? myProgress = null;
+            if (started && current.Status is RoundStatus.IN_GAME or RoundStatus.DISPUTED)
+                myProgress = SecretObjectives.Progress(objectives.ExpressionOf(me.Slot), Evaluate(series, current).Facts[me.Slot]);
+            currentDto = new LabRoundDto(current.Id, objectives.Tier.ToString(), objectives.TimeLimit,
+                started ? LabMapping.ToDto(SecretObjectives.Get(objectives.IdOf(me.Slot))) : null, myProgress, GameClock(current));
+        }
+
+        var history = series.Rounds
+            .Where(r => r.StartedAt is not null && r.Status is RoundStatus.VALIDATED or RoundStatus.VOIDED)
+            .OrderBy(r => r.Number).ThenBy(r => r.Attempt)
+            .Select(r => (Round: r, Objectives: Objectives(r)))
+            .Where(x => x.Objectives is not null)
+            .Select(x => new LabRevealDto(x.Round.Id, x.Round.Number, x.Round.Attempt,
+                LabMapping.ToDto(SecretObjectives.Get(x.Objectives!.IdOf(me.Slot))),
+                LabMapping.ToDto(SecretObjectives.Get(x.Objectives.IdOf(me.Slot.Other())))))
+            .ToList();
+
+        return new LabStateDto(lab.Mode.ToString(), lab.Tier?.ToString(), currentDto, history);
     }
 }

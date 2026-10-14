@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Api.Domain.Lab;
 
 namespace Api.Domain;
 
@@ -6,13 +7,35 @@ namespace Api.Domain;
 public sealed class SeriesConfig
 {
     [JsonPropertyName("bestOf")] public int BestOf { get; set; }
+    /// <summary>Joueurs par équipe : 1 (1v1, défaut) ou 2 (2v2).</summary>
+    [JsonPropertyName("teamSize")] public int TeamSize { get; set; } = 1;
+    [JsonPropertyName("championMode")] public ChampionMode ChampionMode { get; set; }
+    [JsonPropertyName("spellMode")] public SpellMode SpellMode { get; set; }
+    /// <summary>Ignorée en mode labo « objectifs secrets » (chaque joueur a la sienne).</summary>
+    [JsonPropertyName("winExpression")] public WinNode? WinExpression { get; set; }
+    /// <summary>Mode expérimental du labo, null pour une série standard.</summary>
+    [JsonPropertyName("lab")] public LabConfig? Lab { get; set; }
+
+    public void Validate()
+    {
+        SeriesRules.ValidateBestOf(BestOf);
+        if (!Enum.IsDefined(ChampionMode)) throw new DomainException("Mode de champion inconnu.");
+        if (!Enum.IsDefined(SpellMode)) throw new DomainException("Mode de sorts inconnu.");
+        SeriesRules.ValidateTeamSize(TeamSize, ChampionMode, Lab is not null);
+        if (Lab is not null) Lab.Validate();
+        else Api.Domain.WinExpression.Validate(WinExpression);
+    }
+}
+
+/// <summary>Configuration enregistrée (config prête) : tout sauf le format, choisi au lancement du défi.</summary>
+public sealed class PresetConfig
+{
     [JsonPropertyName("championMode")] public ChampionMode ChampionMode { get; set; }
     [JsonPropertyName("spellMode")] public SpellMode SpellMode { get; set; }
     [JsonPropertyName("winExpression")] public WinNode WinExpression { get; set; } = null!;
 
     public void Validate()
     {
-        SeriesRules.ValidateBestOf(BestOf);
         if (!Enum.IsDefined(ChampionMode)) throw new DomainException("Mode de champion inconnu.");
         if (!Enum.IsDefined(SpellMode)) throw new DomainException("Mode de sorts inconnu.");
         Api.Domain.WinExpression.Validate(WinExpression);
@@ -29,10 +52,34 @@ public static class SeriesRules
         if (!AllowedBestOf.Contains(bestOf)) throw new DomainException("Le BO doit être impair, entre 1 et 11.");
     }
 
+    public static readonly int[] AllowedTeamSizes = [1, 2];
+
+    /// <summary>
+    /// 2v2 : modes Miroir et Aléatoire seulement (decks et bans restent des duels), pas de labo.
+    /// </summary>
+    public static void ValidateTeamSize(int teamSize, ChampionMode mode, bool lab)
+    {
+        if (!AllowedTeamSizes.Contains(teamSize)) throw new DomainException("Format attendu : 1v1 ou 2v2.");
+        if (teamSize == 1) return;
+        if (mode is not (ChampionMode.MIRROR or ChampionMode.RANDOM)) throw new DomainException("En 2v2, seuls les modes Miroir et Aléatoire sont disponibles.");
+        if (lab) throw new DomainException("Les modes du labo se jouent en 1v1.");
+    }
+
     public static int WinsNeeded(int bestOf) => (bestOf + 1) / 2;
 
     /// <summary>Taille minimale d'un deck : BO + 3 (une manche par champion + 3 bans subis).</summary>
     public static int MinDeckSize(int bestOf) => bestOf + BansPerPlayer;
+
+    /// <summary>
+    /// Deck miroir : ⌈BO/2⌉ champions chacun. Les deux decks réunis (BO + 1 entrées) couvrent
+    /// toutes les manches possibles, chaque manche validée consommant une entrée.
+    /// </summary>
+    public static int MirrorDeckSize(int bestOf) => WinsNeeded(bestOf);
+
+    /// <summary>Taille de deck attendue dans l'interface (minimum en mode deck, exacte en deck miroir).</summary>
+    public static int DeckSize(ChampionMode mode, int bestOf) => mode == ChampionMode.MIRROR_DECK ? MirrorDeckSize(bestOf) : MinDeckSize(bestOf);
+
+    public static bool UsesDeck(ChampionMode mode) => mode is ChampionMode.DECK or ChampionMode.MIRROR_DECK;
 
     public static int SpellBudget(int bestOf) => 2 * bestOf;
 
@@ -49,6 +96,15 @@ public static class SeriesRules
         if (deck.Count < min) throw new DomainException($"Le deck doit contenir au moins {min} champions (BO + 3).");
         var missing = deck.Where(c => !pool.Contains(c)).ToList();
         if (missing.Count > 0) throw new DomainException($"Champions absents de ton pool : {string.Join(", ", missing)}.");
+    }
+
+    /// <summary>Deck miroir : taille exacte, champions possédés par les deux joueurs (ils joueront le même).</summary>
+    public static void ValidateMirrorDeck(int bestOf, IReadOnlyCollection<int> deck, IReadOnlySet<int> commonPool)
+    {
+        if (deck.Distinct().Count() != deck.Count) throw new DomainException("Le deck contient des doublons.");
+        var size = MirrorDeckSize(bestOf);
+        if (deck.Count != size) throw new DomainException($"Le deck doit contenir exactement {size} champions.");
+        if (deck.Any(c => !commonPool.Contains(c))) throw new DomainException("Chaque champion doit être disponible pour vous deux.");
     }
 
     public static void ValidateSpellBudget(int bestOf, IReadOnlyDictionary<int, int> budget, IReadOnlyCollection<int> allowedSpells)

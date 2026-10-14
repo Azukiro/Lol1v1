@@ -5,6 +5,15 @@ namespace Api.Tests;
 public class WinExpressionTests
 {
     [Fact]
+    public void Validate_accepts_same_condition_in_two_groups()
+    {
+        // (Kills ≥ 1 ET CS ≥ 50) OU (Tour ET CS ≥ 50) : rien d'inutile.
+        WinExpression.Validate(WinNode.Or(
+            WinNode.And(WinNode.Leaf(Conditions.Kills, 1), WinNode.Leaf(Conditions.Cs, 50)),
+            WinNode.And(WinNode.Leaf(Conditions.FirstTower), WinNode.Leaf(Conditions.Cs, 50))));
+    }
+
+    [Fact]
     public void Validate_accepts_spec_example()
     {
         var expr = WinExpression.Parse("""
@@ -22,9 +31,13 @@ public class WinExpressionTests
     [InlineData("""{ "condition": "KILLS" }""")]
     [InlineData("""{ "condition": "KILLS", "threshold": 0 }""")]
     [InlineData("""{ "condition": "FIRST_BLOOD", "threshold": 3 }""")]
+    [InlineData("""{ "condition": "CS", "threshold": 125 }""")]
     [InlineData("""{ "op": "XOR", "children": [ { "condition": "FIRST_BLOOD" }, { "condition": "FIRST_TOWER" } ] }""")]
     [InlineData("""{ "op": "OR", "children": [ { "condition": "FIRST_BLOOD" } ] }""")]
     [InlineData("""{ "op": "OR", "children": [ { "condition": "FIRST_BLOOD" }, { "op": "AND", "children": [ { "condition": "FIRST_TOWER" }, { "op": "OR", "children": [ { "condition": "FIRST_BLOOD" }, { "condition": "FIRST_TOWER" } ] } ] } ] }""")]
+    [InlineData("""{ "op": "OR", "children": [ { "condition": "FIRST_TOWER" }, { "op": "AND", "children": [ { "condition": "KILLS", "threshold": 2 }, { "condition": "FIRST_TOWER" } ] } ] }""")]
+    [InlineData("""{ "op": "OR", "children": [ { "condition": "KILLS", "threshold": 1 }, { "condition": "KILLS", "threshold": 3 } ] }""")]
+    [InlineData("""{ "op": "OR", "children": [ { "condition": "FIRST_TOWER" }, { "op": "AND", "children": [ { "condition": "KILLS", "threshold": 1 }, { "condition": "KILLS", "threshold": 2 } ] } ] }""")]
     public void Validate_rejects_invalid(string json)
     {
         Assert.Throws<DomainException>(() => WinExpression.Validate(WinExpression.Parse(json)));
@@ -147,17 +160,77 @@ public class ArbitrationTests
         var o = Arbitration.Evaluate(Expr, events, T0.AddSeconds(1));
         Assert.Equal(Slot.A, o.Winner);
         Assert.Equal(312.4, o.WinningSatisfaction!.Time);
-        Assert.False(o.WinnerSingleSource);
     }
 
     [Fact]
-    public void Single_source_waits_for_delay()
+    public void Same_kill_with_different_event_ids_counts_once()
     {
+        // Partie réelle : le client de A a renuméroté ses événements après une reconnexion (n° 3 chez A, n° 20 chez B).
+        var expr = WinNode.Leaf(Conditions.Kills, 2);
+        var events = new List<ObservedEvent>
+        {
+            E(Slot.A, ObservationType.KILL, "3", 485.3, Slot.B), E(Slot.B, ObservationType.KILL, "20", 485.3, Slot.B),
+        };
+        var o = Arbitration.Evaluate(expr, events, T0.AddSeconds(30));
+        Assert.Equal(1, o.Facts[Slot.B].Kills);
+        Assert.Single(o.Confirmed);
+        Assert.Null(o.Winner);
+    }
+
+    [Fact]
+    public void Simultaneous_trade_is_not_a_contradiction()
+    {
+        var expr = WinNode.Leaf(Conditions.Kills, 3);
+        var events = new List<ObservedEvent>
+        {
+            E(Slot.A, ObservationType.KILL, "1", 200, Slot.A), E(Slot.A, ObservationType.KILL, "2", 200, Slot.B),
+            E(Slot.B, ObservationType.KILL, "1", 200, Slot.A), E(Slot.B, ObservationType.KILL, "2", 200, Slot.B),
+        };
+        var o = Arbitration.Evaluate(expr, events, T0);
+        Assert.False(o.Disputed);
+        Assert.Equal(1, o.Facts[Slot.A].Kills);
+        Assert.Equal(1, o.Facts[Slot.B].Kills);
+    }
+
+    [Fact]
+    public void Event_seen_by_one_team_only_is_disputed_after_delay()
+    {
+        // Faux kill injecté par un client (Live Client API simulée) : l'adversaire ne le voit jamais.
         var events = new List<ObservedEvent> { E(Slot.B, ObservationType.TURRET, "9", 400, Slot.B) };
-        Assert.Null(Arbitration.Evaluate(Expr, events, T0.AddSeconds(5)).Winner);
-        var o = Arbitration.Evaluate(Expr, events, T0.AddSeconds(11));
-        Assert.Equal(Slot.B, o.Winner);
-        Assert.True(o.WinnerSingleSource);
+        var pending = Arbitration.Evaluate(Expr, events, T0.AddSeconds(5));
+        Assert.Null(pending.Winner);
+        Assert.False(pending.Disputed);
+        var o = Arbitration.Evaluate(Expr, events, T0.AddSeconds(21));
+        Assert.Null(o.Winner);
+        Assert.True(o.Disputed);
+    }
+
+    [Fact]
+    public void Event_denied_by_opponent_is_disputed_immediately()
+    {
+        var events = new List<ObservedEvent>
+        {
+            E(Slot.A, ObservationType.KILL, "t100000-SELF", 100, Slot.A),
+            E(Slot.A, ObservationType.KILL, "t200000-SELF", 200, Slot.A),
+            E(Slot.B, ObservationType.KILL, "t100000-OPPONENT", 100, Slot.A),
+            E(Slot.B, ObservationType.DENIAL, "deny", 200, Slot.A, (int)ObservationType.KILL, receivedSec: 3),
+        };
+        var o = Arbitration.Evaluate(Expr, events, T0.AddSeconds(3));
+        Assert.True(o.Disputed);
+        Assert.Null(o.Winner);
+        Assert.Contains("démenti", o.Contradictions.Single());
+    }
+
+    [Fact]
+    public void Denial_by_own_team_does_not_count()
+    {
+        // Un démenti ne compte que venant de l'équipe adverse ; ici A « dément » son propre kill, B le confirme.
+        var events = new List<ObservedEvent>
+        {
+            E(Slot.A, ObservationType.KILL, "1", 100, Slot.A), E(Slot.B, ObservationType.KILL, "1", 100, Slot.A),
+            E(Slot.A, ObservationType.DENIAL, "deny", 100, Slot.A, (int)ObservationType.KILL),
+        };
+        Assert.False(Arbitration.Evaluate(Expr, events, T0).Disputed);
     }
 
     [Fact]
@@ -192,7 +265,9 @@ public class ArbitrationTests
             E(Slot.B, ObservationType.TURRET, "4", 290, Slot.B, receivedSec: 0),
         };
         Assert.Null(Arbitration.Evaluate(Expr, events, T0.AddSeconds(2)).Winner);
-        Assert.Equal(Slot.B, Arbitration.Evaluate(Expr, events, T0.AddSeconds(12)).Winner);
+        // A confirme la tour de B après la demande de vérification : elle est antérieure, B l'emporte.
+        events.Add(E(Slot.A, ObservationType.TURRET, "4", 290, Slot.B, receivedSec: 3));
+        Assert.Equal(Slot.B, Arbitration.Evaluate(Expr, events, T0.AddSeconds(3)).Winner);
     }
 
     [Fact]
@@ -206,7 +281,10 @@ public class ArbitrationTests
         Assert.Equal(Slot.A, Arbitration.Evaluate(expr, [self, view], T0.AddSeconds(1)).Winner);
 
         var lowView = E(Slot.B, ObservationType.CS, "cs-A-20", 650, Slot.A, 20, receivedSec: 15);
-        Assert.True(Arbitration.Evaluate(expr, [self, lowView], T0.AddSeconds(16)).Disputed);
+        Assert.False(Arbitration.Evaluate(expr, [self, lowView], T0.AddSeconds(16)).Disputed);
+        Assert.True(Arbitration.Evaluate(expr, [self, lowView], T0.AddSeconds(21)).Disputed);
+        // Aucune vue adverse : plus de validation « source unique ».
+        Assert.True(Arbitration.Evaluate(expr, [self], T0.AddSeconds(21)).Disputed);
     }
 
     [Fact]

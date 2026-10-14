@@ -1,12 +1,12 @@
 import { HttpClient, HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
 import { inject, Injectable, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
-import { AuthResponse, ChampionRef, Invitation, RiotAccount, SeriesConfig, SeriesState, SeriesSummary, SpellRef, User } from './models';
+import { AuthResponse, ChampionRef, HistoryEntry, Invitation, PresetConfig, Preset, RiotAccount, SeriesConfig, SeriesState, SeriesSummary, SpellRef, User } from './models';
 
 /** URL de l'API : fournie par Electron (API_URL), sinon localhost. */
 export const appConfig = { apiUrl: 'http://localhost:5080', version: '' };
 
-const TOKEN_KEY = 'lol1v1.token';
+const TOKEN_KEY = 'duelyst.token';
 
 export function readToken(): string | null {
   try {
@@ -75,8 +75,21 @@ export class ApiService {
   recentOpponents() {
     return this.get<{ userId: string; displayName: string; riotId: string }[]>('/users/recent-opponents');
   }
+  lookupPlayers(puuids: string[]) {
+    return this.post<{ puuid: string; userId: string; displayName: string; riotId: string; profileIconId: number | null }[]>('/users/lookup', { puuids });
+  }
   searchPlayer(riotId: string) {
     return this.get<{ userId: string; displayName: string; riotId: string }>(`/users/search?riotId=${encodeURIComponent(riotId)}`);
+  }
+
+  presets() {
+    return this.get<{ server: Preset[]; mine: Preset[] }>('/presets');
+  }
+  createPreset(name: string, config: PresetConfig) {
+    return this.post<Preset>('/presets', { name, config });
+  }
+  deletePreset(id: string) {
+    return firstValueFrom(this.http.delete<void>(this.url(`/presets/${id}`)));
   }
 
   invitations() {
@@ -84,6 +97,10 @@ export class ApiService {
   }
   invite(toRiotId: string, config: SeriesConfig) {
     return this.post<Invitation>('/invitations', { toRiotId, config });
+  }
+  /** 2v2 : trois joueurs, la série démarre quand les trois ont accepté, équipes tirées au sort à ce moment. */
+  inviteTeams(playerRiotIds: [string, string, string], config: SeriesConfig) {
+    return this.post<Invitation>('/invitations', { playerRiotIds, config: { ...config, teamSize: 2 } });
   }
   accept(id: string) {
     return this.post<Invitation>(`/invitations/${id}/accept`);
@@ -94,6 +111,15 @@ export class ApiService {
 
   series(status?: string) {
     return this.get<SeriesSummary[]>(`/series${status ? `?status=${status}` : ''}`);
+  }
+  history() {
+    return this.get<HistoryEntry[]>('/series/history');
+  }
+  seriesRecap(id: string) {
+    return this.get<HistoryEntry>(`/series/${id}/recap`);
+  }
+  stats() {
+    return this.get<HistoryEntry[]>('/series/stats');
   }
   seriesState(id: string) {
     return this.get<SeriesState>(`/series/${id}`);

@@ -1,4 +1,5 @@
 using Api.Domain;
+using Api.Domain.Lab;
 
 namespace Api.Dtos;
 
@@ -7,16 +8,31 @@ public sealed record RegisterRequest(string Email, string Password, string Displ
 public sealed record LoginRequest(string Email, string Password);
 public sealed record AuthResponse(string Token, UserDto User);
 public sealed record UserDto(Guid Id, string Email, string DisplayName, RiotAccountDto? RiotAccount);
-public sealed record RiotAccountDto(string Puuid, string GameName, string TagLine, string Region, string RiotId);
-public sealed record LinkRiotRequest(string Puuid, string GameName, string TagLine, string Region);
-public sealed record PlayerSearchResult(Guid UserId, string DisplayName, string RiotId);
+public sealed record RiotAccountDto(string Puuid, string GameName, string TagLine, string Region, string RiotId, int? ProfileIconId);
+public sealed record LinkRiotRequest(string Puuid, string GameName, string TagLine, string Region, int? ProfileIconId = null);
+public sealed record PlayerSearchResult(Guid UserId, string DisplayName, string RiotId, int? ProfileIconId = null);
+public sealed record LookupRequest(string[] Puuids);
+public sealed record RegisteredPlayer(string Puuid, Guid UserId, string DisplayName, string RiotId, int? ProfileIconId);
+
+// ---- Pré-configurations ----
+public sealed record PresetDto(string Id, string Name, string Description, PresetConfig Config, bool BuiltIn);
+public sealed record PresetsResponse(List<PresetDto> Server, List<PresetDto> Mine);
+public sealed record CreatePresetRequest(string Name, PresetConfig Config);
 
 // ---- Invitations ----
-public sealed record CreateInvitationRequest(string ToRiotId, SeriesConfig Config);
+/// <summary>
+/// 1v1 : ToRiotId. 2v2 (Config.TeamSize = 2) : trois PlayerRiotIds, équipes tirées au sort au démarrage de la série
+/// (ancien format TeammateRiotId + OpponentRiotIds accepté : mêmes trois joueurs, équipes tirées au sort aussi).
+/// </summary>
+public sealed record CreateInvitationRequest(string? ToRiotId, SeriesConfig Config, string? TeammateRiotId = null, string[]? OpponentRiotIds = null,
+    string[]? PlayerRiotIds = null);
+/// <summary>Group : en 2v2, les trois invités du défi avec leur réponse (null en 1v1). Team n'a pas de sens avant le tirage.</summary>
 public sealed record InvitationDto(
     Guid Id, string Status, SeriesConfig Config, string ConfigLabel,
     PlayerSearchResult From, PlayerSearchResult To,
-    DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, Guid? SeriesId);
+    DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, Guid? SeriesId,
+    List<InvitationMemberDto>? Group = null);
+public sealed record InvitationMemberDto(PlayerSearchResult Player, string Team, string Status);
 
 // ---- Séries ----
 public sealed record PoolRequest(int[] ChampionIds, int[]? FreeChampionIds);
@@ -25,8 +41,21 @@ public sealed record SpellBudgetRequest(Dictionary<int, int> Tokens);
 
 public sealed record SeriesSummaryDto(
     Guid Id, string Status, int BestOf, string ChampionMode, string SpellMode, string WinExpressionLabel,
-    string MySlot, string OpponentName, string OpponentRiotId, int MyWins, int OpponentWins,
-    string? WinnerSlot, DateTimeOffset CreatedAt, DateTimeOffset? FinishedAt);
+    string MySlot, string OpponentName, string OpponentRiotId, int? OpponentProfileIconId, int MyWins, int OpponentWins,
+    string? WinnerSlot, DateTimeOffset CreatedAt, DateTimeOffset? FinishedAt,
+    /// <summary>2v2 : OpponentName réunit les deux adversaires, PartnerName est le coéquipier.</summary>
+    int TeamSize = 1, string? PartnerName = null);
+
+/// <summary>Série de l'historique, avec le récapitulatif de chaque manche jouée.</summary>
+/// <summary>MyBans : champions que j'ai bannis ; OpponentBans : ceux que l'adversaire m'a bannis (visibles une fois révélés).</summary>
+public sealed record HistoryEntryDto(SeriesSummaryDto Series, List<HistoryRoundDto> Rounds, List<int> MyBans, List<int> OpponentBans);
+
+/// <summary>Manche jouée (tentatives annulées exclues), vue du joueur courant.</summary>
+public sealed record HistoryRoundDto(
+    int Number, string? WinnerSlot, string? WinningLabel, string? WinningCondition, double? WinningTime,
+    DateTimeOffset? StartedAt, DateTimeOffset? EndedAt, HistoryPlayerRoundDto Me, HistoryPlayerRoundDto Opponent);
+
+public sealed record HistoryPlayerRoundDto(int? ChampionId, int? Spell1Id, int? Spell2Id, int Kills, int Cs, bool FirstBlood, bool FirstTower);
 
 public sealed record SeriesStateDto
 {
@@ -36,10 +65,15 @@ public sealed record SeriesStateDto
     public int WinsNeeded { get; init; }
     public string ChampionMode { get; init; } = "";
     public string SpellMode { get; init; } = "";
-    public WinNode WinExpression { get; init; } = null!;
+    /// <summary>Null en mode labo « objectifs secrets » : voir <see cref="Lab"/>.</summary>
+    public WinNode? WinExpression { get; init; }
     public string WinExpressionLabel { get; init; } = "";
     public string? WinnerSlot { get; init; }
+    /// <summary>Mon équipe (en 1v1, mon slot).</summary>
     public string MySlot { get; init; } = "";
+    public Guid MyUserId { get; init; }
+    /// <summary>Joueurs par équipe : 1 ou 2.</summary>
+    public int TeamSize { get; init; } = 1;
     public string CreatorSlot { get; init; } = "A";
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset? FinishedAt { get; init; }
@@ -50,21 +84,25 @@ public sealed record SeriesStateDto
     public List<RoundDto> Rounds { get; init; } = [];
     public Guid? CurrentRoundId { get; init; }
     public LiveDto? Live { get; init; }
+    /// <summary>Mode expérimental du labo, null pour une série standard.</summary>
+    public LabStateDto? Lab { get; init; }
 }
 
 public sealed record RulesDto(int MinDeckSize, int BansPerPlayer, int SpellBudget, int SpellCap, IReadOnlyList<int> AllowedSpellIds);
 
 public sealed record PlayerDto(
-    string Slot, Guid UserId, string DisplayName, string RiotId, string Puuid, int RoundsWon,
+    string Slot, Guid UserId, string DisplayName, string RiotId, string Puuid, int? ProfileIconId, int RoundsWon,
     int PoolSize, int FreeCount, DateTimeOffset? PoolUpdatedAt, bool DeckLocked, int DeckSize,
-    bool SpellBudgetLocked, bool BansSubmitted);
+    bool SpellBudgetLocked, bool BansSubmitted, int Seat = 0);
 
 public sealed record DeckEntryDto(int ChampionId, bool Banned, bool Consumed);
 public sealed record SpellTokenDto(int SpellId, int Initial, int Left);
 
 public sealed record MyDataDto(
     int[] Pool, int[] Free, List<DeckEntryDto> Deck, List<SpellTokenDto> SpellTokens,
-    int[] MyBans, int[] DeckChampionsNotInPool);
+    int[] MyBans, int[] DeckChampionsNotInPool,
+    /// <summary>Deck miroir, en préparation : champions jouables par les deux (null tant qu'un pool manque).</summary>
+    int[]? CommonPool);
 
 public sealed record OpponentDataDto(
     /// <summary>Visible quand les deux decks sont validés (phase de bans).</summary>
@@ -73,7 +111,7 @@ public sealed record OpponentDataDto(
     int[]? BansOnMe,
     List<SpellTokenDto>? SpellTokens);
 
-public sealed record AssignmentDto(string Slot, int? ChampionId, int? Spell1Id, int? Spell2Id, bool Submitted, bool Revealed, bool Conform);
+public sealed record AssignmentDto(string Slot, int? ChampionId, int? Spell1Id, int? Spell2Id, bool Submitted, bool Revealed, bool Conform, Guid UserId, int Seat = 0);
 
 public sealed record RoundDto(
     Guid Id, int Number, int Attempt, string Status, string? VoidReason, long? LolGameId,
@@ -83,6 +121,7 @@ public sealed record RoundDto(
 
 public sealed record WinningConditionDto(string Label, string? Condition, int? Threshold, double? EventTime, bool SingleSource);
 
+/// <summary>Progression par équipe (slot).</summary>
 public sealed record LiveDto(
     Dictionary<string, PlayerProgressDto> Progress,
     List<ValidatedEventDto> Events,
@@ -91,6 +130,20 @@ public sealed record LiveDto(
 
 public sealed record PlayerProgressDto(int Kills, bool FirstBlood, bool FirstTower, int Cs, double? SatisfiedAt);
 public sealed record ValidatedEventDto(string Type, string Slot, double EventTime, int? Value, bool SingleSource);
+
+// ---- Labo ----
+public sealed record LabStateDto(string Mode, string? Tier, LabRoundDto? Current, List<LabRevealDto> History);
+/// <summary>Manche en cours : Mine reste null tant que la partie n'a pas commencé.</summary>
+public sealed record LabRoundDto(Guid RoundId, string Tier, double TimeLimit, LabObjectiveDto? Mine, double? MyProgress, double GameClock);
+public sealed record LabObjectiveDto(string Id, string Label, WinNode Expression, string Tier, double EstimatedMinutes);
+public sealed record LabRevealDto(Guid RoundId, int Number, int Attempt, LabObjectiveDto Mine, LabObjectiveDto Opponent);
+public sealed record LabTierDto(string Tier, string Label, double TimeLimit, List<LabObjectiveDto> Objectives);
+public sealed record LabDrawDto(string Tier, LabObjectiveDto A, LabObjectiveDto B);
+
+public static class LabMapping
+{
+    public static LabObjectiveDto ToDto(SecretObjective o) => new(o.Id, o.Label, o.Expression, o.Tier.ToString(), o.EstimatedMinutes);
+}
 
 // ---- Hub ----
 public sealed record ObservationReport(string Type, string EventId, double EventTime, ObservationPayload? Payload);

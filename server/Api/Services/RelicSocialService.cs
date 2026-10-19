@@ -9,7 +9,7 @@ namespace Api.Services;
 
 /// <summary>
 /// Côté social des reliques : roster mis en avant (5 postes), amis suivis et collection d'un autre joueur.
-/// Les collections sont visibles par tout joueur connecté ; la liste d'amis sert de raccourci.
+/// Les collections sont visibles par tout joueur connecté ; la liste d'amis (réciproque) sert de raccourci.
 /// </summary>
 public sealed class RelicSocialService(AppDbContext db)
 {
@@ -82,18 +82,25 @@ public sealed class RelicSocialService(AppDbContext db)
             friendId = matches[0];
         }
         if (friendId == userId) throw new AppException("C'est toi !");
-        if (!await db.RelicFriends.AnyAsync(f => f.UserId == userId && f.FriendId == friendId))
-        {
-            if (await db.RelicFriends.CountAsync(f => f.UserId == userId) >= MaxFriends) throw new AppException($"{MaxFriends} amis maximum.", 409);
-            db.RelicFriends.Add(new RelicFriend { UserId = userId, FriendId = friendId });
-            await db.SaveChangesAsync();
-        }
+        // Amitié réciproque : le lien est créé dans les deux sens.
+        var links = await db.RelicFriends
+            .Where(f => (f.UserId == userId && f.FriendId == friendId) || (f.UserId == friendId && f.FriendId == userId)).ToListAsync();
+        var mine = links.Any(f => f.UserId == userId);
+        var theirs = links.Any(f => f.UserId == friendId);
+        if (!mine && await db.RelicFriends.CountAsync(f => f.UserId == userId) >= MaxFriends) throw new AppException($"{MaxFriends} amis maximum.", 409);
+        if (!theirs && await db.RelicFriends.CountAsync(f => f.UserId == friendId) >= MaxFriends)
+            throw new AppException("Sa liste d'amis est pleine.", 409);
+        if (!mine) db.RelicFriends.Add(new RelicFriend { UserId = userId, FriendId = friendId });
+        if (!theirs) db.RelicFriends.Add(new RelicFriend { UserId = friendId, FriendId = userId });
+        await db.SaveChangesAsync();
         return (await CardsAsync([friendId], [friendId]))[friendId];
     }
 
+    /// <summary>Retire l'amitié des deux côtés.</summary>
     public async Task RemoveFriendAsync(Guid userId, Guid friendId)
     {
-        db.RelicFriends.RemoveRange(await db.RelicFriends.Where(f => f.UserId == userId && f.FriendId == friendId).ToListAsync());
+        db.RelicFriends.RemoveRange(await db.RelicFriends
+            .Where(f => (f.UserId == userId && f.FriendId == friendId) || (f.UserId == friendId && f.FriendId == userId)).ToListAsync());
         await db.SaveChangesAsync();
     }
 

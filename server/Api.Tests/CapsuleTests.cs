@@ -247,6 +247,10 @@ public class CapsuleFlowTests
         var friends = await alice.GetFromJsonAsync<List<PlayerCardDto>>("/api/v1/capsules/friends", ApiJson.Options);
         Assert.Single(friends!);
         Assert.True(friends![0].Added);
+        // Réciproque : Bob voit Alice sans rien faire.
+        var bobFriends = await bob.GetFromJsonAsync<List<PlayerCardDto>>("/api/v1/capsules/friends", ApiJson.Options);
+        Assert.Equal("relicAlice", Assert.Single(bobFriends!).DisplayName);
+        Assert.True(bobFriends![0].Added);
 
         var player = await alice.GetFromJsonAsync<PlayerCollectionDto>($"/api/v1/capsules/players/{card.UserId}", ApiJson.Options);
         Assert.Equal(3, player!.Items.Sum(i => i.Count));
@@ -254,6 +258,7 @@ public class CapsuleFlowTests
 
         (await alice.DeleteAsync($"/api/v1/capsules/friends/{card.UserId}")).EnsureSuccessStatusCode();
         Assert.Empty((await alice.GetFromJsonAsync<List<PlayerCardDto>>("/api/v1/capsules/friends", ApiJson.Options))!);
+        Assert.Empty((await bob.GetFromJsonAsync<List<PlayerCardDto>>("/api/v1/capsules/friends", ApiJson.Options))!);
     }
 }
 

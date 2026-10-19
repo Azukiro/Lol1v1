@@ -253,7 +253,7 @@ public class PushSubscriptionEntity
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
-/// <summary>Ami ajouté dans les reliques (sens unique : on suit sa collection).</summary>
+/// <summary>Lien d'amitié des reliques, une ligne par sens : ajouter un ami crée aussi le lien inverse.</summary>
 public class RelicFriend
 {
     public Guid UserId { get; set; }

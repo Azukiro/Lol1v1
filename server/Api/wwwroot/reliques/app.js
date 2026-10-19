@@ -1,4 +1,4 @@
-// Capsules : une capsule par heure, ouverture animée, collection par rareté / gamme / champion. PWA autonome servie par l'API.
+// Reliques (capsules en interne) : une relique par heure, ouverture animée, collection par rareté / gamme / champion. PWA autonome servie par l'API.
 const API = '/api/v1';
 const DD = 'https://ddragon.leagueoflegends.com/cdn/img/champion';
 const CD = 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/';
@@ -208,7 +208,7 @@ function tick() {
   if (w.nextAtMs && now() >= w.nextAtMs) {
     w.available++;
     w.nextAtMs = w.available >= w.maxStock ? null : w.nextAtMs + w.intervalSeconds * 1000;
-    if (w.available === w.notifyAt) toast(`${w.available} capsules en stock : ouvre-les !`);
+    if (w.available === w.notifyAt) toast(`${w.available} reliques en stock : ouvre-les !`);
     renderWallet();
   }
   renderTimer();
@@ -241,7 +241,7 @@ function renderWallet() {
   $('#tap-hint').textContent = has ? 'Touche pour ouvrir' : premium ? `Forge-en une : ${w.essencePerPremium} essence` : 'Reviens bientôt';
   $('#pips').innerHTML = Array.from({ length: w.maxStock }, (_, i) => `<i class="pip${i < w.available ? ' on' : ''}"></i>`).join('')
     + (w.available > w.maxStock ? '' : '');
-  $('#stock-text').textContent = `${w.available} / ${w.maxStock} capsules${w.available > w.maxStock ? ' (bonus)' : ''}`;
+  $('#stock-text').textContent = `${w.available} / ${w.maxStock} reliques${w.available > w.maxStock ? ' (bonus)' : ''}`;
   $('#open-one').disabled = !has || S.busy;
   const n = Math.min(stock, 10);
   $('#open-all').disabled = n < 2 || S.busy;
@@ -260,7 +260,7 @@ function renderWallet() {
   $('#total-opened').textContent = w.totalOpened ? `${w.totalOpened} ouvertes` : '';
   const all = w.available + w.premiumAvailable;
   const badge = $('#nav-badge'); badge.hidden = !all; badge.textContent = all;
-  document.title = all ? `(${all}) Capsules` : 'Capsules';
+  document.title = all ? `(${all}) Reliques` : 'Reliques';
   try { all ? navigator.setAppBadge?.(all) : navigator.clearAppBadge?.(); } catch { /* non supporté */ }
   $('#debug').hidden = !w.debug;
   renderTimer();
@@ -273,6 +273,11 @@ function renderRecent() {
 }
 
 // ---------- Ouverture ----------
+// Passer l'animation : toucher la relique pendant la charge écourte toutes les pauses restantes.
+const skipper = { on: false, wake: () => {} };
+const pause = (ms) => (skipper.on ? Promise.resolve() : new Promise((r) => { const t = setTimeout(r, ms); skipper.wake = () => { clearTimeout(t); r(); }; }));
+function skipAnimation() { if (skipper.on) return; skipper.on = true; skipper.wake(); }
+
 async function openCapsules(count) {
   const type = S.type;
   if (S.busy || !S.wallet || stockOf(type) < 1) return;
@@ -282,11 +287,12 @@ async function openCapsules(count) {
   const startGlow = type === 'PREMIUM' ? COLOR.ULTIMATE : COLOR.RARE;
   reveal.hidden = false; reveal.style.setProperty('--glow', startGlow);
   $('#reveal-single').hidden = true; $('#reveal-multi').hidden = true; $('#reveal-actions').hidden = true; $('#rays').className = 'rays';
+  skipper.on = false;
   cap.hidden = false; cap.className = 'reveal-capsule charge';
   buzz(30);
   let res;
   try {
-    [res] = await Promise.all([api('/capsules/open', { method: 'POST', body: { count, type } }), sleep(450)]);
+    [res] = await Promise.all([api('/capsules/open', { method: 'POST', body: { count, type } }), pause(450)]);
   } catch (e) {
     reveal.hidden = true; S.busy = false; renderWallet(); toast(e.message, true); return;
   }
@@ -295,13 +301,14 @@ async function openCapsules(count) {
   // Montée en tension : la lueur passe par chaque palier jusqu'à la rareté obtenue.
   const steps = rank(best) <= 1 ? [best] : RARITIES.slice(2, rank(best) + 1);
   for (let i = 0; i < steps.length; i++) {
+    if (skipper.on) { reveal.style.setProperty('--glow', COLOR[best]); break; }
     reveal.style.setProperty('--glow', COLOR[steps[i]]);
     if (i === steps.length - 1 && rank(best) >= 3) cap.classList.add('hard');
     audio.step(rank(steps[i])); buzz(20 + i * 15);
-    await sleep(count > 1 ? 320 : 420 + i * 90);
+    await pause(count > 1 ? 320 : 420 + i * 90);
   }
   cap.className = 'reveal-capsule pop';
-  await sleep(220);
+  await pause(220);
   const r = rank(best);
   $('#flash').className = 'flash'; void $('#flash').offsetWidth; $('#flash').className = 'flash go';
   const box = cap.getBoundingClientRect();
@@ -338,15 +345,33 @@ function dropInfo(d, it) {
 function showSingle(d) {
   const it = item(d.kind, d.itemId);
   const el = $('#reveal-single');
-  el.innerHTML = `<div class="big-card r-${d.rarity}">${cardHTML(it, { isNew: d.isNew, tag: 'div' })}</div>${dropInfo(d, it)}`;
+  const more = stockOf() > 0;
+  el.innerHTML = `<div class="big-card r-${d.rarity}${more ? ' tappable' : ''}" ${more ? 'role="button" tabindex="0" aria-label="Ouvrir la relique suivante"' : ''}>
+      ${cardHTML(it, { isNew: d.isNew, tag: 'div' })}</div>${dropInfo(d, it)}
+    ${more ? '<p class="tap-again">Touche la carte pour ouvrir la suivante</p>' : ''}`;
   el.hidden = false;
   audio.chime(rank(d.rarity));
   showRevealActions(false);
+  if (more) {
+    const card = $('.big-card', el);
+    // Après l'animation de retournement, pour ne pas enchaîner sur un double tap.
+    setTimeout(() => {
+      card.onclick = () => openNext(1);
+      card.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openNext(1); } };
+    }, 600);
+  }
+}
+
+/** Referme la révélation et ouvre aussitôt les suivantes (même type de relique). */
+function openNext(count) {
+  if (stockOf() < 1) return;
+  closeReveal();
+  openCapsules(Math.min(count, stockOf()));
 }
 
 function showMulti(drops) {
   const grid = $('#multi-grid');
-  $('#multi-title').textContent = `${drops.length} capsules`;
+  $('#multi-title').textContent = `${drops.length} reliques`;
   $('#multi-sub').textContent = 'Touche une carte pour la révéler';
   grid.innerHTML = drops.map((d, i) => {
     const it = item(d.kind, d.itemId);
@@ -360,7 +385,11 @@ function showMulti(drops) {
 }
 
 function flipCard(el) {
-  if (el.classList.contains('open')) return;
+  // Toutes retournées : toucher une carte lance le lot suivant.
+  if (el.classList.contains('open')) {
+    if (!$$('.flip:not(.open)').length) openNext(10);
+    return;
+  }
   el.classList.add('open');
   const d = JSON.parse($('#multi-grid').dataset.drops)[+el.dataset.i];
   const r = rank(d.rarity);
@@ -375,7 +404,7 @@ function flipCard(el) {
 function multiDone(drops) {
   const news = drops.filter((d) => d.isNew).length;
   const ess = drops.reduce((s, d) => s + d.essence, 0);
-  $('#multi-sub').innerHTML = `<span class="multi-summary"><b>${news}</b> nouveauté${news > 1 ? 's' : ''}${ess ? ` · <b>+${ess}</b> essence` : ''}</span>`;
+  $('#multi-sub').innerHTML = `<span class="multi-summary"><b>${news}</b> nouveauté${news > 1 ? 's' : ''}${ess ? ` · <b>+${ess}</b> essence` : ''}${stockOf() ? ' · touche une carte pour continuer' : ''}</span>`;
   showRevealActions(false);
 }
 
@@ -499,7 +528,7 @@ function renderByChampion(q, missing) {
 }
 
 function emptyColl() {
-  return `<p class="empty-note">${S.owned.size ? 'Rien ne correspond. Active « Manquants » pour tout voir.' : 'Ta collection est vide : ouvre ta première capsule !'}</p>`;
+  return `<p class="empty-note">${S.owned.size ? 'Rien ne correspond. Active « Manquants » pour tout voir.' : 'Ta collection est vide : ouvre ta première relique !'}</p>`;
 }
 
 // ---------- Fiches ----------
@@ -523,9 +552,9 @@ function showItem(key) {
       <div class="facts">
         <div><b>${o ? `×${o.count}` : '—'}</b><span>Exemplaires</span></div>
         <div><b>${o ? new Date(o.firstObtainedAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : 'Jamais'}</b><span>Obtenu</span></div>
-        <div><b>${fmt(chanceIn('STANDARD'))}</b><span>Chance / capsule</span></div>
+        <div><b>${fmt(chanceIn('STANDARD'))}</b><span>Chance / relique</span></div>
       </div>
-      <p class="muted">Chance par capsule prestige : ${fmt(chanceIn('PREMIUM'))}</p>
+      <p class="muted">Chance par relique prestige : ${fmt(chanceIn('PREMIUM'))}</p>
       ${o ? `<p class="muted">Un doublon rapporte ${odds?.duplicateEssence ?? 0} essence.</p>` : '<p class="muted">Pas encore obtenu. Continue d\'ouvrir !</p>'}
     </div>`);
 }
@@ -544,15 +573,15 @@ function showChampion(id) {
 function oddsHTML() {
   const pct = (type, r) => { const o = S.cat.oddsBy[type][r]; return o ? `${o.percent}%` : '—'; };
   const cls = (type) => (type === S.type ? 'sel' : 'dim');
-  return `<span class="h name">Rareté</span><span class="h">Capsule</span><span class="h prem">Prestige</span><span class="h">Doublon</span>
+  return `<span class="h name">Rareté</span><span class="h">Relique</span><span class="h prem">Prestige</span><span class="h">Doublon</span>
     ${[...RARITIES].reverse().map((r) => `<span class="name r-${r}">${LABEL[r]}</span>
       <span class="${cls('STANDARD')}">${pct('STANDARD', r)}</span><span class="${cls('PREMIUM')}">${pct('PREMIUM', r)}</span>
       <span>+${(S.cat.oddsBy.STANDARD[r] || S.cat.oddsBy.PREMIUM[r]).duplicateEssence}</span>`).join('')}`;
 }
 
 function oddsNote() {
-  return `Prix en essence : capsule ${S.cat.price.STANDARD}, prestige ${S.cat.price.PREMIUM}. « Doublon » : essence reçue quand l'objet est déjà dans ta collection. `
-    + `Après ${S.cat.pityThreshold - 1} capsules sans Épique, la suivante est Épique ou mieux. La prestige ne contient que des skins.`;
+  return `Prix en essence : relique ${S.cat.price.STANDARD}, prestige ${S.cat.price.PREMIUM}. « Doublon » : essence reçue quand l'objet est déjà dans ta collection. `
+    + `Après ${S.cat.pityThreshold - 1} reliques sans Épique, la suivante est Épique ou mieux. La prestige ne contient que des skins.`;
 }
 
 function renderOdds() {
@@ -587,31 +616,46 @@ const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platfo
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 let installEvent = null;
 
+const isMobile = matchMedia('(pointer: coarse)').matches || innerWidth < 760;
+
+// Entrée « Installer l'app » du menu (masquée une fois installée) et popup au premier lancement sur mobile.
 function setupInstall() {
-  const dismissed = +(store.get('capsules.installDismissed') || 0);
-  const can = () => !standalone && Date.now() - dismissed > 7 * 864e5;
-  addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault(); installEvent = e;
-    if (can()) $('#install-banner').hidden = false;
-  });
-  addEventListener('appinstalled', () => { $('#install-banner').hidden = true; toast('App installée !'); });
-  if (isIOS && can()) {
-    $('#install-banner').hidden = false;
-    $('#install-text').textContent = 'Dans Safari : Partager, puis « Sur l\'écran d\'accueil ».';
-    $('#install-btn').textContent = 'Comment ?';
-  }
-  $('#install-btn').onclick = async () => {
-    if (installEvent) { installEvent.prompt(); const { outcome } = await installEvent.userChoice; installEvent = null; if (outcome === 'accepted') $('#install-banner').hidden = true; }
-    else showInstallHelp();
-  };
-  $('#install-close').onclick = () => { $('#install-banner').hidden = true; store.set('capsules.installDismissed', String(Date.now())); };
+  $('#install-menu').hidden = standalone;
+  addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; });
+  addEventListener('appinstalled', () => { installEvent = null; $('#install-menu').hidden = true; closeSheet(); toast('App installée !'); });
+  $('#install-menu').onclick = () => { $('#menu').hidden = true; showInstall(); };
 }
 
-function showInstallHelp() {
-  openSheet(`<div class="odds"><h2>Installer l'app</h2>
-    <p>1. Ouvre cette page dans <b>Safari</b>.</p><p>2. Touche le bouton <b>Partager</b> (carré avec une flèche).</p>
-    <p>3. Choisis <b>« Sur l'écran d'accueil »</b>, puis Ajouter.</p>
-    <p class="muted">Ouvre ensuite Capsules depuis l'écran d'accueil pour activer les notifications.</p></div>`);
+async function maybePromptInstall() {
+  if (standalone || !isMobile || store.get('capsules.installPrompted')) return;
+  // Laisse au navigateur le temps d'annoncer l'installation possible (Android).
+  for (let i = 0; i < 20 && !installEvent && !isIOS; i++) await sleep(100);
+  store.set('capsules.installPrompted', '1');
+  showInstall(true);
+}
+
+async function installNow() {
+  if (!installEvent) return;
+  installEvent.prompt();
+  const { outcome } = await installEvent.userChoice;
+  installEvent = null;
+  if (outcome === 'accepted') closeSheet();
+}
+
+function showInstall(firstLaunch = false) {
+  const steps = isIOS
+    ? `<ol class="install-steps"><li>Ouvre cette page dans <b>Safari</b>.</li><li>Touche <b>Partager</b> (carré avec une flèche).</li>
+        <li>Choisis <b>« Sur l'écran d'accueil »</b>, puis <b>Ajouter</b>.</li></ol>`
+    : `<ol class="install-steps"><li>Ouvre le menu du navigateur <b>⋮</b>.</li><li>Choisis <b>« Installer l'application »</b> ou <b>« Ajouter à l'écran d'accueil »</b>.</li></ol>`;
+  openSheet(`<div class="install-sheet">
+    <div class="install-icon"><img src="icons/icon-192.png" alt=""></div>
+    <h2>${firstLaunch ? 'Installe Reliques' : 'Installer l\'app'}</h2>
+    <p class="muted">Ouvre tes reliques en un geste depuis l'écran d'accueil, en plein écran.</p>
+    <ul class="install-perks"><li>Notification quand ton stock est plein</li><li>Compteur de reliques sur l'icône</li><li>Chargement instantané</li></ul>
+    ${installEvent ? '<button class="btn primary big block" id="install-now">Installer</button>' : steps}
+    <button class="btn ghost block" data-close>${firstLaunch ? 'Plus tard' : 'Fermer'}</button>
+  </div>`);
+  $('#install-now')?.addEventListener('click', installNow);
 }
 
 const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
@@ -632,11 +676,11 @@ async function setupNotify() {
   const card = $('#notify-card');
   try { S.pushKey = (await api('/capsules/push/key')).publicKey; } catch { S.pushKey = null; }
   const n = S.wallet?.notifyAt ?? 10;
-  $('#notify-text').textContent = `Notification quand tu as ${n} capsules en stock.`;
+  $('#notify-text').textContent = `Notification quand tu as ${n} reliques en stock.`;
   if (!S.pushKey) { card.hidden = true; return; }
   if (isIOS && !standalone) {
     card.hidden = false; $('#notify-text').textContent = 'Installe l\'app sur l\'écran d\'accueil pour être prévenu.';
-    $('#notify-btn').textContent = 'Installer'; $('#notify-btn').onclick = showInstallHelp; return;
+    $('#notify-btn').textContent = 'Installer'; $('#notify-btn').onclick = () => showInstall(); return;
   }
   if (!pushSupported || Notification.permission === 'denied') { card.hidden = true; return; }
   const sub = Notification.permission === 'granted' ? await currentSub() : null;
@@ -658,7 +702,7 @@ async function enableNotify() {
     const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(S.pushKey) });
     await sendSub(sub);
     $('#notify-card').hidden = true;
-    toast(`C'est noté : on te prévient à ${S.wallet.notifyAt} capsules.`);
+    toast(`C'est noté : on te prévient à ${S.wallet.notifyAt} reliques.`);
   } catch (e) { toast(`Activation impossible : ${e.message}`, true); }
 }
 
@@ -717,6 +761,7 @@ async function start() {
   } catch (e) { toast(e.message, true); }
   finally { clearTimeout(slow); }
   setupNotify();
+  maybePromptInstall();
 }
 
 // ---------- Événements ----------
@@ -731,7 +776,7 @@ function bind() {
     try {
       setWallet(await api('/capsules/buy', { method: 'POST', body: { type } }));
       audio.chime(type === 'PREMIUM' ? 4 : 2);
-      toast(type === 'PREMIUM' ? 'Capsule prestige forgée !' : 'Capsule forgée !');
+      toast(type === 'PREMIUM' ? 'Relique prestige forgée !' : 'Relique forgée !');
       setType(type);
     } catch (e) { toast(e.message, true); }
   };
@@ -740,7 +785,8 @@ function bind() {
   $$('.type-switch [data-type]').forEach((b) => (b.onclick = () => setType(b.dataset.type)));
   $('#reveal-close').onclick = closeReveal;
   $('#reveal-skip').onclick = revealAll;
-  $('#reveal-again').onclick = () => { const n = Math.min(stockOf(), 10); closeReveal(); openCapsules(n > 1 ? n : 1); };
+  $('#reveal-again').onclick = () => openNext(10);
+  $('#reveal-capsule').addEventListener('click', skipAnimation);
   $('#multi-grid').addEventListener('click', (e) => { const f = e.target.closest('.flip'); if (f) flipCard(f); });
 
   $('#menu-btn').onclick = (e) => { e.stopPropagation(); $('#menu').hidden = !$('#menu').hidden; };

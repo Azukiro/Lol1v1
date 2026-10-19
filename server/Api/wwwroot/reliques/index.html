@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Capsules · Duelyst</title>
-  <meta name="description" content="Une capsule par heure : ouvre-la, collectionne, complète tes gammes.">
+  <title>Reliques · Duelyst</title>
+  <meta name="description" content="Une relique par heure : ouvre-la, collectionne, complète tes gammes.">
   <meta name="theme-color" content="#0b0e14">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Capsules">
+  <meta name="apple-mobile-web-app-title" content="Reliques">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
@@ -24,8 +24,8 @@
   <section id="auth" class="auth" hidden>
     <div class="auth-card">
       <div class="auth-logo"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="#capsule-mini"/></svg></div>
-      <h1>Capsules</h1>
-      <p class="muted">Une capsule toutes les heures. Ouvre, collectionne, complète tes gammes.</p>
+      <h1>Reliques</h1>
+      <p class="muted">Une relique toutes les heures. Ouvre, collectionne, complète tes gammes.</p>
       <form id="auth-form" novalidate>
         <label class="field" id="name-field" hidden><span>Pseudo</span><input name="displayName" autocomplete="nickname" maxlength="32"></label>
         <label class="field"><span>Email</span><input name="email" type="email" autocomplete="email" required></label>
@@ -41,7 +41,7 @@
   <!-- Application -->
   <div id="app" class="app" hidden>
     <header class="topbar">
-      <div class="brand"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="#capsule-mini"/></svg><span>Capsules</span></div>
+      <div class="brand"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="#capsule-mini"/></svg><span>Reliques</span></div>
       <nav class="tabs" aria-label="Sections">
         <button class="tab" data-view="open" aria-current="page">Ouvrir</button>
         <button class="tab" data-view="collection">Collection</button>
@@ -50,6 +50,7 @@
       <button class="icon-btn" id="menu-btn" aria-label="Menu" aria-haspopup="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button>
       <div class="menu" id="menu" hidden>
         <div class="menu-user" id="menu-user"></div>
+        <button id="install-menu" hidden>Installer l'app</button>
         <button id="sound-toggle">Son : activé</button>
         <button id="odds-btn">Taux de drop</button>
         <button id="logout-btn">Se déconnecter</button>
@@ -58,20 +59,14 @@
 
     <!-- Vue ouverture -->
     <main id="view-open" class="view view-open">
-      <div class="install-banner" id="install-banner" hidden>
-        <div><b>Installe l'app</b><span id="install-text">Accès en un geste et notification quand ton stock est plein.</span></div>
-        <button class="btn small" id="install-btn">Installer</button>
-        <button class="icon-btn" id="install-close" aria-label="Fermer"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-      </div>
-
-      <div class="type-switch" role="tablist" aria-label="Type de capsule">
-        <button role="tab" data-type="STANDARD" aria-selected="true"><span>Capsule</span><b id="count-std">0</b></button>
+      <div class="type-switch" role="tablist" aria-label="Type de relique">
+        <button role="tab" data-type="STANDARD" aria-selected="true"><span>Relique</span><b id="count-std">0</b></button>
         <button role="tab" data-type="PREMIUM" aria-selected="false"><span>Prestige</span><b id="count-prem">0</b></button>
       </div>
 
       <section class="stage" aria-live="polite">
         <div class="stage-glow"></div>
-        <button class="capsule" id="capsule" aria-label="Ouvrir une capsule">
+        <button class="capsule" id="capsule" aria-label="Ouvrir une relique">
           <svg viewBox="0 0 200 220" aria-hidden="true"><use href="#capsule-art"/></svg>
           <span class="capsule-count" id="capsule-count">0</span>
         </button>
@@ -82,7 +77,7 @@
 
       <section class="stock" id="stock">
         <div class="pips" id="pips" aria-hidden="true"></div>
-        <div class="stock-line"><span id="stock-text">0 / 10 capsules</span><span class="sep">·</span><span id="next-text" class="muted"></span></div>
+        <div class="stock-line"><span id="stock-text">0 / 10 reliques</span><span class="sep">·</span><span id="next-text" class="muted"></span></div>
         <div class="timer-bar"><i id="timer-fill"></i></div>
       </section>
 
@@ -100,7 +95,7 @@
           <div class="perk-head"><span class="kicker">Essence · forge</span><b id="essence-text">0</b></div>
           <div class="meter essence"><i id="essence-fill"></i><span class="tick" id="essence-tick"></span></div>
           <div class="forge">
-            <button class="btn small" id="buy-std" disabled>Capsule · <span id="price-std">150</span></button>
+            <button class="btn small" id="buy-std" disabled>Relique · <span id="price-std">150</span></button>
             <button class="btn small gold" id="buy-prem" disabled>Prestige · <span id="price-prem">600</span></button>
           </div>
         </div>
@@ -108,12 +103,12 @@
 
       <section class="notify-card" id="notify-card" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a2.5 2.5 0 0 0 2.4-2h-4.8a2.5 2.5 0 0 0 2.4 2zm7-6V11a7 7 0 0 0-5.5-6.8V3a1.5 1.5 0 0 0-3 0v1.2A7 7 0 0 0 5 11v5l-2 2v1h18v-1z"/></svg>
-        <div><b>Préviens-moi</b><span id="notify-text">Notification quand tu as 10 capsules en stock.</span></div>
+        <div><b>Préviens-moi</b><span id="notify-text">Notification quand tu as 10 reliques en stock.</span></div>
         <button class="btn small" id="notify-btn">Activer</button>
       </section>
 
       <section class="odds-panel">
-        <div class="section-head"><h2>Taux de drop</h2><span class="muted">par capsule</span></div>
+        <div class="section-head"><h2>Taux de drop</h2><span class="muted">par relique</span></div>
         <div class="odds-table" id="odds-table"></div>
         <p class="odds-note" id="odds-note"></p>
       </section>
@@ -157,10 +152,10 @@
     <canvas id="fx"></canvas>
     <div class="rays" id="rays"></div>
     <div class="flash" id="flash"></div>
-    <div class="reveal-capsule" id="reveal-capsule"><svg viewBox="0 0 200 220" aria-hidden="true"><use href="#capsule-art"/></svg></div>
+    <div class="reveal-capsule" id="reveal-capsule" role="button" aria-label="Passer l'animation"><svg viewBox="0 0 200 220" aria-hidden="true"><use href="#capsule-art"/></svg></div>
     <div class="reveal-single" id="reveal-single" hidden></div>
     <div class="reveal-multi" id="reveal-multi" hidden>
-      <div class="multi-head"><h2 id="multi-title">10 capsules</h2><span class="muted" id="multi-sub">Touche une carte pour la révéler</span></div>
+      <div class="multi-head"><h2 id="multi-title">10 reliques</h2><span class="muted" id="multi-sub">Touche une carte pour la révéler</span></div>
       <div class="multi-grid" id="multi-grid"></div>
     </div>
     <div class="reveal-actions" id="reveal-actions" hidden>

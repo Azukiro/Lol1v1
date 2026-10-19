@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Api.Controllers;
 
-/// <summary>Capsules : une par heure, à ouvrir pour collectionner champions et skins (page web /capsules).</summary>
+/// <summary>Capsules : une par heure, à ouvrir pour collectionner champions et skins (page web /reliques).</summary>
 [ApiController]
 [Authorize]
 [Route("api/v1/capsules")]

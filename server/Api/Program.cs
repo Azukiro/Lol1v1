@@ -100,6 +100,17 @@ app.Use(async (ctx, next) =>
     }
 });
 
+// Ancien chemin public des reliques (ex-capsules) : liens et PWA déjà installées.
+app.Use(async (ctx, next) =>
+{
+    if (ctx.Request.Path.StartsWithSegments("/capsules", out var rest))
+    {
+        ctx.Response.Redirect($"/reliques{(rest.HasValue ? rest.Value : "/")}{ctx.Request.QueryString}", permanent: true);
+        return;
+    }
+    await next();
+});
+
 // Page vitrine (wwwroot/index.html) servie à la racine.
 app.UseDefaultFiles();
 app.UseStaticFiles();

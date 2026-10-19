@@ -422,9 +422,10 @@ Données traitées : e-mail, hash du mot de passe, Riot ID, PUUID, historique de
 
 ---
 
-## 11. Capsules (page web `/capsules`)
+## 11. Reliques (page web `/reliques`)
 
-Page PWA servie par l'API : `https://<service>.onrender.com/capsules/` (même compte que l'application).
+Page PWA servie par l'API : `https://<service>.onrender.com/reliques/` (même compte que l'application).
+L'ancien chemin `/capsules/` redirige vers `/reliques/`. En interne (code, base, API `/api/v1/capsules`, configuration `Capsules__*`), le nom « capsules » est conservé.
 
 ### 11.1 Notifications push : clés VAPID
 
@@ -449,10 +450,10 @@ Pour des notifications fiables, garder le service éveillé avec un ping externe
 ### 11.3 Réglages (facultatifs, section `Capsules`)
 
 `IntervalMinutes` (60), `MaxStock` (10), `NotifyAt` (10), `WelcomeCapsules` (3), `EssencePerCapsule` (150),
-`EssencePerPremium` (600, capsule prestige), `MaxOpenAtOnce` (10). Les taux de drop sont dans `Domain/Capsules/CapsuleRules.cs`.
+`EssencePerPremium` (600, relique prestige), `MaxOpenAtOnce` (10). Les taux de drop sont dans `Domain/Capsules/CapsuleRules.cs`.
 
 ### 11.4 Mode debug
 
 Avec `ASPNETCORE_ENVIRONMENT=Development` (profil `http` en local), un panneau « Debug » apparaît sur la page :
-ajout de capsules / d'essence, remise à zéro. Les routes `/api/v1/capsules/debug/*` renvoient 404 dans tout autre environnement.
+ajout de reliques / d'essence, remise à zéro. Les routes `/api/v1/capsules/debug/*` renvoient 404 dans tout autre environnement.
 

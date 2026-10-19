@@ -87,9 +87,9 @@ h2 { font-size: 18px; }
 
 /* Ouverture */
 .view-open { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; max-width: 560px; }
-.install-banner, .notify-card { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 16px; border-radius: 14px; background: linear-gradient(110deg, rgba(25, 227, 255, .1), rgba(167, 139, 250, .08)); border: 1px solid rgba(25, 227, 255, .25); }
-.install-banner > div, .notify-card > div { flex: 1; display: grid; font-size: 13px; color: var(--muted); }
-.install-banner b, .notify-card b { color: var(--text); font-size: 14px; }
+.notify-card { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 16px; border-radius: 14px; background: linear-gradient(110deg, rgba(25, 227, 255, .1), rgba(167, 139, 250, .08)); border: 1px solid rgba(25, 227, 255, .25); }
+.notify-card > div { flex: 1; display: grid; font-size: 13px; color: var(--muted); }
+.notify-card b { color: var(--text); font-size: 14px; }
 .notify-card > svg { width: 24px; height: 24px; fill: var(--cyan); flex: none; }
 
 .stage { position: relative; display: grid; place-items: center; padding: 18px 0 6px; min-height: 300px; }
@@ -374,3 +374,24 @@ h2 { font-size: 18px; }
 .odds-table > .dim { color: var(--muted); }
 .odds-table > .h.prem { color: var(--yellow); }
 .odds-note { margin: 10px 0 0; color: var(--muted); font-size: 13px; }
+
+/* Installation de l'app */
+.install-sheet { display: grid; gap: 14px; padding: 26px 18px 8px; text-align: center; }
+.install-icon img { width: 76px; height: 76px; border-radius: 18px; box-shadow: 0 0 30px rgba(25, 227, 255, .35); }
+.install-sheet h2 { font-size: 26px; }
+.install-perks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; text-align: left; }
+.install-perks li { padding: 10px 12px 10px 36px; border-radius: 10px; background: var(--panel); position: relative; font-size: 14px; }
+.install-perks li::before { content: ''; position: absolute; left: 14px; top: 50%; width: 8px; height: 8px; margin-top: -4px; transform: rotate(45deg); background: var(--cyan); }
+.install-steps { margin: 0; padding: 12px 12px 12px 34px; border-radius: 12px; border: 1px dashed var(--line-2); text-align: left; display: grid; gap: 6px; font-size: 14px; }
+#menu #install-menu { color: var(--cyan); font-weight: 600; }
+
+/* Révélation : toucher la carte ouvre la suivante */
+.big-card.tappable { cursor: pointer; }
+.big-card.tappable:active .card { transform: scale(.97); }
+.big-card.tappable:focus-visible { outline: 2px solid var(--rc); outline-offset: 6px; border-radius: 14px; }
+.tap-again { margin: 0; font-family: var(--display); font-weight: 700; font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: var(--muted); animation: blink 2s ease-in-out infinite, rise .5s .6s both; }
+
+/* Passer l'animation d'ouverture */
+.reveal-capsule { cursor: pointer; }
+.reveal-capsule.charge::after { content: 'Touche pour passer'; position: absolute; left: 50%; top: calc(100% + 28px); translate: -50% 0; white-space: nowrap;
+  font-family: var(--display); font-weight: 700; font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: var(--muted); animation: fade .4s .8s both; }

@@ -1,10 +1,10 @@
 {
-  "name": "Capsules · Duelyst",
-  "short_name": "Capsules",
-  "description": "Une capsule par heure : ouvre, collectionne, complète tes gammes.",
-  "id": "/capsules/",
-  "start_url": "/capsules/",
-  "scope": "/capsules/",
+  "name": "Reliques · Duelyst",
+  "short_name": "Reliques",
+  "description": "Une relique par heure : ouvre, collectionne, complète tes gammes.",
+  "id": "/reliques/",
+  "start_url": "/reliques/",
+  "scope": "/reliques/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0b0e14",
@@ -18,6 +18,6 @@
     { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
   ],
   "shortcuts": [
-    { "name": "Collection", "url": "/capsules/?view=collection", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+    { "name": "Collection", "url": "/reliques/?view=collection", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
   ]
 }

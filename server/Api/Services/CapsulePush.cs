@@ -46,7 +46,7 @@ public sealed class PushService(Microsoft.Extensions.Options.IOptions<VapidOptio
     }
 }
 
-/// <summary>Toutes les 5 minutes : prévient les joueurs abonnés dont le stock de capsules atteint le seuil.</summary>
+/// <summary>Toutes les 5 minutes : prévient les joueurs abonnés dont le stock de reliques atteint le seuil.</summary>
 public sealed class CapsuleNotifier(IServiceScopeFactory scopes, PushService push, ILogger<CapsuleNotifier> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -80,10 +80,10 @@ public sealed class CapsuleNotifier(IServiceScopeFactory scopes, PushService pus
             wallet.FullNotified = true;
             await push.SendAsync(db, wallet.UserId, new
             {
-                title = $"{available} capsules t'attendent",
+                title = $"{available} reliques t'attendent",
                 body = "Ton stock est plein : ouvre-les avant de perdre les prochaines.",
-                url = "/capsules/",
-                tag = "capsules-full",
+                url = "/reliques/",
+                tag = "reliques-full",
             }, ct);
         }
         await db.SaveChangesAsync(ct);

@@ -46,7 +46,7 @@ public sealed class CapsuleCatalogService(IHttpClientFactory httpFactory, IConfi
             if (Current.IsEmpty && DateTimeOffset.UtcNow - _lastAttempt > TimeSpan.FromMinutes(1)) await LoadAsync(ct);
         }
         finally { _gate.Release(); }
-        if (Current.IsEmpty) throw new AppException("Catalogue des capsules indisponible, réessaie dans une minute.", 503);
+        if (Current.IsEmpty) throw new AppException("Catalogue des reliques indisponible, réessaie dans une minute.", 503);
         return Current;
     }
 

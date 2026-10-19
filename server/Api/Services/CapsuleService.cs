@@ -55,7 +55,7 @@ public sealed class CapsuleService(
 
     public async Task<OpenCapsulesResponse> OpenAsync(Guid userId, int count, CapsuleType type = CapsuleType.STANDARD)
     {
-        if (count < 1 || count > _o.MaxOpenAtOnce) throw new AppException($"Entre 1 et {_o.MaxOpenAtOnce} capsules à la fois.");
+        if (count < 1 || count > _o.MaxOpenAtOnce) throw new AppException($"Entre 1 et {_o.MaxOpenAtOnce} reliques à la fois.");
         var catalog = await catalogs.GetAsync();
         using var _ = await locks.AcquireAsync(userId);
 
@@ -63,7 +63,7 @@ public sealed class CapsuleService(
         Normalize(wallet);
         var premium = type == CapsuleType.PREMIUM;
         var stock = premium ? wallet.PremiumStored : wallet.Stored;
-        if (stock < count) throw new AppException(stock == 0 ? $"Aucune capsule{(premium ? " prestige" : "")} disponible." : $"Seulement {stock} capsule(s) disponible(s).", 409);
+        if (stock < count) throw new AppException(stock == 0 ? $"Aucune relique{(premium ? " prestige" : "")} disponible." : $"Seulement {stock} relique(s) disponible(s).", 409);
 
         var owned = await db.CollectionItems.Where(c => c.UserId == userId).ToDictionaryAsync(c => (c.Kind, c.ItemId));
         var available = Enum.GetValues<Rarity>().Where(r => r == Rarity.COMMON ? catalog.Champions.Count > 0 : catalog.SkinsByRarity[r].Any()).ToHashSet();
@@ -109,7 +109,7 @@ public sealed class CapsuleService(
         using var _ = await locks.AcquireAsync(userId);
         var wallet = await GetOrCreateWalletAsync(userId);
         var cost = EssenceCost(type);
-        if (wallet.Essence < cost) throw new AppException($"Il faut {cost} essences pour une capsule{(type == CapsuleType.PREMIUM ? " prestige" : "")}.", 409);
+        if (wallet.Essence < cost) throw new AppException($"Il faut {cost} essences pour une relique{(type == CapsuleType.PREMIUM ? " prestige" : "")}.", 409);
         Normalize(wallet);
         wallet.Essence -= cost;
         if (type == CapsuleType.PREMIUM) wallet.PremiumStored++; else wallet.Stored++;

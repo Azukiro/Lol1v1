@@ -184,5 +184,19 @@ public class CapsuleFlowTests
         Assert.Equal(10_000, CapsuleRules.StandardWeights.Values.Sum());
         Assert.Equal(10_000, CapsuleRules.PremiumWeights.Values.Sum());
     }
+
+    [Fact]
+    public async Task Old_capsules_path_redirects_to_reliques()
+    {
+        await using var factory = new ApiFactory();
+        var http = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var res = await http.GetAsync("/capsules/?view=collection");
+        Assert.Equal(HttpStatusCode.MovedPermanently, res.StatusCode);
+        Assert.Equal("/reliques/?view=collection", res.Headers.Location!.OriginalString);
+        res = await http.GetAsync("/capsules");
+        Assert.Equal("/reliques/", res.Headers.Location!.OriginalString);
+        // L'API garde son nom interne.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await http.GetAsync("/api/v1/capsules/state")).StatusCode);
+    }
 }
 

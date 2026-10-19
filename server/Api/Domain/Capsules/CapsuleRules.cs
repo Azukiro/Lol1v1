@@ -8,11 +8,14 @@ public enum Rarity { COMMON, RARE, EPIC, LEGENDARY, MYTHIC, ULTIMATE, EXALTED }
 
 public enum CapsuleItemKind { CHAMPION, SKIN }
 
+/// <summary>STANDARD : gagnée chaque heure ou forgée ; PREMIUM : forgée plus cher, sans champion et à meilleurs taux.</summary>
+public enum CapsuleType { STANDARD, PREMIUM }
+
 /// <summary>Règles pures des capsules : accumulation horaire, tirage pondéré, garantie, essence des doublons.</summary>
 public static class CapsuleRules
 {
-    /// <summary>Poids de tirage (sur 10 000) par rareté.</summary>
-    public static readonly IReadOnlyDictionary<Rarity, int> Weights = new Dictionary<Rarity, int>
+    /// <summary>Poids de tirage (sur 10 000) par rareté, capsule standard.</summary>
+    public static readonly IReadOnlyDictionary<Rarity, int> StandardWeights = new Dictionary<Rarity, int>
     {
         [Rarity.COMMON] = 5500,
         [Rarity.RARE] = 2800,
@@ -22,6 +25,19 @@ public static class CapsuleRules
         [Rarity.ULTIMATE] = 40,
         [Rarity.EXALTED] = 10,
     };
+
+    /// <summary>Poids de tirage (sur 10 000), capsule prestige : que des skins, Épique ou mieux dans 60 % des cas.</summary>
+    public static readonly IReadOnlyDictionary<Rarity, int> PremiumWeights = new Dictionary<Rarity, int>
+    {
+        [Rarity.RARE] = 4000,
+        [Rarity.EPIC] = 4000,
+        [Rarity.LEGENDARY] = 1400,
+        [Rarity.MYTHIC] = 400,
+        [Rarity.ULTIMATE] = 150,
+        [Rarity.EXALTED] = 50,
+    };
+
+    public static IReadOnlyDictionary<Rarity, int> WeightsFor(CapsuleType type) => type == CapsuleType.PREMIUM ? PremiumWeights : StandardWeights;
 
     /// <summary>Essence gagnée quand l'objet tiré est déjà possédé.</summary>
     public static int DuplicateEssence(Rarity rarity) => rarity switch
@@ -52,10 +68,11 @@ public static class CapsuleRules
     }
 
     /// <summary>Tire une rareté ; <paramref name="guaranteed"/> exclut Commun et Rare (garantie).</summary>
-    public static Rarity RollRarity(Random rng, bool guaranteed, ISet<Rarity> available)
+    public static Rarity RollRarity(Random rng, CapsuleType type, bool guaranteed, ISet<Rarity> available)
     {
-        var pool = Weights.Where(w => available.Contains(w.Key) && (!guaranteed || w.Key >= Rarity.EPIC)).ToList();
-        if (pool.Count == 0) pool = Weights.Where(w => available.Contains(w.Key)).ToList();
+        var weights = WeightsFor(type);
+        var pool = weights.Where(w => available.Contains(w.Key) && (!guaranteed || w.Key >= Rarity.EPIC)).ToList();
+        if (pool.Count == 0) pool = weights.Where(w => available.Contains(w.Key)).ToList();
         var roll = rng.Next(pool.Sum(w => w.Value));
         foreach (var (rarity, weight) in pool)
         {

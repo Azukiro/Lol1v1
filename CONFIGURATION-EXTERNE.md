@@ -448,7 +448,8 @@ Pour des notifications fiables, garder le service éveillé avec un ping externe
 
 ### 11.3 Réglages (facultatifs, section `Capsules`)
 
-`IntervalMinutes` (60), `MaxStock` (10), `NotifyAt` (10), `WelcomeCapsules` (3), `EssencePerCapsule` (150), `MaxOpenAtOnce` (10).
+`IntervalMinutes` (60), `MaxStock` (10), `NotifyAt` (10), `WelcomeCapsules` (3), `EssencePerCapsule` (150),
+`EssencePerPremium` (600, capsule prestige), `MaxOpenAtOnce` (10). Les taux de drop sont dans `Domain/Capsules/CapsuleRules.cs`.
 
 ### 11.4 Mode debug
 

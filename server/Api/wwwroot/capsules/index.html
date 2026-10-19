@@ -64,6 +64,11 @@
         <button class="icon-btn" id="install-close" aria-label="Fermer"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
       </div>
 
+      <div class="type-switch" role="tablist" aria-label="Type de capsule">
+        <button role="tab" data-type="STANDARD" aria-selected="true"><span>Capsule</span><b id="count-std">0</b></button>
+        <button role="tab" data-type="PREMIUM" aria-selected="false"><span>Prestige</span><b id="count-prem">0</b></button>
+      </div>
+
       <section class="stage" aria-live="polite">
         <div class="stage-glow"></div>
         <button class="capsule" id="capsule" aria-label="Ouvrir une capsule">
@@ -73,7 +78,9 @@
         <div class="tap-hint" id="tap-hint">Touche pour ouvrir</div>
       </section>
 
-      <section class="stock">
+      <p class="premium-note" id="premium-note" hidden>Forgée avec l'essence. Uniquement des skins, Épique ou mieux 6 fois sur 10.</p>
+
+      <section class="stock" id="stock">
         <div class="pips" id="pips" aria-hidden="true"></div>
         <div class="stock-line"><span id="stock-text">0 / 10 capsules</span><span class="sep">·</span><span id="next-text" class="muted"></span></div>
         <div class="timer-bar"><i id="timer-fill"></i></div>
@@ -90,9 +97,12 @@
           <div class="meter"><i id="pity-fill"></i></div>
         </div>
         <div class="perk">
-          <div class="perk-head"><span class="kicker">Essence</span><b id="essence-text">0 / 150</b></div>
-          <div class="meter essence"><i id="essence-fill"></i></div>
-          <button class="btn small" id="buy-btn" disabled>Forger une capsule</button>
+          <div class="perk-head"><span class="kicker">Essence · forge</span><b id="essence-text">0</b></div>
+          <div class="meter essence"><i id="essence-fill"></i><span class="tick" id="essence-tick"></span></div>
+          <div class="forge">
+            <button class="btn small" id="buy-std" disabled>Capsule · <span id="price-std">150</span></button>
+            <button class="btn small gold" id="buy-prem" disabled>Prestige · <span id="price-prem">600</span></button>
+          </div>
         </div>
       </section>
 
@@ -100,6 +110,12 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a2.5 2.5 0 0 0 2.4-2h-4.8a2.5 2.5 0 0 0 2.4 2zm7-6V11a7 7 0 0 0-5.5-6.8V3a1.5 1.5 0 0 0-3 0v1.2A7 7 0 0 0 5 11v5l-2 2v1h18v-1z"/></svg>
         <div><b>Préviens-moi</b><span id="notify-text">Notification quand tu as 10 capsules en stock.</span></div>
         <button class="btn small" id="notify-btn">Activer</button>
+      </section>
+
+      <section class="odds-panel">
+        <div class="section-head"><h2>Taux de drop</h2><span class="muted">par capsule</span></div>
+        <div class="odds-table" id="odds-table"></div>
+        <p class="odds-note" id="odds-note"></p>
       </section>
 
       <section class="recent">
@@ -170,6 +186,7 @@
       <button data-debug="cap:1">+1</button>
       <button data-debug="cap:10">+10</button>
       <button data-debug="cap:100">+100</button>
+      <button data-debug="prem:1">+1 prestige</button>
       <button data-debug="ess:1000">+1000 ess.</button>
       <button data-debug="reset" class="danger">Reset</button>
     </div>

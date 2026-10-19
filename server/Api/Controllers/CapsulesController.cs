@@ -23,16 +23,17 @@ public sealed class CapsulesController(
     [HttpPost("open")]
     public async Task<OpenCapsulesResponse> Open(OpenCapsulesRequest req)
     {
-        var res = await capsules.OpenAsync(User.UserId(), req.Count);
+        var res = await capsules.OpenAsync(User.UserId(), req.Count, req.Type);
         return res with { State = WithDebug(res.State) };
     }
 
     [HttpPost("buy")]
-    public async Task<CapsuleStateDto> Buy() => WithDebug(await capsules.BuyAsync(User.UserId()));
+    public async Task<CapsuleStateDto> Buy([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] BuyCapsuleRequest? req) =>
+        WithDebug(await capsules.BuyAsync(User.UserId(), req?.Type ?? Api.Domain.Capsules.CapsuleType.STANDARD));
 
     [HttpPost("debug/grant")]
     public async Task<ActionResult<CapsuleStateDto>> DebugGrant(DebugGrantRequest req) =>
-        DebugEnabled ? WithDebug(await capsules.DebugGrantAsync(User.UserId(), req.Count, req.Essence)) : NotFound();
+        DebugEnabled ? WithDebug(await capsules.DebugGrantAsync(User.UserId(), req.Count, req.Essence, req.Premium)) : NotFound();
 
     [HttpPost("debug/reset")]
     public async Task<ActionResult<CapsuleStateDto>> DebugReset() =>

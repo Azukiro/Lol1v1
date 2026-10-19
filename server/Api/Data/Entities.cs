@@ -206,6 +206,8 @@ public class CapsuleWallet
     public Guid UserId { get; set; }
     /// <summary>Capsules en stock à <see cref="AccrualAnchor"/>.</summary>
     public int Stored { get; set; }
+    /// <summary>Capsules prestige en stock (forgées uniquement, pas d'accumulation).</summary>
+    public int PremiumStored { get; set; }
     /// <summary>Point de départ de l'heure en cours.</summary>
     public DateTimeOffset AccrualAnchor { get; set; }
     public int Essence { get; set; }

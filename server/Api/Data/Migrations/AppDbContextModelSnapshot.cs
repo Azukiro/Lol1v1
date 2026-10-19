@@ -121,6 +121,10 @@ namespace Api.Data.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("full_notified");
 
+                    b.Property<int>("PremiumStored")
+                        .HasColumnType("integer")
+                        .HasColumnName("premium_stored");
+
                     b.Property<int>("SinceEpic")
                         .HasColumnType("integer")
                         .HasColumnName("since_epic");

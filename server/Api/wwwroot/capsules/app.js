@@ -5,7 +5,7 @@ const CD = 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/
 const RARITIES = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'MYTHIC', 'ULTIMATE', 'EXALTED'];
 const LABEL = { COMMON: 'Commun', RARE: 'Rare', EPIC: 'Épique', LEGENDARY: 'Légendaire', MYTHIC: 'Mythique', ULTIMATE: 'Ultime', EXALTED: 'Exalté' };
 const COLOR = { COMMON: '#8a94a6', RARE: '#19e3ff', EPIC: '#a78bfa', LEGENDARY: '#ff8a3d', MYTHIC: '#ff3366', ULTIMATE: '#ffc94d', EXALTED: '#ffffff' };
-const CATALOG_KEY = 'capsules.catalog.v1';
+const CATALOG_KEY = 'capsules.catalog.v2';
 const rank = (r) => RARITIES.indexOf(r);
 
 const $ = (s, root = document) => root.querySelector(s);
@@ -27,6 +27,7 @@ const S = {
   owned: new Map(),
   recent: [],
   view: 'open',
+  type: 'STANDARD',
   busy: false,
   sound: store.get('capsules.sound') !== 'off',
   coll: { group: 'rarity', q: '', missing: false, rarity: null, open: new Set(), limits: {} },
@@ -71,14 +72,17 @@ function indexCatalog(data) {
     for (const l of s.lines) (byLine.get(l) || byLine.set(l, []).get(l)).push(s.id);
     (byChamp.get(s.championId) || byChamp.set(s.championId, []).get(s.championId)).push(s.id);
   }
-  const odds = Object.fromEntries(data.odds.map((o) => [o.rarity, o]));
-  return { ...data, champ, skin, line, byLine, byChamp, byRarity, oddsBy: odds };
+  // oddsBy.STANDARD.EPIC = { percent, duplicateEssence }
+  const oddsBy = Object.fromEntries(data.odds.map((o) => [o.type, Object.fromEntries(o.rates.map((r) => [r.rarity, r]))]));
+  const price = Object.fromEntries(data.odds.map((o) => [o.type, o.essenceCost]));
+  return { ...data, champ, skin, line, byLine, byChamp, byRarity, oddsBy, price };
 }
 
 async function loadCatalog() {
   const cached = JSON.parse(store.get(CATALOG_KEY) || 'null');
   if (cached && Date.now() - cached.at < 6 * 3600e3) { S.cat = indexCatalog(cached.data); return; }
-  const data = await api('/capsules/catalog');
+  // Version dans l'URL : le catalogue est aussi en cache HTTP (6 h), un changement de format doit le contourner.
+  const data = await api('/capsules/catalog?v=2');
   store.set(CATALOG_KEY, JSON.stringify({ at: Date.now(), data }));
   S.cat = indexCatalog(data);
 }
@@ -219,30 +223,45 @@ function renderTimer() {
   $('#timer-fill').style.width = `${100 - (left / (w.intervalSeconds * 1000)) * 100}%`;
 }
 
+const stockOf = (type = S.type) => (type === 'PREMIUM' ? S.wallet.premiumAvailable : S.wallet.available);
+
 function renderWallet() {
   const w = S.wallet;
-  const has = w.available > 0;
+  const premium = S.type === 'PREMIUM';
+  const stock = stockOf();
+  const has = stock > 0;
+  $('#view-open').classList.toggle('premium', premium);
+  $('#count-std').textContent = w.available;
+  $('#count-prem').textContent = w.premiumAvailable;
+  $('#stock').hidden = premium;
+  $('#premium-note').hidden = !premium;
   $('#capsule').classList.toggle('empty', !has);
   $('#capsule').disabled = !has;
-  $('#capsule-count').textContent = w.available;
-  $('#tap-hint').textContent = has ? 'Touche pour ouvrir' : 'Reviens bientôt';
+  $('#capsule-count').textContent = stock;
+  $('#tap-hint').textContent = has ? 'Touche pour ouvrir' : premium ? `Forge-en une : ${w.essencePerPremium} essence` : 'Reviens bientôt';
   $('#pips').innerHTML = Array.from({ length: w.maxStock }, (_, i) => `<i class="pip${i < w.available ? ' on' : ''}"></i>`).join('')
     + (w.available > w.maxStock ? '' : '');
   $('#stock-text').textContent = `${w.available} / ${w.maxStock} capsules${w.available > w.maxStock ? ' (bonus)' : ''}`;
   $('#open-one').disabled = !has || S.busy;
-  const n = Math.min(w.available, 10);
+  const n = Math.min(stock, 10);
   $('#open-all').disabled = n < 2 || S.busy;
   $('#open-all').textContent = n >= 2 ? `Ouvrir ×${n}` : 'Tout ouvrir';
   $('#essence').textContent = w.essence;
-  $('#essence-text').textContent = `${w.essence} / ${w.essencePerCapsule}`;
-  $('#essence-fill').style.width = `${Math.min(100, (w.essence / w.essencePerCapsule) * 100)}%`;
-  $('#buy-btn').disabled = w.essence < w.essencePerCapsule || S.busy;
+  // Jauge jusqu'au prix d'une prestige, repère au prix d'une capsule.
+  $('#essence-text').textContent = `${w.essence} essence`;
+  $('#essence-fill').style.width = `${Math.min(100, (w.essence / w.essencePerPremium) * 100)}%`;
+  $('#essence-tick').style.left = `${(w.essencePerCapsule / w.essencePerPremium) * 100}%`;
+  $('#price-std').textContent = w.essencePerCapsule;
+  $('#price-prem').textContent = w.essencePerPremium;
+  $('#buy-std').disabled = w.essence < w.essencePerCapsule || S.busy;
+  $('#buy-prem').disabled = w.essence < w.essencePerPremium || S.busy;
   $('#pity-text').textContent = w.pityIn <= 1 ? 'Épique garanti à la prochaine' : `Épique garanti dans ${w.pityIn}`;
   $('#pity-fill').style.width = `${((10 - w.pityIn) / 9) * 100}%`;
   $('#total-opened').textContent = w.totalOpened ? `${w.totalOpened} ouvertes` : '';
-  const badge = $('#nav-badge'); badge.hidden = !has; badge.textContent = w.available;
-  document.title = has ? `(${w.available}) Capsules` : 'Capsules';
-  try { has ? navigator.setAppBadge?.(w.available) : navigator.clearAppBadge?.(); } catch { /* non supporté */ }
+  const all = w.available + w.premiumAvailable;
+  const badge = $('#nav-badge'); badge.hidden = !all; badge.textContent = all;
+  document.title = all ? `(${all}) Capsules` : 'Capsules';
+  try { all ? navigator.setAppBadge?.(all) : navigator.clearAppBadge?.(); } catch { /* non supporté */ }
   $('#debug').hidden = !w.debug;
   renderTimer();
 }
@@ -255,17 +274,19 @@ function renderRecent() {
 
 // ---------- Ouverture ----------
 async function openCapsules(count) {
-  if (S.busy || !S.wallet || S.wallet.available < 1) return;
+  const type = S.type;
+  if (S.busy || !S.wallet || stockOf(type) < 1) return;
   S.busy = true; renderWallet();
   audio.ensure();
   const reveal = $('#reveal'); const cap = $('#reveal-capsule');
-  reveal.hidden = false; reveal.style.setProperty('--glow', COLOR.RARE);
+  const startGlow = type === 'PREMIUM' ? COLOR.ULTIMATE : COLOR.RARE;
+  reveal.hidden = false; reveal.style.setProperty('--glow', startGlow);
   $('#reveal-single').hidden = true; $('#reveal-multi').hidden = true; $('#reveal-actions').hidden = true; $('#rays').className = 'rays';
   cap.hidden = false; cap.className = 'reveal-capsule charge';
   buzz(30);
   let res;
   try {
-    [res] = await Promise.all([api('/capsules/open', { method: 'POST', body: { count } }), sleep(450)]);
+    [res] = await Promise.all([api('/capsules/open', { method: 'POST', body: { count, type } }), sleep(450)]);
   } catch (e) {
     reveal.hidden = true; S.busy = false; renderWallet(); toast(e.message, true); return;
   }
@@ -369,8 +390,9 @@ async function revealAll() {
 function showRevealActions(pending) {
   $('#reveal-actions').hidden = false;
   $('#reveal-skip').hidden = !pending;
-  $('#reveal-again').hidden = pending || S.wallet.available < 1;
-  $('#reveal-again').textContent = S.wallet.available > 1 ? `Encore ×${Math.min(S.wallet.available, 10)}` : 'Ouvrir encore';
+  const stock = stockOf();
+  $('#reveal-again').hidden = pending || stock < 1;
+  $('#reveal-again').textContent = stock > 1 ? `Encore ×${Math.min(stock, 10)}` : 'Ouvrir encore';
   $('#reveal-close').hidden = pending;
 }
 
@@ -487,8 +509,9 @@ function closeSheet() { $('#sheet').hidden = true; }
 function showItem(key) {
   const it = fromKey(key); if (!it) return;
   const o = ownedOf(key);
-  const odds = S.cat.oddsBy[it.rarity];
-  const chance = odds ? odds.percent / S.cat.byRarity[it.rarity].length : 0;
+  const odds = S.cat.oddsBy.STANDARD[it.rarity];
+  const chanceIn = (type) => (S.cat.oddsBy[type][it.rarity]?.percent ?? 0) / S.cat.byRarity[it.rarity].length;
+  const fmt = (c) => (c === 0 ? '—' : `${c >= 0.01 ? c.toFixed(2) : c.toFixed(3)}%`);
   const lines = it.lines.map((l) => S.cat.line.get(l)).filter(Boolean);
   openSheet(`
     <div class="detail-hero" style="background-image:url('${it.splash}'), url('${it.art}')"></div>
@@ -500,8 +523,9 @@ function showItem(key) {
       <div class="facts">
         <div><b>${o ? `×${o.count}` : '—'}</b><span>Exemplaires</span></div>
         <div><b>${o ? new Date(o.firstObtainedAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : 'Jamais'}</b><span>Obtenu</span></div>
-        <div><b>${chance >= 0.01 ? chance.toFixed(2) : chance.toFixed(3)}%</b><span>Chance / capsule</span></div>
+        <div><b>${fmt(chanceIn('STANDARD'))}</b><span>Chance / capsule</span></div>
       </div>
+      <p class="muted">Chance par capsule prestige : ${fmt(chanceIn('PREMIUM'))}</p>
       ${o ? `<p class="muted">Un doublon rapporte ${odds?.duplicateEssence ?? 0} essence.</p>` : '<p class="muted">Pas encore obtenu. Continue d\'ouvrir !</p>'}
     </div>`);
 }
@@ -516,9 +540,36 @@ function showChampion(id) {
     <div class="grid">${its.map((it) => { const o = ownedOf(it.key); return cardHTML(it, { missing: !o, count: o?.count }); }).join('')}</div></div>`);
 }
 
+// Tableau comparatif : taux par type de capsule et essence d'un doublon (colonne du type choisi mise en avant).
+function oddsHTML() {
+  const pct = (type, r) => { const o = S.cat.oddsBy[type][r]; return o ? `${o.percent}%` : '—'; };
+  const cls = (type) => (type === S.type ? 'sel' : 'dim');
+  return `<span class="h name">Rareté</span><span class="h">Capsule</span><span class="h prem">Prestige</span><span class="h">Doublon</span>
+    ${[...RARITIES].reverse().map((r) => `<span class="name r-${r}">${LABEL[r]}</span>
+      <span class="${cls('STANDARD')}">${pct('STANDARD', r)}</span><span class="${cls('PREMIUM')}">${pct('PREMIUM', r)}</span>
+      <span>+${(S.cat.oddsBy.STANDARD[r] || S.cat.oddsBy.PREMIUM[r]).duplicateEssence}</span>`).join('')}`;
+}
+
+function oddsNote() {
+  return `Prix en essence : capsule ${S.cat.price.STANDARD}, prestige ${S.cat.price.PREMIUM}. « Doublon » : essence reçue quand l'objet est déjà dans ta collection. `
+    + `Après ${S.cat.pityThreshold - 1} capsules sans Épique, la suivante est Épique ou mieux. La prestige ne contient que des skins.`;
+}
+
+function renderOdds() {
+  if (!S.cat) return;
+  $('#odds-table').innerHTML = oddsHTML();
+  $('#odds-note').textContent = oddsNote();
+}
+
 function showOdds() {
-  openSheet(`<div class="odds"><h2>Taux de drop</h2><p class="muted">Par capsule. Après ${S.cat.pityThreshold - 1} tirages sans Épique, le suivant est Épique ou mieux. Un doublon devient de l'essence ; ${S.wallet.essencePerCapsule} essence = une capsule.</p>
-    ${[...S.cat.odds].reverse().map((o) => `<div class="odds-row r-${o.rarity}"><span class="name">${LABEL[o.rarity]}</span><span>${o.percent}%</span><span class="muted">+${o.duplicateEssence} ess.</span></div>`).join('')}</div>`);
+  openSheet(`<div class="odds"><h2>Taux de drop</h2><div class="odds-table">${oddsHTML()}</div><p class="odds-note">${esc(oddsNote())}</p></div>`);
+}
+
+function setType(type) {
+  S.type = type;
+  $$('.type-switch [data-type]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.type === type)));
+  if (S.wallet) renderWallet();
+  renderOdds();
 }
 
 // ---------- Navigation ----------
@@ -661,6 +712,7 @@ async function start() {
     S.owned = new Map(coll.items.map((i) => [`${i.kind}:${i.itemId}`, i]));
     S.recent = coll.recent;
     renderRecent();
+    renderOdds();
     if (S.view === 'collection') renderCollection();
   } catch (e) { toast(e.message, true); }
   finally { clearTimeout(slow); }
@@ -674,13 +726,21 @@ function bind() {
   $$('[data-view]').forEach((b) => (b.onclick = () => setView(b.dataset.view)));
   $('#capsule').onclick = () => openCapsules(1);
   $('#open-one').onclick = () => openCapsules(1);
-  $('#open-all').onclick = () => openCapsules(Math.min(S.wallet.available, 10));
-  $('#buy-btn').onclick = async () => {
-    try { setWallet(await api('/capsules/buy', { method: 'POST' })); audio.chime(2); toast('Capsule forgée !'); } catch (e) { toast(e.message, true); }
+  $('#open-all').onclick = () => openCapsules(Math.min(stockOf(), 10));
+  const buy = async (type) => {
+    try {
+      setWallet(await api('/capsules/buy', { method: 'POST', body: { type } }));
+      audio.chime(type === 'PREMIUM' ? 4 : 2);
+      toast(type === 'PREMIUM' ? 'Capsule prestige forgée !' : 'Capsule forgée !');
+      setType(type);
+    } catch (e) { toast(e.message, true); }
   };
+  $('#buy-std').onclick = () => buy('STANDARD');
+  $('#buy-prem').onclick = () => buy('PREMIUM');
+  $$('.type-switch [data-type]').forEach((b) => (b.onclick = () => setType(b.dataset.type)));
   $('#reveal-close').onclick = closeReveal;
   $('#reveal-skip').onclick = revealAll;
-  $('#reveal-again').onclick = () => { const n = Math.min(S.wallet.available, 10); closeReveal(); openCapsules(n > 1 ? n : 1); };
+  $('#reveal-again').onclick = () => { const n = Math.min(stockOf(), 10); closeReveal(); openCapsules(n > 1 ? n : 1); };
   $('#multi-grid').addEventListener('click', (e) => { const f = e.target.closest('.flip'); if (f) flipCard(f); });
 
   $('#menu-btn').onclick = (e) => { e.stopPropagation(); $('#menu').hidden = !$('#menu').hidden; };
@@ -725,7 +785,7 @@ function bind() {
     const b = e.target.closest('[data-debug]'); if (!b) return;
     const [kind, n] = b.dataset.debug.split(':');
     if (kind === 'reset') { if (confirm('Vider collection, historique et stock ?')) debugCall('reset'); }
-    else debugCall('grant', kind === 'cap' ? { count: +n } : { count: 0, essence: +n });
+    else debugCall('grant', { count: kind === 'cap' ? +n : 0, essence: kind === 'ess' ? +n : 0, premium: kind === 'prem' ? +n : 0 });
   });
 
   addEventListener('visibilitychange', () => { if (!document.hidden && S.token) api('/capsules/state').then(setWallet).catch(() => {}); });

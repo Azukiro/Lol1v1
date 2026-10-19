@@ -15,6 +15,7 @@ public sealed class CapsuleOptions
     /// <summary>Capsules offertes à la première visite.</summary>
     public int WelcomeCapsules { get; set; } = 3;
     public int EssencePerCapsule { get; set; } = 150;
+    public int EssencePerPremium { get; set; } = 600;
     public int MaxOpenAtOnce { get; set; } = 10;
 
     public TimeSpan Interval => TimeSpan.FromMinutes(IntervalMinutes);
@@ -52,7 +53,7 @@ public sealed class CapsuleService(
         return ToDto(wallet);
     }
 
-    public async Task<OpenCapsulesResponse> OpenAsync(Guid userId, int count)
+    public async Task<OpenCapsulesResponse> OpenAsync(Guid userId, int count, CapsuleType type = CapsuleType.STANDARD)
     {
         if (count < 1 || count > _o.MaxOpenAtOnce) throw new AppException($"Entre 1 et {_o.MaxOpenAtOnce} capsules à la fois.");
         var catalog = await catalogs.GetAsync();
@@ -60,7 +61,9 @@ public sealed class CapsuleService(
 
         var wallet = await GetOrCreateWalletAsync(userId);
         Normalize(wallet);
-        if (wallet.Stored < count) throw new AppException(wallet.Stored == 0 ? "Aucune capsule disponible." : $"Seulement {wallet.Stored} capsule(s) disponible(s).", 409);
+        var premium = type == CapsuleType.PREMIUM;
+        var stock = premium ? wallet.PremiumStored : wallet.Stored;
+        if (stock < count) throw new AppException(stock == 0 ? $"Aucune capsule{(premium ? " prestige" : "")} disponible." : $"Seulement {stock} capsule(s) disponible(s).", 409);
 
         var owned = await db.CollectionItems.Where(c => c.UserId == userId).ToDictionaryAsync(c => (c.Kind, c.ItemId));
         var available = Enum.GetValues<Rarity>().Where(r => r == Rarity.COMMON ? catalog.Champions.Count > 0 : catalog.SkinsByRarity[r].Any()).ToHashSet();
@@ -70,7 +73,7 @@ public sealed class CapsuleService(
         for (var i = 0; i < count; i++)
         {
             var guaranteed = wallet.SinceEpic >= CapsuleRules.PityThreshold - 1;
-            var rarity = CapsuleRules.RollRarity(Random.Shared, guaranteed, available);
+            var rarity = CapsuleRules.RollRarity(Random.Shared, type, guaranteed, available);
             var (kind, itemId) = Pick(catalog, rarity, owned);
 
             owned.TryGetValue((kind, itemId), out var item);
@@ -91,36 +94,38 @@ public sealed class CapsuleService(
 
             wallet.SinceEpic = rarity >= Rarity.EPIC ? 0 : wallet.SinceEpic + 1;
             wallet.TotalOpened++;
-            wallet.Stored--;
+            if (premium) wallet.PremiumStored--; else wallet.Stored--;
             db.CapsuleDrops.Add(new CapsuleDrop { UserId = userId, Kind = kind, ItemId = itemId, Rarity = rarity, IsNew = isNew, OpenedAt = now });
-            drops.Add(new CapsuleDropDto(kind, itemId, rarity, isNew, item.Count, essence, guaranteed && rarity >= Rarity.EPIC));
+            drops.Add(new CapsuleDropDto(kind, itemId, rarity, isNew, item.Count, essence, guaranteed && !premium && rarity >= Rarity.EPIC));
         }
         if (wallet.Stored < _o.NotifyAt) wallet.FullNotified = false;
         await db.SaveChangesAsync();
         return new OpenCapsulesResponse(drops, ToDto(wallet));
     }
 
-    /// <summary>Échange de l'essence des doublons contre une capsule.</summary>
-    public async Task<CapsuleStateDto> BuyAsync(Guid userId)
+    /// <summary>Échange de l'essence des doublons contre une capsule (standard ou prestige).</summary>
+    public async Task<CapsuleStateDto> BuyAsync(Guid userId, CapsuleType type = CapsuleType.STANDARD)
     {
         using var _ = await locks.AcquireAsync(userId);
         var wallet = await GetOrCreateWalletAsync(userId);
-        if (wallet.Essence < _o.EssencePerCapsule) throw new AppException($"Il faut {_o.EssencePerCapsule} essences pour une capsule.", 409);
+        var cost = EssenceCost(type);
+        if (wallet.Essence < cost) throw new AppException($"Il faut {cost} essences pour une capsule{(type == CapsuleType.PREMIUM ? " prestige" : "")}.", 409);
         Normalize(wallet);
-        wallet.Essence -= _o.EssencePerCapsule;
-        wallet.Stored++;
+        wallet.Essence -= cost;
+        if (type == CapsuleType.PREMIUM) wallet.PremiumStored++; else wallet.Stored++;
         await db.SaveChangesAsync();
         return ToDto(wallet);
     }
 
     /// <summary>Mode debug (environnement Development uniquement) : ajoute des capsules et de l'essence sans limite.</summary>
-    public async Task<CapsuleStateDto> DebugGrantAsync(Guid userId, int count, int essence)
+    public async Task<CapsuleStateDto> DebugGrantAsync(Guid userId, int count, int essence, int premium)
     {
         using var _ = await locks.AcquireAsync(userId);
         var wallet = await GetOrCreateWalletAsync(userId);
         Normalize(wallet);
         wallet.Stored = Math.Clamp(wallet.Stored + count, 0, 999);
         wallet.Essence = Math.Max(0, wallet.Essence + essence);
+        wallet.PremiumStored = Math.Clamp(wallet.PremiumStored + premium, 0, 999);
         await db.SaveChangesAsync();
         return ToDto(wallet);
     }
@@ -147,14 +152,21 @@ public sealed class CapsuleService(
 
     public CapsuleCatalogDto ToCatalogDto(CapsuleCatalog c)
     {
-        var total = (double)CapsuleRules.Weights.Values.Sum();
         return new CapsuleCatalogDto(
             c.Champions.Select(x => new CatalogChampionDto(x.Id, x.Name, x.Alias)).ToList(),
             c.Skins.Select(x => new CatalogSkinDto(x.Id, x.ChampionId, x.Num, x.Name, x.Rarity, x.Lines, x.Legacy, x.LoadPath)).ToList(),
             c.Lines.Select(x => new CatalogLineDto(x.Id, x.Name)).ToList(),
-            CapsuleRules.Weights.Select(w => new RarityOddsDto(w.Key, Math.Round(w.Value / total * 100, 2), CapsuleRules.DuplicateEssence(w.Key))).ToList(),
+            Enum.GetValues<CapsuleType>().Select(t =>
+            {
+                var weights = CapsuleRules.WeightsFor(t);
+                var total = (double)weights.Values.Sum();
+                return new CapsuleOddsDto(t, EssenceCost(t),
+                    weights.Select(w => new RarityOddsDto(w.Key, Math.Round(w.Value / total * 100, 2), CapsuleRules.DuplicateEssence(w.Key))).ToList());
+            }).ToList(),
             CapsuleRules.PityThreshold);
     }
+
+    public int EssenceCost(CapsuleType type) => type == CapsuleType.PREMIUM ? _o.EssencePerPremium : _o.EssencePerCapsule;
 
     /// <summary>Stock courant d'un portefeuille (sans l'enregistrer), pour le notificateur.</summary>
     public int AvailableNow(CapsuleWallet wallet) =>
@@ -192,6 +204,7 @@ public sealed class CapsuleService(
         var now = clock.GetUtcNow();
         var nextAt = w.Stored >= _o.MaxStock ? (DateTimeOffset?)null : w.AccrualAnchor + _o.Interval;
         return new CapsuleStateDto(w.Stored, _o.MaxStock, _o.NotifyAt, nextAt, (int)_o.Interval.TotalSeconds,
-            w.Essence, _o.EssencePerCapsule, CapsuleRules.PityThreshold - w.SinceEpic, w.TotalOpened, now);
+            w.Essence, _o.EssencePerCapsule, CapsuleRules.PityThreshold - w.SinceEpic, w.TotalOpened, now,
+            w.PremiumStored, _o.EssencePerPremium);
     }
 }

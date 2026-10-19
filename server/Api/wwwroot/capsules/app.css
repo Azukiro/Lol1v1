@@ -122,6 +122,7 @@ h2 { font-size: 18px; }
 .timer-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--cyan), var(--violet)); transition: width 1s linear; }
 
 .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.actions .btn { white-space: nowrap; padding-left: 12px; padding-right: 12px; letter-spacing: .08em; }
 .perks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .perk { padding: 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); display: grid; gap: 10px; align-content: start; }
 .perk-head { display: grid; gap: 2px; }
@@ -342,3 +343,34 @@ h2 { font-size: 18px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* Choix du type de capsule */
+.type-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); }
+.type-switch button { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border-radius: 10px; font-family: var(--display); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.type-switch b { min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--panel-2); color: var(--text); font-size: 13px; display: grid; place-items: center; }
+.type-switch button[aria-selected="true"] { background: var(--panel-2); color: var(--text); box-shadow: inset 0 -2px 0 var(--cyan); }
+.type-switch button[data-type="PREMIUM"][aria-selected="true"] { box-shadow: inset 0 -2px 0 var(--yellow); color: var(--yellow); }
+.type-switch button[data-type="PREMIUM"] b { background: rgba(255, 201, 77, .16); color: var(--yellow); }
+.view-open.premium { --glow: var(--yellow); }
+.view-open.premium .capsule-count { background: var(--yellow); color: #1a1200; box-shadow: 0 0 0 4px var(--bg), 0 0 20px rgba(255, 201, 77, .6); }
+.view-open.premium .tap-hint { color: var(--yellow); }
+.view-open.premium .btn.primary { background: var(--yellow); color: #1a1200; box-shadow: 0 0 28px rgba(255, 201, 77, .35); }
+.premium-note { margin: -6px 0 0; text-align: center; color: var(--muted); font-size: 14px; }
+
+/* Forge */
+.meter { position: relative; }
+.meter .tick { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); opacity: .5; }
+.forge { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn.gold:not(:disabled) { border-color: rgba(255, 201, 77, .6); color: var(--yellow); }
+
+/* Taux de drop */
+.odds-panel { padding: 16px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); }
+.odds-table { display: grid; grid-template-columns: 1fr auto auto auto; column-gap: 14px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.odds-table > span { padding: 7px 0; border-bottom: 1px solid var(--line); text-align: right; }
+.odds-table > .h { font-family: var(--display); font-weight: 700; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); padding-top: 0; }
+.odds-table > .name { text-align: left; font-family: var(--display); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--rc); }
+.odds-table > .h.name { color: var(--muted); }
+.odds-table > .sel { color: var(--text); font-weight: 600; }
+.odds-table > .dim { color: var(--muted); }
+.odds-table > .h.prem { color: var(--yellow); }
+.odds-note { margin: 10px 0 0; color: var(--muted); font-size: 13px; }

@@ -35,7 +35,7 @@ public class CapsuleRulesTests
     {
         var all = Enum.GetValues<Rarity>().ToHashSet();
         var rng = new Random(42);
-        for (var i = 0; i < 500; i++) Assert.True(CapsuleRules.RollRarity(rng, true, all) >= Rarity.EPIC);
+        for (var i = 0; i < 500; i++) Assert.True(CapsuleRules.RollRarity(rng, CapsuleType.STANDARD, true, all) >= Rarity.EPIC);
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public class CapsuleRulesTests
         var available = new HashSet<Rarity> { Rarity.COMMON, Rarity.RARE, Rarity.EPIC };
         for (var i = 0; i < 20_000; i++)
         {
-            var r = CapsuleRules.RollRarity(rng, false, available);
+            var r = CapsuleRules.RollRarity(rng, CapsuleType.STANDARD, false, available);
             counts[r] = counts.GetValueOrDefault(r) + 1;
         }
         Assert.Equal(available, counts.Keys.ToHashSet());
@@ -146,4 +146,43 @@ public class CapsuleFlowTests
         Assert.False(state!.Debug);
         Assert.Equal(3, state.Available);
     }
+
+    [Fact]
+    public async Task Premium_capsule_is_forged_with_essence_and_never_drops_a_champion()
+    {
+        await using var factory = new ApiFactory();
+        SeedCatalog(factory);
+        var http = await Login(factory, "capsD");
+        await http.GetAsync("/api/v1/capsules/state");
+        // Pas assez d'essence pour une prestige.
+        Assert.Equal(HttpStatusCode.Conflict, (await http.PostAsJsonAsync("/api/v1/capsules/buy", new { type = "PREMIUM" })).StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Api.Data.AppDbContext>();
+            db.CapsuleWallets.Single().Essence = 1300;
+            await db.SaveChangesAsync();
+        }
+        await (await http.PostAsJsonAsync("/api/v1/capsules/buy", new { type = "PREMIUM" })).EnsureSuccessStatusCode().Content.ReadFromJsonAsync<CapsuleStateDto>(ApiJson.Options);
+        var state = await (await http.PostAsJsonAsync("/api/v1/capsules/buy", new { type = "PREMIUM" }))
+            .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<CapsuleStateDto>(ApiJson.Options);
+        Assert.Equal(2, state!.PremiumAvailable);
+        Assert.Equal(100, state.Essence);
+        Assert.Equal(3, state.Available);
+
+        var opened = await (await http.PostAsJsonAsync("/api/v1/capsules/open", new { count = 2, type = "PREMIUM" }))
+            .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<OpenCapsulesResponse>(ApiJson.Options);
+        Assert.All(opened!.Drops, d => Assert.Equal(CapsuleItemKind.SKIN, d.Kind));
+        Assert.Equal(0, opened.State.PremiumAvailable);
+        Assert.Equal(3, opened.State.Available);
+    }
+
+    [Fact]
+    public void Catalog_lists_odds_and_price_of_both_capsules()
+    {
+        Assert.DoesNotContain(Rarity.COMMON, CapsuleRules.PremiumWeights.Keys);
+        Assert.Equal(10_000, CapsuleRules.StandardWeights.Values.Sum());
+        Assert.Equal(10_000, CapsuleRules.PremiumWeights.Values.Sum());
+    }
 }
+

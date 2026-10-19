@@ -621,8 +621,8 @@ function renderRoster() {
   $('#roster').innerHTML = ROLES.map((role, i) => {
     const it = slots[i] && item(slots[i].kind, slots[i].itemId);
     const tag = editable ? 'button' : 'div';
-    return `<${tag} class="slot${it ? ` filled r-${it.rarity}` : ''}" ${editable ? `type="button" data-slot="${i}"` : ''} aria-label="${role}${it ? ` : ${esc(it.name)}` : ''}">
-      ${it ? `<img loading="lazy" src="${it.art}" ${it.fb ? `data-fb="${it.fb}"` : ''} alt=""><span class="shade"></span><b>${esc(it.name)}</b>`
+    return `<${tag} class="slot${it ? ` filled r-${it.rarity}` : ''}" ${editable ? `type="button" data-slot="${i}"` : ''} aria-label="${role}${it ? ` : ${esc(it.name)}, ${LABEL[it.rarity]}` : ''}">
+      ${it ? `<img loading="lazy" src="${it.art}" ${it.fb ? `data-fb="${it.fb}"` : ''} alt=""><span class="shade"></span><b>${esc(it.name)}</b><span class="rar" title="${LABEL[it.rarity]}"></span>`
         : `<span class="plus">${editable ? '+' : '—'}</span>`}
       <span class="role">${role}</span></${tag}>`;
   }).join('');

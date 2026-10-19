@@ -399,9 +399,14 @@ h2 { font-size: 18px; }
 /* Roster : 5 postes mis en avant */
 .roster-block { padding: 16px; border-radius: 16px; background: linear-gradient(160deg, rgba(25, 227, 255, .07), rgba(167, 139, 250, .05)), var(--panel); border: 1px solid var(--line); }
 .roster { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
-.slot { --rc: var(--line-2); position: relative; aspect-ratio: 308 / 560; border-radius: 10px; overflow: hidden; background: var(--bg-2); border: 1px dashed var(--line-2); display: grid; place-items: center; text-align: center; }
-.slot.filled { border: 0; box-shadow: 0 0 0 1.5px var(--rc), 0 0 14px color-mix(in srgb, var(--rc) 35%, transparent); }
-.slot.filled.r-EXALTED { box-shadow: 0 0 0 1.5px #fff, 0 0 18px rgba(255, 255, 255, .35); }
+/* --rc vient de la classe r-<RARETÉ> (pas de valeur par défaut ici, elle l'écraserait). */
+.slot { position: relative; aspect-ratio: 308 / 560; border-radius: 10px; overflow: hidden; background: var(--bg-2); border: 1px dashed var(--line-2); display: grid; place-items: center; text-align: center; }
+.slot.filled { border: 0; box-shadow: 0 0 0 2px var(--rc), 0 0 16px color-mix(in srgb, var(--rc) 45%, transparent); }
+.slot.filled.r-EXALTED { box-shadow: 0 0 18px rgba(255, 255, 255, .35); }
+.slot.filled.r-EXALTED::before { content: ''; position: absolute; inset: 0; z-index: 2; border-radius: inherit; padding: 2px; background: var(--exalted); animation: spin 4s linear infinite; pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.slot .rar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--rc); }
+.slot.filled b { bottom: 8px; }
 .slot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .slot .shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5, 7, 12, .55), transparent 28%, transparent 55%, rgba(5, 7, 12, .92)); }
 .slot b { position: absolute; left: 4px; right: 4px; bottom: 6px; font-size: 10px; line-height: 1.15; font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }

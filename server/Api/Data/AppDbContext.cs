@@ -22,6 +22,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<PushSubscriptionEntity> PushSubscriptions => Set<PushSubscriptionEntity>();
     public DbSet<RelicFriend> RelicFriends => Set<RelicFriend>();
 
+    /// <summary>Incrémente le jeton de concurrence des portefeuilles modifiés (stock, essence, roster…).</summary>
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        foreach (var entry in ChangeTracker.Entries<CapsuleWallet>().Where(e => e.State == EntityState.Modified))
+            entry.Entity.Version++;
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
     protected override void ConfigureConventions(ModelConfigurationBuilder builder)
     {
         builder.Properties<Enum>().HaveConversion<string>().HaveMaxLength(32);
@@ -136,15 +144,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         b.Entity<CapsuleWallet>(e =>
         {
-            e.ToTable("capsule_wallet");
+            e.ToTable("capsule_wallet", t =>
+            {
+                t.HasCheckConstraint("ck_capsule_wallet_stock", "stored >= 0 AND premium_stored >= 0 AND essence >= 0 AND since_epic >= 0 AND total_opened >= 0");
+            });
             e.HasKey(x => x.UserId);
+            e.Property(x => x.Version).IsConcurrencyToken();
             e.Property(x => x.Roster).HasColumnType("jsonb");
             e.HasOne<User>().WithOne().HasForeignKey<CapsuleWallet>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<CollectionItem>(e =>
         {
-            e.ToTable("collection_item");
+            e.ToTable("collection_item", t => t.HasCheckConstraint("ck_collection_item_count", "count >= 1"));
             e.HasKey(x => new { x.UserId, x.Kind, x.ItemId });
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -158,7 +170,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         b.Entity<RelicFriend>(e =>
         {
-            e.ToTable("relic_friend");
+            e.ToTable("relic_friend", t => t.HasCheckConstraint("ck_relic_friend_not_self", "user_id <> friend_id"));
             e.HasKey(x => new { x.UserId, x.FriendId });
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<User>().WithMany().HasForeignKey(x => x.FriendId).OnDelete(DeleteBehavior.Cascade);

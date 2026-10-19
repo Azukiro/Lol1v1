@@ -31,6 +31,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("Game:LoadDataDragon", "false");
         builder.UseSetting("Game:EnableTicker", "false");
         builder.UseSetting("Capsules:LoadCatalog", "false");
+        builder.UseSetting("RateLimit:Enabled", "false");
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<DbContextOptions<AppDbContext>>();

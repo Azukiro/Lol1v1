@@ -12,6 +12,7 @@ namespace Api.Controllers;
 
 [ApiController]
 [Route("api/v1/auth")]
+[Microsoft.AspNetCore.RateLimiting.EnableRateLimiting(RateLimits.Auth)]
 public sealed class AuthController(AppDbContext db, IPasswordHasher<User> hasher, TokenService tokens) : ControllerBase
 {
     [HttpPost("register")]

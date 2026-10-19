@@ -116,7 +116,7 @@ document.addEventListener('error', (e) => {
 function cardHTML(it, { missing = false, count = 0, isNew = false, tag = 'button' } = {}) {
   if (!it) return '';
   return `<${tag} class="card r-${it.rarity}${missing ? ' missing' : ''}" data-key="${it.key}" ${tag === 'button' ? 'type="button"' : ''} aria-label="${esc(it.name)}">
-    <img loading="lazy" decoding="async" src="${it.art}" ${it.fb ? `data-fb="${it.fb}"` : ''} alt="">
+    <img loading="lazy" decoding="async" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt="">
     <span class="shade"></span>
     ${isNew ? '<span class="new">NOUVEAU</span>' : ''}${count > 1 ? `<span class="count">×${count}</span>` : ''}
     <span class="meta"><b>${esc(it.name)}</b><span>${it.kind === 'SKIN' ? esc(it.sub) : LABEL[it.rarity]}</span></span>
@@ -514,7 +514,7 @@ function renderByLine(q, missing) {
       <button data-line="${l.id}" aria-expanded="${open}"><span class="lname">${esc(l.name)}${complete ? ' ✦' : ''}</span><span class="lnum">${owned.length} / ${its.length}</span>
       <span class="ltrack"><i style="width:${(owned.length / its.length) * 100}%"></i></span></button>
       ${open ? `<div class="grid">${its.sort((a, b) => rank(b.rarity) - rank(a.rarity)).map((it) => { const o = ownedOf(it.key); return cardHTML(it, { missing: !o, count: o?.count }); }).join('')}</div>`
-        : owned.length ? `<div class="thumbs">${owned.slice(0, 10).map((it) => `<img loading="lazy" src="${it.art}" ${it.fb ? `data-fb="${it.fb}"` : ''} alt="">`).join('')}</div>` : ''}
+        : owned.length ? `<div class="thumbs">${owned.slice(0, 10).map((it) => `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt="">`).join('')}</div>` : ''}
     </div>`;
   }).join('')}</div>${rows.length > (S.coll.limits.lines || 80) ? '<button class="btn small more" data-more="lines">Voir plus de gammes</button>' : ''}`;
 }
@@ -528,7 +528,7 @@ function renderByChampion(q, missing) {
   if (!champs.length) return emptyColl();
   return `<div class="champ-grid">${champs.map(({ c, skins, ownedSkins, has }) => `
     <button class="champ${has ? ' owned' : ''}" data-champ="${c.id}" type="button">
-      <span class="pic"><img loading="lazy" src="${DD}/loading/${c.alias}_0.jpg" alt=""></span>
+      <span class="pic"><img loading="lazy" src="${esc(`${DD}/loading/${c.alias}_0.jpg`)}" alt=""></span>
       <span>${esc(c.name)}</span><span class="sk"><b>${ownedSkins}</b> / ${skins.length} skins</span>
     </button>`).join('')}</div>`;
 }
@@ -550,7 +550,7 @@ function showItem(key) {
   const fmt = (c) => (c === 0 ? '—' : `${c >= 0.01 ? c.toFixed(2) : c.toFixed(3)}%`);
   const lines = it.lines.map((l) => S.cat.line.get(l)).filter(Boolean);
   openSheet(`
-    <div class="detail-hero" style="background-image:url('${it.splash}'), url('${it.art}')"></div>
+    <div class="detail-hero" style="background-image:url('${esc(it.splash)}'), url('${esc(it.art)}')"></div>
     <div class="detail-body r-${it.rarity}">
       <div class="tags"><span class="tag">${LABEL[it.rarity]}</span>${it.legacy ? '<span class="tag line">Héritage</span>' : ''}
         ${lines.map((l) => `<button class="tag line" data-goto-line="${l.id}">${esc(l.name)}</button>`).join('')}</div>
@@ -622,7 +622,7 @@ function renderRoster() {
     const it = slots[i] && item(slots[i].kind, slots[i].itemId);
     const tag = editable ? 'button' : 'div';
     return `<${tag} class="slot${it ? ` filled r-${it.rarity}` : ''}" ${editable ? `type="button" data-slot="${i}"` : ''} aria-label="${role}${it ? ` : ${esc(it.name)}, ${LABEL[it.rarity]}` : ''}">
-      ${it ? `<img loading="lazy" src="${it.art}" ${it.fb ? `data-fb="${it.fb}"` : ''} alt=""><span class="shade"></span><b>${esc(it.name)}</b><span class="rar" title="${LABEL[it.rarity]}"></span>`
+      ${it ? `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt=""><span class="shade"></span><b>${esc(it.name)}</b><span class="rar" title="${LABEL[it.rarity]}"></span>`
         : `<span class="plus">${editable ? '+' : '—'}</span>`}
       <span class="role">${role}</span></${tag}>`;
   }).join('');
@@ -661,7 +661,7 @@ async function setSlot(index, key) {
 
 function avatarHTML(p) {
   const letter = esc((p.displayName[0] || '?').toUpperCase());
-  return `<span class="avatar">${letter}${p.profileIconId ? `<img src="https://ddragon.leagueoflegends.com/cdn/img/profileicon/${p.profileIconId}.png" alt="" onerror="this.remove()">` : ''}</span>`;
+  return `<span class="avatar">${letter}${p.profileIconId ? `<img src="https://ddragon.leagueoflegends.com/cdn/img/profileicon/${+p.profileIconId}.png" alt="">` : ''}</span>`;
 }
 
 function friendHTML(p) {
@@ -671,7 +671,7 @@ function friendHTML(p) {
     <button class="friend-main" data-player="${p.userId}" type="button">
       ${avatarHTML(p)}
       <span class="who"><b>${esc(p.displayName)}</b><span>${p.riotId ? esc(p.riotId) + ' · ' : ''}${p.owned} objets · ${pct}%</span></span>
-      <span class="mini-roster">${p.roster.map((s) => { const it = s && item(s.kind, s.itemId); return it ? `<img loading="lazy" class="r-${it.rarity}" src="${it.art}" alt="">` : '<i></i>'; }).join('')}</span>
+      <span class="mini-roster">${p.roster.map((s) => { const it = s && item(s.kind, s.itemId); return it ? `<img loading="lazy" class="r-${it.rarity}" src="${esc(it.art)}" alt="">` : '<i></i>'; }).join('')}</span>
     </button>
     ${p.added ? `<button class="icon-btn" data-unfriend="${p.userId}" aria-label="Retirer ${esc(p.displayName)}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`
       : `<button class="btn small" data-befriend="${p.userId}">Ajouter</button>`}

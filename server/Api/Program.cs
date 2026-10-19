@@ -3,7 +3,9 @@ using System.Text.Json.Serialization;
 using Api.Data;
 using Api.Hubs;
 using Api.Services;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
@@ -74,6 +76,33 @@ builder.Services.AddSingleton<CapsuleLocks>();
 builder.Services.AddSingleton<PushService>();
 builder.Services.AddScoped<CapsuleService>();
 builder.Services.AddScoped<RelicSocialService>();
+// Render termine TLS sur son proxy : l'adresse client vient du dernier saut de X-Forwarded-For (non falsifiable par le client).
+builder.Services.Configure<ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    o.ForwardLimit = 1;
+    o.KnownNetworks.Clear();
+    o.KnownProxies.Clear();
+});
+
+// Limitation de débit : force brute sur la connexion, rafales sur les écritures des reliques, plafond global par IP.
+var rateLimit = builder.Configuration.GetValue("RateLimit:Enabled", true);
+builder.Services.AddRateLimiter(o =>
+{
+    static string Ip(HttpContext c) => c.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    static string UserOrIp(HttpContext c) => c.User.FindFirst("sub")?.Value ?? Ip(c);
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.OnRejected = async (ctx, ct) =>
+        await ctx.HttpContext.Response.WriteAsJsonAsync(new { error = "Trop de requêtes, réessaie dans un instant." }, ct);
+    o.AddPolicy(RateLimits.Auth, c => !rateLimit ? RateLimitPartition.GetNoLimiter("off")
+        : RateLimitPartition.GetFixedWindowLimiter(Ip(c), _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
+    o.AddPolicy(RateLimits.RelicWrite, c => !rateLimit ? RateLimitPartition.GetNoLimiter("off")
+        : RateLimitPartition.GetSlidingWindowLimiter(UserOrIp(c), _ => new SlidingWindowRateLimiterOptions { PermitLimit = 40, Window = TimeSpan.FromMinutes(1), SegmentsPerWindow = 6 }));
+    o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(c => !rateLimit || !c.Request.Path.StartsWithSegments("/api")
+        ? RateLimitPartition.GetNoLimiter("off")
+        : RateLimitPartition.GetFixedWindowLimiter(Ip(c), _ => new FixedWindowRateLimiterOptions { PermitLimit = 600, Window = TimeSpan.FromMinutes(1) }));
+});
+
 builder.Services.AddHostedService<ReferenceDataLoader>();
 if (builder.Configuration.GetValue("Capsules:LoadCatalog", true))
     builder.Services.AddHostedService<CapsuleCatalogLoader>();
@@ -91,6 +120,23 @@ using (var scope = app.Services.CreateScope())
     else db.Database.EnsureCreated();
 }
 
+app.UseForwardedHeaders();
+
+// En-têtes de sécurité ; CSP stricte sur la page des reliques (aucun script en ligne, ressources limitées).
+app.Use(async (ctx, next) =>
+{
+    var h = ctx.Response.Headers;
+    h.XContentTypeOptions = "nosniff";
+    h.XFrameOptions = "DENY";
+    h["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    if (ctx.Request.Path.StartsWithSegments("/reliques"))
+        h.ContentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            + "font-src https://fonts.gstatic.com; img-src 'self' data: https://ddragon.leagueoflegends.com https://raw.communitydragon.org; "
+            + "connect-src 'self' https://ddragon.leagueoflegends.com https://raw.communitydragon.org; manifest-src 'self'; worker-src 'self'; "
+            + "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";
+    await next();
+});
+
 app.Use(async (ctx, next) =>
 {
     try { await next(); }
@@ -98,6 +144,12 @@ app.Use(async (ctx, next) =>
     {
         ctx.Response.StatusCode = e.Status;
         await ctx.Response.WriteAsJsonAsync(new { error = e.Message });
+    }
+    catch (DbUpdateConcurrencyException)
+    {
+        // Deux requêtes ont modifié le même portefeuille : la seconde est rejetée, rien n'est dépensé deux fois.
+        ctx.Response.StatusCode = StatusCodes.Status409Conflict;
+        await ctx.Response.WriteAsJsonAsync(new { error = "Action simultanée détectée, réessaie." });
     }
 });
 
@@ -133,6 +185,7 @@ if (Directory.Exists(launcher.UpdatesPath))
 }
 app.UseCors();
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", time = DateTimeOffset.UtcNow }));

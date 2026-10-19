@@ -141,10 +141,18 @@ namespace Api.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("total_opened");
 
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
                     b.HasKey("UserId")
                         .HasName("pk_capsule_wallet");
 
-                    b.ToTable("capsule_wallet", (string)null);
+                    b.ToTable("capsule_wallet", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_capsule_wallet_stock", "stored >= 0 AND premium_stored >= 0 AND essence >= 0 AND since_epic >= 0 AND total_opened >= 0");
+                        });
                 });
 
             modelBuilder.Entity("Api.Data.CollectionItem", b =>
@@ -173,7 +181,10 @@ namespace Api.Data.Migrations
                     b.HasKey("UserId", "Kind", "ItemId")
                         .HasName("pk_collection_item");
 
-                    b.ToTable("collection_item", (string)null);
+                    b.ToTable("collection_item", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_collection_item_count", "count >= 1");
+                        });
                 });
 
             modelBuilder.Entity("Api.Data.DeckChampion", b =>
@@ -390,7 +401,10 @@ namespace Api.Data.Migrations
                     b.HasIndex("FriendId")
                         .HasDatabaseName("ix_relic_friend_friend_id");
 
-                    b.ToTable("relic_friend", (string)null);
+                    b.ToTable("relic_friend", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_relic_friend_not_self", "user_id <> friend_id");
+                        });
                 });
 
             modelBuilder.Entity("Api.Data.RiotAccount", b =>

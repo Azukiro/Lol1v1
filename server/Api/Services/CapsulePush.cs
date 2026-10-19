@@ -29,6 +29,7 @@ public sealed class PushService(Microsoft.Extensions.Options.IOptions<VapidOptio
         var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         foreach (var sub in await db.PushSubscriptions.Where(s => s.UserId == userId).ToListAsync(ct))
         {
+            if (!PushEndpoints.IsAllowed(sub.Endpoint)) { db.PushSubscriptions.Remove(sub); continue; }
             try
             {
                 await _client.SendNotificationAsync(new PushSubscription(sub.Endpoint, sub.P256dh, sub.Auth), json, vapid, ct);

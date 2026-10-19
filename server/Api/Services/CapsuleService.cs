@@ -73,7 +73,7 @@ public sealed class CapsuleService(
         for (var i = 0; i < count; i++)
         {
             var guaranteed = wallet.SinceEpic >= CapsuleRules.PityThreshold - 1;
-            var rarity = CapsuleRules.RollRarity(Random.Shared, type, guaranteed, available);
+            var rarity = CapsuleRules.RollRarity(CryptoRandom.Instance, type, guaranteed, available);
             var (kind, itemId) = Pick(catalog, rarity, owned);
 
             owned.TryGetValue((kind, itemId), out var item);
@@ -178,8 +178,8 @@ public sealed class CapsuleService(
     private static (CapsuleItemKind Kind, int Id) Pick(CapsuleCatalog catalog, Rarity rarity, Dictionary<(CapsuleItemKind, int), CollectionItem> owned)
     {
         (CapsuleItemKind, int) Draw() => rarity == CapsuleRules.ChampionRarity
-            ? (CapsuleItemKind.CHAMPION, catalog.Champions[Random.Shared.Next(catalog.Champions.Count)].Id)
-            : (CapsuleItemKind.SKIN, catalog.SkinsByRarity[rarity].ElementAt(Random.Shared.Next(catalog.SkinsByRarity[rarity].Count())).Id);
+            ? (CapsuleItemKind.CHAMPION, catalog.Champions[CryptoRandom.Instance.Next(catalog.Champions.Count)].Id)
+            : (CapsuleItemKind.SKIN, catalog.SkinsByRarity[rarity].ElementAt(CryptoRandom.Instance.Next(catalog.SkinsByRarity[rarity].Count())).Id);
         var first = Draw();
         return owned.ContainsKey(first) ? Draw() : first;
     }

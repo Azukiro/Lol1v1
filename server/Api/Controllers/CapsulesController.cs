@@ -3,6 +3,7 @@ using Api.Dtos;
 using Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 namespace Api.Controllers;
@@ -12,16 +13,21 @@ namespace Api.Controllers;
 [Authorize]
 [Route("api/v1/capsules")]
 public sealed class CapsulesController(
-    CapsuleService capsules, CapsuleCatalogService catalogs, PushService push, RelicSocialService social, AppDbContext db, IWebHostEnvironment env)
+    CapsuleService capsules, CapsuleCatalogService catalogs, PushService push, RelicSocialService social, AppDbContext db,
+    IWebHostEnvironment env, IConfiguration config)
     : ControllerBase
 {
-    /// <summary>Mode debug réservé au poste de développement (ASPNETCORE_ENVIRONMENT=Development), jamais en production.</summary>
-    private bool DebugEnabled => env.IsDevelopment();
+    /// <summary>
+    /// Mode debug réservé au poste de développement : il faut ASPNETCORE_ENVIRONMENT=Development ET Capsules:EnableDebug=true
+    /// (appsettings.Development.json uniquement). Une seule des deux conditions ne suffit pas.
+    /// </summary>
+    private bool DebugEnabled => env.IsDevelopment() && config.GetValue("Capsules:EnableDebug", false);
 
     [HttpGet("state")]
     public async Task<CapsuleStateDto> State() => WithDebug(await capsules.GetStateAsync(User.UserId()));
 
     [HttpPost("open")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
     public async Task<OpenCapsulesResponse> Open(OpenCapsulesRequest req)
     {
         var res = await capsules.OpenAsync(User.UserId(), req.Count, req.Type);
@@ -29,6 +35,7 @@ public sealed class CapsulesController(
     }
 
     [HttpPost("buy")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
     public async Task<CapsuleStateDto> Buy([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] BuyCapsuleRequest? req) =>
         WithDebug(await capsules.BuyAsync(User.UserId(), req?.Type ?? Api.Domain.Capsules.CapsuleType.STANDARD));
 
@@ -46,15 +53,18 @@ public sealed class CapsulesController(
     public Task<CollectionResponse> Collection() => capsules.GetCollectionAsync(User.UserId());
 
     [HttpPut("roster")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
     public Task<List<RosterSlotDto?>> Roster(RosterRequest req) => social.SetRosterAsync(User.UserId(), req.Slots);
 
     [HttpGet("friends")]
     public Task<List<PlayerCardDto>> Friends() => social.GetFriendsAsync(User.UserId());
 
     [HttpPost("friends")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
     public Task<PlayerCardDto> AddFriend(AddFriendRequest req) => social.AddFriendAsync(User.UserId(), req.Query, req.UserId);
 
     [HttpDelete("friends/{friendId:guid}")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
     public async Task<IActionResult> RemoveFriend(Guid friendId)
     {
         await social.RemoveFriendAsync(User.UserId(), friendId);
@@ -78,10 +88,11 @@ public sealed class CapsulesController(
     public PushKeyDto PushKey() => new(push.Options.Enabled ? push.Options.PublicKey : null);
 
     [HttpPost("push/subscribe")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
     public async Task<IActionResult> Subscribe(PushSubscribeRequest req)
     {
         if (!push.Options.Enabled) throw new AppException("Notifications non configurées sur le serveur.", 503);
-        if (!Uri.TryCreate(req.Endpoint, UriKind.Absolute, out var uri) || uri.Scheme != "https" || req.Endpoint.Length > 1024
+        if (req.Endpoint is null || !PushEndpoints.IsAllowed(req.Endpoint) || req.Endpoint.Length > 1024
             || string.IsNullOrWhiteSpace(req.P256dh) || string.IsNullOrWhiteSpace(req.Auth) || req.P256dh.Length > 256 || req.Auth.Length > 128)
             throw new AppException("Abonnement invalide.");
         var userId = User.UserId();

@@ -218,6 +218,8 @@ public class CapsuleWallet
     public bool FullNotified { get; set; }
     /// <summary>Roster mis en avant : 5 objets possédés, un par poste (jsonb, [{kind,itemId}|null] × 5).</summary>
     public string? Roster { get; set; }
+    /// <summary>Jeton de concurrence, incrémenté à chaque écriture (AppDbContext) : deux requêtes simultanées ne dépensent pas le même stock.</summary>
+    public int Version { get; set; }
 }
 
 /// <summary>Objet possédé (champion ou skin) et nombre d'exemplaires obtenus.</summary>

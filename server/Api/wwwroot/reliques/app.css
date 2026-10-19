@@ -452,3 +452,9 @@ button.slot:active { transform: scale(.97); }
 .news h2 { font-size: 28px; }
 .news-item { display: grid; gap: 3px; padding: 12px 14px; border-radius: 12px; background: var(--panel); border-left: 3px solid var(--cyan); }
 .news-item span { color: var(--muted); font-size: 14px; }
+
+/* Réveil du serveur (démarrage à froid) */
+.wake { position: fixed; z-index: 70; left: 50%; top: calc(66px + var(--safe-t)); translate: -50% 0; display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+  border-radius: 999px; background: var(--panel); border: 1px solid rgba(255, 201, 77, .5); box-shadow: 0 10px 30px rgba(0, 0, 0, .5); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; animation: rise .25s; }
+.wake-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--yellow); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .3; transform: scale(.7); } }

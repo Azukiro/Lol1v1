@@ -38,12 +38,65 @@ const S = {
 };
 
 // ---------- API ----------
-async function api(path, { method = 'GET', body } = {}) {
-  const res = await fetch(API + path, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(S.token ? { Authorization: `Bearer ${S.token}` } : {}) },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+// Réveil du serveur (plan gratuit : mis en veille après 15 min, jusqu'à une minute pour repartir).
+const wake = {
+  since: 0, pending: 0, timer: 0,
+  begin() {
+    if (this.pending++ === 0) this.timer = setTimeout(() => this.show(), 2500);
+  },
+  end() {
+    if (--this.pending > 0) return;
+    clearTimeout(this.timer); this.since = 0;
+    $('#wake').hidden = true;
+  },
+  show() {
+    const el = $('#wake');
+    if (!el.hidden) return;
+    this.since ||= Date.now();
+    el.hidden = false;
+    const tick = () => {
+      if (el.hidden) return;
+      const s = Math.round((Date.now() - this.since) / 1000);
+      $('#wake-text').textContent = `Réveil du serveur… ${s} s`;
+      setTimeout(tick, 1000);
+    };
+    tick();
+  },
+};
+const RETRYABLE = new Set([0, 502, 503, 504]);
+
+/**
+ * Appel d'API. retry : relance tant que le serveur se réveille (réseau coupé, 502/503/504), jusqu'à ~2 min.
+ * Réservé aux appels sans effet de bord (lectures, connexion) : une ouverture n'est jamais rejouée.
+ */
+async function api(path, { method = 'GET', body, retry = false } = {}) {
+  const deadline = Date.now() + 120_000;
+  let delay = 1500;
+  wake.begin();
+  try {
+    for (;;) {
+      let res;
+      const ctl = new AbortController();
+      const abort = setTimeout(() => ctl.abort(), 30_000);
+      try {
+        res = await fetch(API + path, {
+          method,
+          signal: ctl.signal,
+          headers: { 'Content-Type': 'application/json', ...(S.token ? { Authorization: `Bearer ${S.token}` } : {}) },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+      } catch { res = null; } finally { clearTimeout(abort); }
+      const status = res?.status ?? 0;
+      if (!RETRYABLE.has(status)) return await parse(res);
+      if (!retry || Date.now() > deadline) throw new Error('Serveur injoignable pour le moment, réessaie dans un instant.');
+      wake.show();
+      await sleep(delay);
+      delay = Math.min(delay * 1.5, 6000);
+    }
+  } finally { wake.end(); }
+}
+
+async function parse(res) {
   if (res.status === 401 && S.token) { logout(); throw new Error('Session expirée, reconnecte-toi.'); }
   if (!res.ok) {
     let msg = `Erreur ${res.status}`;
@@ -86,7 +139,7 @@ async function loadCatalog() {
   const cached = JSON.parse(store.get(CATALOG_KEY) || 'null');
   if (cached && Date.now() - cached.at < 6 * 3600e3) { S.cat = indexCatalog(cached.data); return; }
   // Version dans l'URL : le catalogue est aussi en cache HTTP (6 h), un changement de format doit le contourner.
-  const data = await api('/capsules/catalog?v=3');
+  const data = await api('/capsules/catalog?v=3', { retry: true });
   store.set(CATALOG_KEY, JSON.stringify({ at: Date.now(), data }));
   S.cat = indexCatalog(data);
 }
@@ -246,9 +299,9 @@ function renderWallet() {
   $('#pips').innerHTML = Array.from({ length: w.maxStock }, (_, i) => `<i class="pip${i < w.available ? ' on' : ''}"></i>`).join('')
     + (w.available > w.maxStock ? '' : '');
   $('#stock-text').textContent = `${w.available} / ${w.maxStock} reliques${w.available > w.maxStock ? ' (bonus)' : ''}`;
-  $('#open-one').disabled = !has || S.busy;
+  $('#open-one').disabled = !has || S.busy || !S.online;
   const n = Math.min(stock, 10);
-  $('#open-all').disabled = n < 2 || S.busy;
+  $('#open-all').disabled = n < 2 || S.busy || !S.online;
   $('#open-all').textContent = n >= 2 ? `Ouvrir ×${n}` : 'Tout ouvrir';
   $('#essence').textContent = w.essence;
   // Jauge jusqu'au prix d'une prestige, repère au prix d'une capsule.
@@ -257,8 +310,8 @@ function renderWallet() {
   $('#essence-tick').style.left = `${(w.essencePerCapsule / w.essencePerPremium) * 100}%`;
   $('#price-std').textContent = w.essencePerCapsule;
   $('#price-prem').textContent = w.essencePerPremium;
-  $('#buy-std').disabled = w.essence < w.essencePerCapsule || S.busy;
-  $('#buy-prem').disabled = w.essence < w.essencePerPremium || S.busy;
+  $('#buy-std').disabled = w.essence < w.essencePerCapsule || S.busy || !S.online;
+  $('#buy-prem').disabled = w.essence < w.essencePerPremium || S.busy || !S.online;
   $('#pity-text').textContent = w.pityIn <= 1 ? 'Épique garanti à la prochaine' : `Épique garanti dans ${w.pityIn}`;
   $('#pity-fill').style.width = `${((10 - w.pityIn) / 9) * 100}%`;
   $('#total-opened').textContent = w.totalOpened ? `${w.totalOpened} ouvertes` : '';
@@ -284,7 +337,7 @@ function skipAnimation() { if (skipper.on) return; skipper.on = true; skipper.wa
 
 async function openCapsules(count) {
   const type = S.type;
-  if (S.busy || !S.wallet || stockOf(type) < 1) return;
+  if (S.busy || !S.online || !S.wallet || stockOf(type) < 1) return;
   S.busy = true; renderWallet();
   audio.ensure();
   const reveal = $('#reveal'); const cap = $('#reveal-capsule');
@@ -323,6 +376,7 @@ async function openCapsules(count) {
 
   for (const d of res.drops) applyDrop(d);
   setWallet(res.state);
+  saveSnapshot();
   if (count === 1) showSingle(res.drops[0]); else showMulti(res.drops);
   renderRecent();
   if (S.view === 'collection') renderCollection();
@@ -868,7 +922,7 @@ async function submitAuth(e) {
   const body = { email: f.get('email'), password: f.get('password'), ...(registering ? { displayName: f.get('displayName') } : {}) };
   $('#auth-error').textContent = ''; $('#auth-submit').disabled = true;
   try {
-    const res = await api(`/auth/${registering ? 'register' : 'login'}`, { method: 'POST', body });
+    const res = await api(`/auth/${registering ? 'register' : 'login'}`, { method: 'POST', body, retry: !registering });
     S.token = res.token; S.user = res.user;
     store.set('capsules.token', res.token); store.set('capsules.user', JSON.stringify(res.user));
     await start();
@@ -878,27 +932,59 @@ async function submitAuth(e) {
 
 async function logout() {
   try { const sub = await currentSub(); if (sub && S.token) await fetch(`${API}/capsules/push/unsubscribe`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${S.token}` }, body: JSON.stringify({ endpoint: sub.endpoint }) }); } catch { /* best effort */ }
+  store.del(snapKey());
   S.token = null; S.user = null; S.owned.clear(); S.recent = []; S.friend = null;
   store.del('capsules.token'); store.del('capsules.user');
   $('#menu').hidden = true;
   showAuth();
 }
 
+const snapKey = () => `capsules.snapshot.${S.user?.id}`;
+
+function saveSnapshot() {
+  if (!S.wallet || !S.user) return;
+  const { nextAtMs, ...wallet } = S.wallet;
+  store.set(snapKey(), JSON.stringify({ wallet: { ...wallet, nextAt: nextAtMs ? new Date(nextAtMs).toISOString() : null, serverTime: new Date(now()).toISOString() },
+    items: [...S.owned.values()], recent: S.recent.slice(0, 30), roster: S.roster }));
+}
+
+function applyCollection(coll) {
+  S.owned = new Map(coll.items.map((i) => [`${i.kind}:${i.itemId}`, i]));
+  S.recent = coll.recent;
+  S.roster = coll.roster;
+}
+
+function renderAll() {
+  renderRecent();
+  renderOdds();
+  if (S.view === 'collection') { renderRoster(); renderCollection(); }
+}
+
 async function start() {
   $('#auth').hidden = true; $('#app').hidden = false;
   $('#menu-user').innerHTML = `<b>${esc(S.user?.displayName)}</b>${esc(S.user?.email)}`;
-  const slow = setTimeout(() => toast('Réveil du serveur, quelques secondes…'), 3500);
+  // Dernier état connu (et catalogue en cache) affichés tout de suite ; ouvertures bloquées jusqu'à la réponse du serveur.
+  S.online = false;
+  const snap = JSON.parse(store.get(snapKey()) || 'null');
+  const cached = JSON.parse(store.get(CATALOG_KEY) || 'null');
+  if (snap && cached) {
+    S.cat ||= indexCatalog(cached.data);
+    applyCollection(snap);
+    setWallet(snap.wallet);
+    renderAll();
+  }
   try {
-    const [state, coll] = await Promise.all([api('/capsules/state'), api('/capsules/collection'), loadCatalog()]);
+    const [state, coll] = await Promise.all([api('/capsules/state', { retry: true }), api('/capsules/collection', { retry: true }), loadCatalog()]);
+    S.online = true;
+    applyCollection(coll);
     setWallet(state);
-    S.owned = new Map(coll.items.map((i) => [`${i.kind}:${i.itemId}`, i]));
-    S.recent = coll.recent;
-    S.roster = coll.roster;
-    renderRecent();
-    renderOdds();
-    if (S.view === 'collection') { renderRoster(); renderCollection(); }
-  } catch (e) { toast(e.message, true); }
-  finally { clearTimeout(slow); }
+    renderAll();
+    saveSnapshot();
+  } catch (e) {
+    toast(e.message, true);
+    // Nouvelle tentative au prochain retour sur l'app.
+    S.retryStart = true;
+  }
   setupNotify();
   await maybeShowNews();
   maybePromptInstall();
@@ -996,12 +1082,17 @@ function bind() {
     else debugCall('grant', { count: kind === 'cap' ? +n : 0, essence: kind === 'ess' ? +n : 0, premium: kind === 'prem' ? +n : 0 });
   });
 
-  addEventListener('visibilitychange', () => { if (!document.hidden && S.token) api('/capsules/state').then(setWallet).catch(() => {}); });
+  addEventListener('visibilitychange', () => {
+    if (document.hidden || !S.token) return;
+    if (S.retryStart) { S.retryStart = false; start(); return; }
+    api('/capsules/state', { retry: true }).then((w) => { S.online = true; setWallet(w); saveSnapshot(); }).catch(() => {});
+  });
 }
 
 function syncSegmented() { $$('.segmented button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.group === S.coll.group))); }
 
 // ---------- Démarrage ----------
+fetch('/health', { cache: 'no-store' }).catch(() => {});
 fx.init();
 bind();
 setupInstall();

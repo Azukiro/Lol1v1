@@ -1,5 +1,5 @@
 // Service worker des reliques : coquille hors ligne, cache des illustrations, notifications push.
-const SHELL = 'capsules-shell-v1';
+const SHELL = 'capsules-shell-v2';
 const ART = 'capsules-art-v1';
 const SHELL_FILES = ['./', 'index.html', 'app.css', 'app.js', 'icon.svg', 'manifest.webmanifest', 'icons/icon-192.png'];
 const ART_HOSTS = ['ddragon.leagueoflegends.com', 'raw.communitydragon.org'];
@@ -32,12 +32,21 @@ self.addEventListener('fetch', (e) => {
     }));
     return;
   }
-  // Coquille de l'app : réseau d'abord (mises à jour immédiates), cache si hors ligne. L'API n'est jamais mise en cache.
+  // Coquille de l'app : servie tout de suite depuis le cache, mise à jour en arrière-plan pour la prochaine ouverture.
+  // Au réveil du serveur (plan gratuit : jusqu'à une minute), l'app s'affiche quand même. L'API n'est jamais mise en cache.
   if (url.origin === location.origin && url.pathname.startsWith('/reliques/')) {
-    e.respondWith(fetch(e.request).then((res) => {
-      if (res.ok) caches.open(SHELL).then((c) => c.put(e.request, res.clone()));
-      return res;
-    }).catch(() => caches.match(e.request).then((r) => r || caches.match('index.html'))));
+    e.respondWith(caches.open(SHELL).then(async (cache) => {
+      const hit = await cache.match(e.request, { ignoreSearch: true });
+      const network = fetch(e.request).then((res) => {
+        if (res.ok) cache.put(e.request, res.clone());
+        return res;
+      });
+      if (hit) {
+        e.waitUntil(network.catch(() => {}));
+        return hit;
+      }
+      return network.catch(() => cache.match('index.html'));
+    }));
   }
 });
 

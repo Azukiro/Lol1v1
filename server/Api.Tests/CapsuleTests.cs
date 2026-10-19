@@ -216,5 +216,44 @@ public class CapsuleFlowTests
         Assert.All(drops, d => Assert.Equal(d.Kind == CapsuleItemKind.CHAMPION, d.Rarity == CapsuleRules.ChampionRarity));
         Assert.True(CapsuleRules.StandardWeights[CapsuleRules.ChampionRarity] == CapsuleRules.StandardWeights.Values.Min());
     }
+
+    [Fact]
+    public async Task Friends_see_each_other_collection_and_roster()
+    {
+        await using var factory = new ApiFactory();
+        SeedCatalog(factory);
+        var alice = await Login(factory, "relicAlice");
+        var bob = await Login(factory, "relicBob");
+        var opened = await (await bob.PostAsJsonAsync("/api/v1/capsules/open", new { count = 3 }))
+            .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<OpenCapsulesResponse>(ApiJson.Options);
+        var first = opened!.Drops[0];
+
+        // Roster : seulement des objets possédés, 5 postes, pas de doublon.
+        var slot = new { kind = first.Kind.ToString(), itemId = first.ItemId };
+        Assert.Equal(HttpStatusCode.BadRequest, (await bob.PutAsJsonAsync("/api/v1/capsules/roster", new { slots = new object?[] { slot } })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await bob.PutAsJsonAsync("/api/v1/capsules/roster",
+            new { slots = new object?[] { new { kind = "SKIN", itemId = 999999 }, null, null, null, null } })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await bob.PutAsJsonAsync("/api/v1/capsules/roster", new { slots = new object?[] { slot, slot, null, null, null } })).StatusCode);
+        (await bob.PutAsJsonAsync("/api/v1/capsules/roster", new { slots = new object?[] { null, null, slot, null, null } })).EnsureSuccessStatusCode();
+
+        // Ajout par pseudo, insensible à la casse.
+        Assert.Equal(HttpStatusCode.NotFound, (await alice.PostAsJsonAsync("/api/v1/capsules/friends", new { query = "personne" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await alice.PostAsJsonAsync("/api/v1/capsules/friends", new { query = "relicalice" })).StatusCode);
+        var card = await (await alice.PostAsJsonAsync("/api/v1/capsules/friends", new { query = "RELICBOB" }))
+            .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<PlayerCardDto>(ApiJson.Options);
+        Assert.Equal("relicBob", card!.DisplayName);
+        Assert.Equal(first.ItemId, card.Roster[2]!.ItemId);
+
+        var friends = await alice.GetFromJsonAsync<List<PlayerCardDto>>("/api/v1/capsules/friends", ApiJson.Options);
+        Assert.Single(friends!);
+        Assert.True(friends![0].Added);
+
+        var player = await alice.GetFromJsonAsync<PlayerCollectionDto>($"/api/v1/capsules/players/{card.UserId}", ApiJson.Options);
+        Assert.Equal(3, player!.Items.Sum(i => i.Count));
+        Assert.Equal(player.Items.Count, player.Player.Owned);
+
+        (await alice.DeleteAsync($"/api/v1/capsules/friends/{card.UserId}")).EnsureSuccessStatusCode();
+        Assert.Empty((await alice.GetFromJsonAsync<List<PlayerCardDto>>("/api/v1/capsules/friends", ApiJson.Options))!);
+    }
 }
 

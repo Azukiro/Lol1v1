@@ -45,6 +45,7 @@
       <nav class="tabs" aria-label="Sections">
         <button class="tab" data-view="open" aria-current="page">Ouvrir</button>
         <button class="tab" data-view="collection">Collection</button>
+        <button class="tab" data-view="friends">Amis</button>
       </nav>
       <div class="essence-pill" title="Essence (doublons)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 13 8 8 15 3 8z"/></svg><b id="essence">0</b></div>
       <button class="icon-btn" id="menu-btn" aria-label="Menu" aria-haspopup="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button>
@@ -121,6 +122,17 @@
 
     <!-- Vue collection -->
     <main id="view-collection" class="view view-collection" hidden>
+      <section class="owner-bar" id="owner-bar" hidden>
+        <button class="icon-btn" id="owner-back" aria-label="Retour aux amis"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none"/></svg></button>
+        <div><span class="kicker">Collection de</span><b id="owner-name"></b></div>
+        <button class="btn small" id="owner-follow" hidden>Ajouter</button>
+      </section>
+
+      <section class="roster-block">
+        <div class="section-head"><h2 id="roster-title">Mon roster</h2><span class="muted" id="roster-hint">Touche un poste</span></div>
+        <div class="roster" id="roster"></div>
+      </section>
+
       <section class="coll-summary">
         <div class="ring" id="ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.9" class="ring-bg"/><circle cx="18" cy="18" r="15.9" class="ring-fg" id="ring-fg"/></svg><div><b id="ring-pct">0%</b><span>complété</span></div></div>
         <div class="rarity-bars" id="rarity-bars"></div>
@@ -141,9 +153,26 @@
       <section id="coll-body" class="coll-body"></section>
     </main>
 
+    <!-- Vue amis -->
+    <main id="view-friends" class="view view-friends" hidden>
+      <form class="friend-add" id="friend-form">
+        <input id="friend-query" placeholder="Riot ID (Pseudo#TAG) ou pseudo" autocomplete="off" required minlength="2">
+        <button class="btn primary" type="submit">Ajouter</button>
+      </form>
+      <section>
+        <div class="section-head"><h2>Mes amis</h2><span class="muted" id="friends-count"></span></div>
+        <div class="friends" id="friends-list"></div>
+      </section>
+      <section id="suggest-block" hidden>
+        <div class="section-head"><h2>Croisés en série</h2></div>
+        <div class="friends" id="suggest-list"></div>
+      </section>
+    </main>
+
     <nav class="bottom-nav" aria-label="Sections">
       <button data-view="open" aria-current="page"><svg viewBox="0 0 24 24"><use href="#capsule-mini-24"/></svg>Ouvrir<i class="badge" id="nav-badge" hidden></i></button>
       <button data-view="collection"><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>Collection</button>
+      <button data-view="friends"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6z"/><circle cx="17" cy="9" r="2.8"/><path d="M15.5 14.2c3.3-.4 6 1.8 6 5.8h-4.4c0-2.3-.6-4.3-1.6-5.8z"/></svg>Amis</button>
     </nav>
   </div>
 

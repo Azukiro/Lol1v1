@@ -125,6 +125,10 @@ namespace Api.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("premium_stored");
 
+                    b.Property<string>("Roster")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("roster");
+
                     b.Property<int>("SinceEpic")
                         .HasColumnType("integer")
                         .HasColumnName("since_epic");
@@ -364,6 +368,29 @@ namespace Api.Data.Migrations
                         .HasDatabaseName("ix_push_subscription_user_id");
 
                     b.ToTable("push_subscription", (string)null);
+                });
+
+            modelBuilder.Entity("Api.Data.RelicFriend", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<Guid>("FriendId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("friend_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.HasKey("UserId", "FriendId")
+                        .HasName("pk_relic_friend");
+
+                    b.HasIndex("FriendId")
+                        .HasDatabaseName("ix_relic_friend_friend_id");
+
+                    b.ToTable("relic_friend", (string)null);
                 });
 
             modelBuilder.Entity("Api.Data.RiotAccount", b =>
@@ -886,6 +913,23 @@ namespace Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_push_subscription_user_user_id");
+                });
+
+            modelBuilder.Entity("Api.Data.RelicFriend", b =>
+                {
+                    b.HasOne("Api.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("FriendId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_relic_friend_user_friend_id");
+
+                    b.HasOne("Api.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_relic_friend_user_user_id");
                 });
 
             modelBuilder.Entity("Api.Data.RiotAccount", b =>

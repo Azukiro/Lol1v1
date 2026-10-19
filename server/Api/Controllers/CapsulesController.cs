@@ -12,7 +12,8 @@ namespace Api.Controllers;
 [Authorize]
 [Route("api/v1/capsules")]
 public sealed class CapsulesController(
-    CapsuleService capsules, CapsuleCatalogService catalogs, PushService push, AppDbContext db, IWebHostEnvironment env) : ControllerBase
+    CapsuleService capsules, CapsuleCatalogService catalogs, PushService push, RelicSocialService social, AppDbContext db, IWebHostEnvironment env)
+    : ControllerBase
 {
     /// <summary>Mode debug réservé au poste de développement (ASPNETCORE_ENVIRONMENT=Development), jamais en production.</summary>
     private bool DebugEnabled => env.IsDevelopment();
@@ -43,6 +44,26 @@ public sealed class CapsulesController(
 
     [HttpGet("collection")]
     public Task<CollectionResponse> Collection() => capsules.GetCollectionAsync(User.UserId());
+
+    [HttpPut("roster")]
+    public Task<List<RosterSlotDto?>> Roster(RosterRequest req) => social.SetRosterAsync(User.UserId(), req.Slots);
+
+    [HttpGet("friends")]
+    public Task<List<PlayerCardDto>> Friends() => social.GetFriendsAsync(User.UserId());
+
+    [HttpPost("friends")]
+    public Task<PlayerCardDto> AddFriend(AddFriendRequest req) => social.AddFriendAsync(User.UserId(), req.Query, req.UserId);
+
+    [HttpDelete("friends/{friendId:guid}")]
+    public async Task<IActionResult> RemoveFriend(Guid friendId)
+    {
+        await social.RemoveFriendAsync(User.UserId(), friendId);
+        return NoContent();
+    }
+
+    /// <summary>Collection et roster d'un autre joueur.</summary>
+    [HttpGet("players/{playerId:guid}")]
+    public Task<PlayerCollectionDto> Player(Guid playerId) => social.GetPlayerAsync(User.UserId(), playerId);
 
     /// <summary>Catalogue complet (identique pour tous), mis en cache par le navigateur.</summary>
     [HttpGet("catalog")]

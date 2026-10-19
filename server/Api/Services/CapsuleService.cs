@@ -145,9 +145,11 @@ public sealed class CapsuleService(
     {
         var items = await db.CollectionItems.Where(c => c.UserId == userId).ToListAsync();
         var recent = await db.CapsuleDrops.Where(d => d.UserId == userId).OrderByDescending(d => d.OpenedAt).Take(30).ToListAsync();
+        var roster = await db.CapsuleWallets.Where(w => w.UserId == userId).Select(w => w.Roster).FirstOrDefaultAsync();
         return new CollectionResponse(
             items.Select(i => new OwnedItemDto(i.Kind, i.ItemId, i.Count, i.FirstObtainedAt)).ToList(),
-            recent.Select(d => new CapsuleHistoryDto(d.Kind, d.ItemId, d.Rarity, d.IsNew, d.OpenedAt)).ToList());
+            recent.Select(d => new CapsuleHistoryDto(d.Kind, d.ItemId, d.Rarity, d.IsNew, d.OpenedAt)).ToList(),
+            RelicSocialService.ParseRoster(roster));
     }
 
     public CapsuleCatalogDto ToCatalogDto(CapsuleCatalog c)

@@ -20,6 +20,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<CollectionItem> CollectionItems => Set<CollectionItem>();
     public DbSet<CapsuleDrop> CapsuleDrops => Set<CapsuleDrop>();
     public DbSet<PushSubscriptionEntity> PushSubscriptions => Set<PushSubscriptionEntity>();
+    public DbSet<RelicFriend> RelicFriends => Set<RelicFriend>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder builder)
     {
@@ -137,6 +138,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.ToTable("capsule_wallet");
             e.HasKey(x => x.UserId);
+            e.Property(x => x.Roster).HasColumnType("jsonb");
             e.HasOne<User>().WithOne().HasForeignKey<CapsuleWallet>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -152,6 +154,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable("capsule_drop");
             e.HasIndex(x => new { x.UserId, x.OpenedAt });
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<RelicFriend>(e =>
+        {
+            e.ToTable("relic_friend");
+            e.HasKey(x => new { x.UserId, x.FriendId });
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.FriendId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<PushSubscriptionEntity>(e =>

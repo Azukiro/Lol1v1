@@ -15,7 +15,16 @@ public sealed record OpenCapsulesResponse(List<CapsuleDropDto> Drops, CapsuleSta
 
 public sealed record OwnedItemDto(CapsuleItemKind Kind, int ItemId, int Count, DateTimeOffset FirstObtainedAt);
 public sealed record CapsuleHistoryDto(CapsuleItemKind Kind, int ItemId, Rarity Rarity, bool IsNew, DateTimeOffset OpenedAt);
-public sealed record CollectionResponse(List<OwnedItemDto> Items, List<CapsuleHistoryDto> Recent);
+public sealed record CollectionResponse(List<OwnedItemDto> Items, List<CapsuleHistoryDto> Recent, List<RosterSlotDto?> Roster);
+
+/// <summary>Objet placé à un poste du roster (TOP, JUNGLE, MID, BOT, SUPPORT dans cet ordre).</summary>
+public sealed record RosterSlotDto(CapsuleItemKind Kind, int ItemId);
+public sealed record RosterRequest(List<RosterSlotDto?> Slots);
+public sealed record PlayerCardDto(
+    Guid UserId, string DisplayName, string? RiotId, int? ProfileIconId, int Owned, int TotalOpened, List<RosterSlotDto?> Roster, bool Added);
+public sealed record PlayerCollectionDto(PlayerCardDto Player, List<OwnedItemDto> Items);
+/// <summary>Riot ID / pseudo saisi, ou identifiant d'un joueur déjà affiché (suggestion).</summary>
+public sealed record AddFriendRequest(string? Query, Guid? UserId = null);
 
 public sealed record CatalogChampionDto(int Id, string Name, string Alias);
 public sealed record CatalogSkinDto(int Id, int ChampionId, int Num, string Name, Rarity Rarity, int[] Lines, bool Legacy, string? Load);

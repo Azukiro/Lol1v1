@@ -216,6 +216,8 @@ public class CapsuleWallet
     public int SinceEpic { get; set; }
     /// <summary>Notification « stock plein » déjà envoyée (remise à zéro à l'ouverture).</summary>
     public bool FullNotified { get; set; }
+    /// <summary>Roster mis en avant : 5 objets possédés, un par poste (jsonb, [{kind,itemId}|null] × 5).</summary>
+    public string? Roster { get; set; }
 }
 
 /// <summary>Objet possédé (champion ou skin) et nombre d'exemplaires obtenus.</summary>
@@ -248,5 +250,13 @@ public class PushSubscriptionEntity
     public string Endpoint { get; set; } = "";
     public string P256dh { get; set; } = "";
     public string Auth { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>Ami ajouté dans les reliques (sens unique : on suit sa collection).</summary>
+public class RelicFriend
+{
+    public Guid UserId { get; set; }
+    public Guid FriendId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

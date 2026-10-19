@@ -32,6 +32,9 @@ const S = {
   sound: store.get('capsules.sound') !== 'off',
   coll: { group: 'rarity', q: '', missing: false, rarity: null, open: new Set(), limits: {} },
   pushKey: null,
+  roster: [null, null, null, null, null],
+  friend: null,
+  friends: [],
 };
 
 // ---------- API ----------
@@ -432,13 +435,15 @@ function closeReveal() {
 }
 
 // ---------- Collection ----------
-function ownedOf(key) { return S.owned.get(key); }
+// Collection affichée : la sienne, ou celle de l'ami consulté.
+const lens = () => S.friend?.owned ?? S.owned;
+function ownedOf(key) { return lens().get(key); }
 
 function totals() {
   const out = {};
   for (const r of RARITIES) {
     const keys = S.cat.byRarity[r];
-    out[r] = { total: keys.length, owned: keys.filter((k) => S.owned.has(k)).length };
+    out[r] = { total: keys.length, owned: keys.filter((k) => lens().has(k)).length };
   }
   return out;
 }
@@ -476,10 +481,10 @@ function renderCollection() {
 function renderByRarity(q, missing) {
   const sections = [...RARITIES].reverse().filter((r) => !S.coll.rarity || S.coll.rarity === r).map((r) => {
     const keys = S.cat.byRarity[r];
-    const owned = keys.filter((k) => S.owned.has(k)).length;
-    let items = keys.map(fromKey).filter((it) => it && (missing || S.owned.has(it.key)) && matches(it, q));
+    const owned = keys.filter((k) => lens().has(k)).length;
+    let items = keys.map(fromKey).filter((it) => it && (missing || lens().has(it.key)) && matches(it, q));
     if (!items.length) return '';
-    items.sort((a, b) => (S.owned.has(b.key) - S.owned.has(a.key)) || a.name.localeCompare(b.name, 'fr'));
+    items.sort((a, b) => (lens().has(b.key) - lens().has(a.key)) || a.name.localeCompare(b.name, 'fr'));
     const limit = S.coll.limits[r] || 60;
     const more = items.length - limit;
     items = items.slice(0, limit);
@@ -496,7 +501,7 @@ function renderByLine(q, missing) {
   const rows = S.cat.lines.map((l) => {
     const ids = S.cat.byLine.get(l.id) || [];
     const its = ids.map((id) => item('SKIN', id)).filter(Boolean);
-    const owned = its.filter((it) => S.owned.has(it.key));
+    const owned = its.filter((it) => lens().has(it.key));
     return { l, its, owned };
   }).filter(({ l, its, owned }) => its.length && (missing || owned.length)
     && (!q || l.name.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').includes(q) || its.some((it) => matches(it, q))))
@@ -517,8 +522,8 @@ function renderByLine(q, missing) {
 function renderByChampion(q, missing) {
   const champs = S.cat.champions.map((c) => {
     const skins = S.cat.byChamp.get(c.id) || [];
-    const ownedSkins = skins.filter((id) => S.owned.has(`SKIN:${id}`)).length;
-    return { c, skins, ownedSkins, has: S.owned.has(`CHAMPION:${c.id}`) };
+    const ownedSkins = skins.filter((id) => lens().has(`SKIN:${id}`)).length;
+    return { c, skins, ownedSkins, has: lens().has(`CHAMPION:${c.id}`) };
   }).filter(({ c, has, ownedSkins }) => (missing || has || ownedSkins) && (!q || c.name.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').includes(q)));
   if (!champs.length) return emptyColl();
   return `<div class="champ-grid">${champs.map(({ c, skins, ownedSkins, has }) => `
@@ -529,7 +534,8 @@ function renderByChampion(q, missing) {
 }
 
 function emptyColl() {
-  return `<p class="empty-note">${S.owned.size ? 'Rien ne correspond. Active « Manquants » pour tout voir.' : 'Ta collection est vide : ouvre ta première relique !'}</p>`;
+  const empty = S.friend ? `La collection de ${esc(S.friend.name)} est vide pour l'instant.` : 'Ta collection est vide : ouvre ta première relique !';
+  return `<p class="empty-note">${lens().size ? 'Rien ne correspond. Active « Manquants » pour tout voir.' : empty}</p>`;
 }
 
 // ---------- Fiches ----------
@@ -564,7 +570,7 @@ function showChampion(id) {
   const c = S.cat.champ.get(id);
   const its = [item('CHAMPION', id), ...(S.cat.byChamp.get(id) || []).map((s) => item('SKIN', s))].filter(Boolean)
     .sort((a, b) => rank(b.rarity) - rank(a.rarity));
-  const own = its.filter((it) => S.owned.has(it.key)).length;
+  const own = its.filter((it) => lens().has(it.key)).length;
   openSheet(`<div class="detail-body" style="margin-top:0;padding-top:22px">
     <h2>${esc(c.name)}</h2><p class="muted">${own} / ${its.length} obtenus</p>
     <div class="grid">${its.map((it) => { const o = ownedOf(it.key); return cardHTML(it, { missing: !o, count: o?.count }); }).join('')}</div></div>`);
@@ -602,13 +608,126 @@ function setType(type) {
   renderOdds();
 }
 
+// ---------- Roster et amis ----------
+const ROLES = ['Top', 'Jungle', 'Mid', 'Bot', 'Support'];
+const keyOf = (slot) => (slot ? `${slot.kind}:${slot.itemId}` : null);
+
+function renderRoster() {
+  const friend = S.friend;
+  const slots = friend ? friend.roster : S.roster;
+  const editable = !friend;
+  $('#roster-title').textContent = friend ? `Roster de ${friend.name}` : 'Mon roster';
+  $('#roster-hint').textContent = editable ? 'Touche un poste' : '';
+  $('#roster').innerHTML = ROLES.map((role, i) => {
+    const it = slots[i] && item(slots[i].kind, slots[i].itemId);
+    const tag = editable ? 'button' : 'div';
+    return `<${tag} class="slot${it ? ` filled r-${it.rarity}` : ''}" ${editable ? `type="button" data-slot="${i}"` : ''} aria-label="${role}${it ? ` : ${esc(it.name)}` : ''}">
+      ${it ? `<img loading="lazy" src="${it.art}" ${it.fb ? `data-fb="${it.fb}"` : ''} alt=""><span class="shade"></span><b>${esc(it.name)}</b>`
+        : `<span class="plus">${editable ? '+' : '—'}</span>`}
+      <span class="role">${role}</span></${tag}>`;
+  }).join('');
+}
+
+function showSlotPicker(index) {
+  const current = keyOf(S.roster[index]);
+  const used = new Set(S.roster.map(keyOf).filter((k) => k && k !== current));
+  const items = [...S.owned.keys()].map(fromKey).filter((it) => it && !used.has(it.key))
+    .sort((a, b) => rank(b.rarity) - rank(a.rarity) || a.name.localeCompare(b.name, 'fr'));
+  openSheet(`<div class="picker">
+    <h2>Poste ${ROLES[index]}</h2>
+    ${items.length ? `<input type="search" id="pick-search" placeholder="Rechercher dans ta collection" autocomplete="off">` : ''}
+    ${current ? `<button class="btn ghost small" data-pick-clear="${index}">Retirer du poste</button>` : ''}
+    <div class="grid" id="pick-grid">${items.length ? items.map((it) => pickCard(it, index, it.key === current)).join('') : '<p class="empty-note">Ouvre des reliques pour remplir ton roster.</p>'}</div>
+  </div>`);
+  $('#pick-search')?.addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').trim();
+    $$('#pick-grid .card').forEach((c) => { c.hidden = q && !matches(fromKey(c.dataset.pick), q); });
+  });
+}
+
+function pickCard(it, index, selected) {
+  return cardHTML(it, { count: 0 }).replace('class="card ', `class="card pick${selected ? ' selected' : ''} `)
+    .replace(`data-key="${it.key}"`, `data-key="${it.key}" data-pick="${it.key}" data-slot-index="${index}"`);
+}
+
+async function setSlot(index, key) {
+  const slots = S.roster.map((s) => (s ? { kind: s.kind, itemId: s.itemId } : null));
+  slots[index] = key ? (([kind, id]) => ({ kind, itemId: +id }))(key.split(':')) : null;
+  try {
+    S.roster = await api('/capsules/roster', { method: 'PUT', body: { slots } });
+    closeSheet(); renderRoster(); buzz(20);
+  } catch (e) { toast(e.message, true); }
+}
+
+function avatarHTML(p) {
+  const letter = esc((p.displayName[0] || '?').toUpperCase());
+  return `<span class="avatar">${letter}${p.profileIconId ? `<img src="https://ddragon.leagueoflegends.com/cdn/img/profileicon/${p.profileIconId}.png" alt="" onerror="this.remove()">` : ''}</span>`;
+}
+
+function friendHTML(p) {
+  const total = S.cat ? RARITIES.reduce((s, r) => s + S.cat.byRarity[r].length, 0) : 0;
+  const pct = total ? Math.round((p.owned / total) * 1000) / 10 : 0;
+  return `<div class="friend">
+    <button class="friend-main" data-player="${p.userId}" type="button">
+      ${avatarHTML(p)}
+      <span class="who"><b>${esc(p.displayName)}</b><span>${p.riotId ? esc(p.riotId) + ' · ' : ''}${p.owned} objets · ${pct}%</span></span>
+      <span class="mini-roster">${p.roster.map((s) => { const it = s && item(s.kind, s.itemId); return it ? `<img loading="lazy" class="r-${it.rarity}" src="${it.art}" alt="">` : '<i></i>'; }).join('')}</span>
+    </button>
+    ${p.added ? `<button class="icon-btn" data-unfriend="${p.userId}" aria-label="Retirer ${esc(p.displayName)}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`
+      : `<button class="btn small" data-befriend="${p.userId}">Ajouter</button>`}
+  </div>`;
+}
+
+async function loadFriends() {
+  try {
+    const list = await api('/capsules/friends');
+    S.friends = list;
+    const added = list.filter((p) => p.added);
+    const met = list.filter((p) => !p.added);
+    $('#friends-count').textContent = added.length ? `${added.length}` : '';
+    $('#friends-list').innerHTML = added.length ? added.map(friendHTML).join('')
+      : '<p class="empty-note">Ajoute un ami avec son Riot ID ou son pseudo pour voir sa collection et son roster.</p>';
+    $('#suggest-block').hidden = !met.length;
+    $('#suggest-list').innerHTML = met.map(friendHTML).join('');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function addFriend(body) {
+  try {
+    const p = await api('/capsules/friends', { method: 'POST', body });
+    toast(`${p.displayName} ajouté à tes amis`);
+    await loadFriends();
+    return p;
+  } catch (e) { toast(e.message, true); return null; }
+}
+
+async function openPlayer(userId) {
+  try {
+    const res = await api(`/capsules/players/${userId}`);
+    S.friend = { userId, name: res.player.displayName, added: res.player.added, roster: res.player.roster,
+      owned: new Map(res.items.map((i) => [`${i.kind}:${i.itemId}`, i])) };
+    S.coll.rarity = null;
+    setView('collection', { friend: true });
+  } catch (e) { toast(e.message, true); }
+}
+
 // ---------- Navigation ----------
-function setView(v) {
+function setView(v, { friend = false } = {}) {
+  // Quitter la collection d'un ami : retour à la sienne.
+  if (!friend) S.friend = null;
   S.view = v;
   $('#view-open').hidden = v !== 'open';
   $('#view-collection').hidden = v !== 'collection';
-  $$('[data-view]').forEach((b) => (b.dataset.view === v ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current')));
-  if (v === 'collection') renderCollection();
+  $('#view-friends').hidden = v !== 'friends';
+  const tab = friend ? 'friends' : v;
+  $$('[data-view]').forEach((b) => (b.dataset.view === tab ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current')));
+  if (v === 'collection') {
+    $('#owner-bar').hidden = !S.friend;
+    if (S.friend) { $('#owner-name').textContent = S.friend.name; $('#owner-follow').hidden = S.friend.added; }
+    renderRoster();
+    renderCollection();
+  }
+  if (v === 'friends') loadFriends();
   scrollTo({ top: 0 });
 }
 
@@ -625,6 +744,24 @@ function setupInstall() {
   addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; });
   addEventListener('appinstalled', () => { installEvent = null; $('#install-menu').hidden = true; closeSheet(); toast('App installée !'); });
   $('#install-menu').onclick = () => { $('#menu').hidden = true; showInstall(); };
+}
+
+const NEWS_KEY = 'capsules.news.friends-roster';
+
+async function maybeShowNews() {
+  if (store.get(NEWS_KEY)) return;
+  store.set(NEWS_KEY, '1');
+  openSheet(`<div class="news">
+    <span class="kicker">Nouveau</span>
+    <h2>Amis et roster</h2>
+    <div class="news-item"><b>Collections de tes amis</b><span>Ajoute un ami avec son Riot ID ou son pseudo, puis explore sa collection et son roster.</span></div>
+    <div class="news-item"><b>Ton roster</b><span>Mets en avant 5 objets de ta collection, un par poste : Top, Jungle, Mid, Bot, Support.</span></div>
+    <button class="btn primary block" data-news-go="collection">Composer mon roster</button>
+    <button class="btn ghost block" data-news-go="friends">Voir mes amis</button>
+  </div>`);
+  $$('[data-news-go]').forEach((b) => (b.onclick = () => { closeSheet(); setView(b.dataset.newsGo); }));
+  // Le popup d'installation attend la fermeture de celui-ci.
+  while (!$('#sheet').hidden) await sleep(300);
 }
 
 async function maybePromptInstall() {
@@ -711,7 +848,7 @@ async function enableNotify() {
 async function debugCall(path, body) {
   try {
     setWallet(await api(`/capsules/debug/${path}`, { method: 'POST', body }));
-    if (path === 'reset') { S.owned.clear(); S.recent = []; renderRecent(); renderCollection(); }
+    if (path === 'reset') { S.owned.clear(); S.recent = []; S.roster = [null, null, null, null, null]; renderRecent(); renderRoster(); renderCollection(); }
   } catch (e) { toast(e.message, true); }
 }
 
@@ -741,7 +878,7 @@ async function submitAuth(e) {
 
 async function logout() {
   try { const sub = await currentSub(); if (sub && S.token) await fetch(`${API}/capsules/push/unsubscribe`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${S.token}` }, body: JSON.stringify({ endpoint: sub.endpoint }) }); } catch { /* best effort */ }
-  S.token = null; S.user = null; S.owned.clear(); S.recent = [];
+  S.token = null; S.user = null; S.owned.clear(); S.recent = []; S.friend = null;
   store.del('capsules.token'); store.del('capsules.user');
   $('#menu').hidden = true;
   showAuth();
@@ -756,12 +893,14 @@ async function start() {
     setWallet(state);
     S.owned = new Map(coll.items.map((i) => [`${i.kind}:${i.itemId}`, i]));
     S.recent = coll.recent;
+    S.roster = coll.roster;
     renderRecent();
     renderOdds();
-    if (S.view === 'collection') renderCollection();
+    if (S.view === 'collection') { renderRoster(); renderCollection(); }
   } catch (e) { toast(e.message, true); }
   finally { clearTimeout(slow); }
   setupNotify();
+  await maybeShowNews();
   maybePromptInstall();
 }
 
@@ -799,6 +938,18 @@ function bind() {
 
   // Cartes cliquables partout (collection, derniers tirages, fiches).
   document.addEventListener('click', (e) => {
+    const pick = e.target.closest('[data-pick]');
+    if (pick) { setSlot(+pick.dataset.slotIndex, pick.dataset.pick); return; }
+    const clear = e.target.closest('[data-pick-clear]');
+    if (clear) { setSlot(+clear.dataset.pickClear, null); return; }
+    const slot = e.target.closest('[data-slot]');
+    if (slot) { showSlotPicker(+slot.dataset.slot); return; }
+    const player = e.target.closest('[data-player]');
+    if (player) { openPlayer(player.dataset.player); return; }
+    const unfriend = e.target.closest('[data-unfriend]');
+    if (unfriend) { api(`/capsules/friends/${unfriend.dataset.unfriend}`, { method: 'DELETE' }).then(loadFriends).catch((err) => toast(err.message, true)); return; }
+    const befriend = e.target.closest('[data-befriend]');
+    if (befriend) { addFriend({ userId: befriend.dataset.befriend }); return; }
     const card = e.target.closest('button.card');
     if (card) { showItem(card.dataset.key); return; }
     const champ = e.target.closest('[data-champ]');
@@ -810,6 +961,16 @@ function bind() {
       syncSegmented(); setView('collection');
     }
   });
+  $('#friend-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = $('#friend-query');
+    if (await addFriend({ query: input.value })) input.value = '';
+  });
+  $('#owner-back').onclick = () => setView('friends');
+  $('#owner-follow').onclick = async () => {
+    const p = await addFriend({ userId: S.friend.userId });
+    if (p) { S.friend.added = true; $('#owner-follow').hidden = true; }
+  };
   $('#sheet').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeSheet(); });
   addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
 

@@ -73,6 +73,7 @@ builder.Services.AddSingleton<CapsuleCatalogService>();
 builder.Services.AddSingleton<CapsuleLocks>();
 builder.Services.AddSingleton<PushService>();
 builder.Services.AddScoped<CapsuleService>();
+builder.Services.AddScoped<RelicSocialService>();
 builder.Services.AddHostedService<ReferenceDataLoader>();
 if (builder.Configuration.GetValue("Capsules:LoadCatalog", true))
     builder.Services.AddHostedService<CapsuleCatalogLoader>();

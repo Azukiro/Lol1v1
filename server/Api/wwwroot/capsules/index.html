@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Capsules · Duelyst</title>
+  <meta name="description" content="Une capsule par heure : ouvre-la, collectionne, complète tes gammes.">
+  <meta name="theme-color" content="#0b0e14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Capsules">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://ddragon.leagueoflegends.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <!-- Connexion -->
+  <section id="auth" class="auth" hidden>
+    <div class="auth-card">
+      <div class="auth-logo"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="#capsule-mini"/></svg></div>
+      <h1>Capsules</h1>
+      <p class="muted">Une capsule toutes les heures. Ouvre, collectionne, complète tes gammes.</p>
+      <form id="auth-form" novalidate>
+        <label class="field" id="name-field" hidden><span>Pseudo</span><input name="displayName" autocomplete="nickname" maxlength="32"></label>
+        <label class="field"><span>Email</span><input name="email" type="email" autocomplete="email" required></label>
+        <label class="field"><span>Mot de passe</span><input name="password" type="password" autocomplete="current-password" minlength="8" required></label>
+        <p class="form-error" id="auth-error" role="alert"></p>
+        <button class="btn primary block" type="submit" id="auth-submit">Se connecter</button>
+      </form>
+      <button class="link" id="auth-toggle" type="button">Pas encore de compte ? Créer un compte</button>
+      <p class="fine">Même compte que l'application Duelyst.</p>
+    </div>
+  </section>
+
+  <!-- Application -->
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <div class="brand"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="#capsule-mini"/></svg><span>Capsules</span></div>
+      <nav class="tabs" aria-label="Sections">
+        <button class="tab" data-view="open" aria-current="page">Ouvrir</button>
+        <button class="tab" data-view="collection">Collection</button>
+      </nav>
+      <div class="essence-pill" title="Essence (doublons)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 13 8 8 15 3 8z"/></svg><b id="essence">0</b></div>
+      <button class="icon-btn" id="menu-btn" aria-label="Menu" aria-haspopup="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button>
+      <div class="menu" id="menu" hidden>
+        <div class="menu-user" id="menu-user"></div>
+        <button id="sound-toggle">Son : activé</button>
+        <button id="odds-btn">Taux de drop</button>
+        <button id="logout-btn">Se déconnecter</button>
+      </div>
+    </header>
+
+    <!-- Vue ouverture -->
+    <main id="view-open" class="view view-open">
+      <div class="install-banner" id="install-banner" hidden>
+        <div><b>Installe l'app</b><span id="install-text">Accès en un geste et notification quand ton stock est plein.</span></div>
+        <button class="btn small" id="install-btn">Installer</button>
+        <button class="icon-btn" id="install-close" aria-label="Fermer"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+
+      <section class="stage" aria-live="polite">
+        <div class="stage-glow"></div>
+        <button class="capsule" id="capsule" aria-label="Ouvrir une capsule">
+          <svg viewBox="0 0 200 220" aria-hidden="true"><use href="#capsule-art"/></svg>
+          <span class="capsule-count" id="capsule-count">0</span>
+        </button>
+        <div class="tap-hint" id="tap-hint">Touche pour ouvrir</div>
+      </section>
+
+      <section class="stock">
+        <div class="pips" id="pips" aria-hidden="true"></div>
+        <div class="stock-line"><span id="stock-text">0 / 10 capsules</span><span class="sep">·</span><span id="next-text" class="muted"></span></div>
+        <div class="timer-bar"><i id="timer-fill"></i></div>
+      </section>
+
+      <section class="actions">
+        <button class="btn primary big" id="open-one" disabled>Ouvrir</button>
+        <button class="btn ghost big" id="open-all" disabled>Tout ouvrir</button>
+      </section>
+
+      <section class="perks">
+        <div class="perk">
+          <div class="perk-head"><span class="kicker">Garantie</span><b id="pity-text">Épique garanti dans 10</b></div>
+          <div class="meter"><i id="pity-fill"></i></div>
+        </div>
+        <div class="perk">
+          <div class="perk-head"><span class="kicker">Essence</span><b id="essence-text">0 / 150</b></div>
+          <div class="meter essence"><i id="essence-fill"></i></div>
+          <button class="btn small" id="buy-btn" disabled>Forger une capsule</button>
+        </div>
+      </section>
+
+      <section class="notify-card" id="notify-card" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a2.5 2.5 0 0 0 2.4-2h-4.8a2.5 2.5 0 0 0 2.4 2zm7-6V11a7 7 0 0 0-5.5-6.8V3a1.5 1.5 0 0 0-3 0v1.2A7 7 0 0 0 5 11v5l-2 2v1h18v-1z"/></svg>
+        <div><b>Préviens-moi</b><span id="notify-text">Notification quand tu as 10 capsules en stock.</span></div>
+        <button class="btn small" id="notify-btn">Activer</button>
+      </section>
+
+      <section class="recent">
+        <div class="section-head"><h2>Derniers tirages</h2><span class="muted" id="total-opened"></span></div>
+        <div class="recent-strip" id="recent-strip"></div>
+      </section>
+    </main>
+
+    <!-- Vue collection -->
+    <main id="view-collection" class="view view-collection" hidden>
+      <section class="coll-summary">
+        <div class="ring" id="ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.9" class="ring-bg"/><circle cx="18" cy="18" r="15.9" class="ring-fg" id="ring-fg"/></svg><div><b id="ring-pct">0%</b><span>complété</span></div></div>
+        <div class="rarity-bars" id="rarity-bars"></div>
+      </section>
+
+      <section class="coll-controls">
+        <div class="segmented" role="tablist">
+          <button data-group="rarity" aria-selected="true">Rareté</button>
+          <button data-group="line">Gammes</button>
+          <button data-group="champion">Champions</button>
+        </div>
+        <div class="coll-filters">
+          <input type="search" id="search" placeholder="Champion, skin, gamme…" autocomplete="off">
+          <label class="switch"><input type="checkbox" id="show-missing"><span></span>Manquants</label>
+        </div>
+      </section>
+
+      <section id="coll-body" class="coll-body"></section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Sections">
+      <button data-view="open" aria-current="page"><svg viewBox="0 0 24 24"><use href="#capsule-mini-24"/></svg>Ouvrir<i class="badge" id="nav-badge" hidden></i></button>
+      <button data-view="collection"><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>Collection</button>
+    </nav>
+  </div>
+
+  <!-- Révélation -->
+  <div id="reveal" class="reveal" hidden>
+    <canvas id="fx"></canvas>
+    <div class="rays" id="rays"></div>
+    <div class="flash" id="flash"></div>
+    <div class="reveal-capsule" id="reveal-capsule"><svg viewBox="0 0 200 220" aria-hidden="true"><use href="#capsule-art"/></svg></div>
+    <div class="reveal-single" id="reveal-single" hidden></div>
+    <div class="reveal-multi" id="reveal-multi" hidden>
+      <div class="multi-head"><h2 id="multi-title">10 capsules</h2><span class="muted" id="multi-sub">Touche une carte pour la révéler</span></div>
+      <div class="multi-grid" id="multi-grid"></div>
+    </div>
+    <div class="reveal-actions" id="reveal-actions" hidden>
+      <button class="btn ghost" id="reveal-skip">Tout révéler</button>
+      <button class="btn primary" id="reveal-again">Ouvrir encore</button>
+      <button class="btn ghost" id="reveal-close">Continuer</button>
+    </div>
+  </div>
+
+  <!-- Détail -->
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-backdrop" data-close></div>
+    <div class="sheet-panel" role="dialog" aria-modal="true">
+      <button class="icon-btn sheet-close" data-close aria-label="Fermer"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      <div id="sheet-body"></div>
+    </div>
+  </div>
+
+  <!-- Mode debug : affiché seulement si l'API tourne en Development -->
+  <details id="debug" class="debug" hidden>
+    <summary>Debug</summary>
+    <div class="debug-btns">
+      <button data-debug="cap:1">+1</button>
+      <button data-debug="cap:10">+10</button>
+      <button data-debug="cap:100">+100</button>
+      <button data-debug="ess:1000">+1000 ess.</button>
+      <button data-debug="reset" class="danger">Reset</button>
+    </div>
+  </details>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="shell" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#2a3550"/><stop offset=".5" stop-color="#141a28"/><stop offset="1" stop-color="#0a0d14"/>
+      </linearGradient>
+      <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#e9f6ff"/><stop offset=".35" stop-color="var(--glow, #19e3ff)"/><stop offset="1" stop-color="#2a3550"/>
+      </linearGradient>
+      <radialGradient id="core" cx=".5" cy=".42" r=".6">
+        <stop offset="0" stop-color="#ffffff"/><stop offset=".25" stop-color="var(--glow, #19e3ff)"/><stop offset="1" stop-color="var(--glow, #19e3ff)" stop-opacity="0"/>
+      </radialGradient>
+      <symbol id="capsule-art" viewBox="0 0 200 220">
+        <path d="M100 8 186 58v104l-86 50-86-50V58z" fill="url(#shell)" stroke="url(#rim)" stroke-width="4"/>
+        <path d="M100 8 186 58 100 108 14 58z" fill="#ffffff" opacity=".05"/>
+        <path d="M100 30 166 68v84l-66 38-66-38V68z" fill="none" stroke="var(--glow, #19e3ff)" stroke-opacity=".35" stroke-width="1.5"/>
+        <circle cx="100" cy="110" r="44" fill="url(#core)" class="core"/>
+        <circle cx="100" cy="110" r="22" fill="#fff" opacity=".9" class="core-hot"/>
+        <path d="M14 58 100 108 186 58M100 108v104" stroke="#000" stroke-opacity=".25" stroke-width="2" fill="none"/>
+        <path d="M44 74 60 64M156 74 140 64M100 190v-14" stroke="var(--glow, #19e3ff)" stroke-width="4" stroke-linecap="round"/>
+      </symbol>
+      <symbol id="capsule-mini" viewBox="0 0 64 64">
+        <path d="M32 3 59 18v28L32 61 5 46V18z" fill="#141a28" stroke="#19e3ff" stroke-width="3"/>
+        <circle cx="32" cy="33" r="11" fill="#19e3ff"/><circle cx="32" cy="33" r="5" fill="#fff"/>
+      </symbol>
+      <symbol id="capsule-mini-24" viewBox="0 0 24 24">
+        <path d="M12 2 21 7v10l-9 5-9-5V7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+        <circle cx="12" cy="12.5" r="3.5" fill="currentColor"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

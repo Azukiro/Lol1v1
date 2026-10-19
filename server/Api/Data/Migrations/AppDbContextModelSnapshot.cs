@@ -59,6 +59,115 @@ namespace Api.Data.Migrations
                     b.ToTable("ban", (string)null);
                 });
 
+            modelBuilder.Entity("Api.Data.CapsuleDrop", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("IsNew")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_new");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("integer")
+                        .HasColumnName("item_id");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("kind");
+
+                    b.Property<DateTimeOffset>("OpenedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("opened_at");
+
+                    b.Property<string>("Rarity")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("rarity");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_capsule_drop");
+
+                    b.HasIndex("UserId", "OpenedAt")
+                        .HasDatabaseName("ix_capsule_drop_user_id_opened_at");
+
+                    b.ToTable("capsule_drop", (string)null);
+                });
+
+            modelBuilder.Entity("Api.Data.CapsuleWallet", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<DateTimeOffset>("AccrualAnchor")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("accrual_anchor");
+
+                    b.Property<int>("Essence")
+                        .HasColumnType("integer")
+                        .HasColumnName("essence");
+
+                    b.Property<bool>("FullNotified")
+                        .HasColumnType("boolean")
+                        .HasColumnName("full_notified");
+
+                    b.Property<int>("SinceEpic")
+                        .HasColumnType("integer")
+                        .HasColumnName("since_epic");
+
+                    b.Property<int>("Stored")
+                        .HasColumnType("integer")
+                        .HasColumnName("stored");
+
+                    b.Property<int>("TotalOpened")
+                        .HasColumnType("integer")
+                        .HasColumnName("total_opened");
+
+                    b.HasKey("UserId")
+                        .HasName("pk_capsule_wallet");
+
+                    b.ToTable("capsule_wallet", (string)null);
+                });
+
+            modelBuilder.Entity("Api.Data.CollectionItem", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("Kind")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("kind");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("integer")
+                        .HasColumnName("item_id");
+
+                    b.Property<int>("Count")
+                        .HasColumnType("integer")
+                        .HasColumnName("count");
+
+                    b.Property<DateTimeOffset>("FirstObtainedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("first_obtained_at");
+
+                    b.HasKey("UserId", "Kind", "ItemId")
+                        .HasName("pk_collection_item");
+
+                    b.ToTable("collection_item", (string)null);
+                });
+
             modelBuilder.Entity("Api.Data.DeckChampion", b =>
                 {
                     b.Property<Guid>("SeriesPlayerId")
@@ -205,6 +314,52 @@ namespace Api.Data.Migrations
                         .HasDatabaseName("ix_observation_round_id_reported_by_player_id_type_event_id");
 
                     b.ToTable("observation", (string)null);
+                });
+
+            modelBuilder.Entity("Api.Data.PushSubscriptionEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Auth")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("auth");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Endpoint")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)")
+                        .HasColumnName("endpoint");
+
+                    b.Property<string>("P256dh")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("p256dh");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_push_subscription");
+
+                    b.HasIndex("Endpoint")
+                        .IsUnique()
+                        .HasDatabaseName("ix_push_subscription_endpoint");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_push_subscription_user_id");
+
+                    b.ToTable("push_subscription", (string)null);
                 });
 
             modelBuilder.Entity("Api.Data.RiotAccount", b =>
@@ -648,6 +803,36 @@ namespace Api.Data.Migrations
                         .HasConstraintName("fk_ban_series_series_id");
                 });
 
+            modelBuilder.Entity("Api.Data.CapsuleDrop", b =>
+                {
+                    b.HasOne("Api.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_capsule_drop_user_user_id");
+                });
+
+            modelBuilder.Entity("Api.Data.CapsuleWallet", b =>
+                {
+                    b.HasOne("Api.Data.User", null)
+                        .WithOne()
+                        .HasForeignKey("Api.Data.CapsuleWallet", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_capsule_wallet_user_user_id");
+                });
+
+            modelBuilder.Entity("Api.Data.CollectionItem", b =>
+                {
+                    b.HasOne("Api.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_collection_item_user_user_id");
+                });
+
             modelBuilder.Entity("Api.Data.DeckChampion", b =>
                 {
                     b.HasOne("Api.Data.SeriesPlayer", null)
@@ -687,6 +872,16 @@ namespace Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_observation_round_round_id");
+                });
+
+            modelBuilder.Entity("Api.Data.PushSubscriptionEntity", b =>
+                {
+                    b.HasOne("Api.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_push_subscription_user_user_id");
                 });
 
             modelBuilder.Entity("Api.Data.RiotAccount", b =>

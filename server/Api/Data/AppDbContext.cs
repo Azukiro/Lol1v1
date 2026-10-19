@@ -16,6 +16,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Round> Rounds => Set<Round>();
     public DbSet<RoundAssignment> RoundAssignments => Set<RoundAssignment>();
     public DbSet<Observation> Observations => Set<Observation>();
+    public DbSet<CapsuleWallet> CapsuleWallets => Set<CapsuleWallet>();
+    public DbSet<CollectionItem> CollectionItems => Set<CollectionItem>();
+    public DbSet<CapsuleDrop> CapsuleDrops => Set<CapsuleDrop>();
+    public DbSet<PushSubscriptionEntity> PushSubscriptions => Set<PushSubscriptionEntity>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder builder)
     {
@@ -127,6 +131,38 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable("observation");
             e.Property(x => x.Payload).HasColumnType("jsonb");
             e.HasIndex(x => new { x.RoundId, x.ReportedByPlayerId, x.Type, x.EventId }).IsUnique();
+        });
+
+        b.Entity<CapsuleWallet>(e =>
+        {
+            e.ToTable("capsule_wallet");
+            e.HasKey(x => x.UserId);
+            e.HasOne<User>().WithOne().HasForeignKey<CapsuleWallet>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<CollectionItem>(e =>
+        {
+            e.ToTable("collection_item");
+            e.HasKey(x => new { x.UserId, x.Kind, x.ItemId });
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<CapsuleDrop>(e =>
+        {
+            e.ToTable("capsule_drop");
+            e.HasIndex(x => new { x.UserId, x.OpenedAt });
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<PushSubscriptionEntity>(e =>
+        {
+            e.ToTable("push_subscription");
+            e.Property(x => x.Endpoint).HasMaxLength(1024);
+            e.Property(x => x.P256dh).HasMaxLength(256);
+            e.Property(x => x.Auth).HasMaxLength(128);
+            e.HasIndex(x => x.Endpoint).IsUnique();
+            e.HasIndex(x => x.UserId);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

@@ -419,3 +419,39 @@ Données traitées : e-mail, hash du mot de passe, Riot ID, PUUID, historique de
 6. **Neon – chaîne de connexion** : la console fournit une URL `postgresql://…?sslmode=require&channel_binding=require`. La spec parle de « récupérer la chaîne avec `SSL Mode=Require` ». Il faut la **convertir** au format Npgsql (§5) et privilégier l'hôte **direct** (non `-pooler`) à cause des migrations au démarrage.
 7. **Dockerfile** : l'exemple du dossier technique (`COPY . .` + `Api/Api.csproj`) suppose un contexte à la racine de l'API. L'implémentation retenue utilise `server/Dockerfile` avec le contexte `server/`. Dans Render, mets donc *Dockerfile Path* `server/Dockerfile` et *Build Context* `server` (déjà dans `render.yaml` en mode Blueprint).
 8. **Mise à jour automatique** : les specs ne précisent pas la visibilité du dépôt. Sans token embarqué, `electron-updater` exige que les Releases soient sur un dépôt **public** (§4).
+
+---
+
+## 11. Capsules (page web `/capsules`)
+
+Page PWA servie par l'API : `https://<service>.onrender.com/capsules/` (même compte que l'application).
+
+### 11.1 Notifications push : clés VAPID
+
+Sans ces clés, tout fonctionne sauf les notifications « stock plein ».
+
+1. Générer une paire une seule fois (la changer invalide tous les abonnements) :
+   `npx web-push generate-vapid-keys`
+2. Render → service `lol1v1-api` → Environment :
+   - `Capsules__Vapid__PublicKey` = clé publique
+   - `Capsules__Vapid__PrivateKey` = clé privée (secret, jamais dans le dépôt)
+   - optionnel `Capsules__Vapid__Subject` = `mailto:<adresse de contact>`
+3. En local : `dotnet user-secrets set "Capsules:Vapid:PublicKey" "<...>"` (idem pour `PrivateKey`) dans `server/Api`.
+
+iOS : les notifications ne marchent qu'une fois la page ajoutée à l'écran d'accueil (iOS 16.4+).
+
+### 11.2 Plan gratuit Render : mise en veille
+
+Le service s'endort après 15 min sans requête ; le notificateur (toutes les 5 min) ne tourne pas pendant la veille.
+Pour des notifications fiables, garder le service éveillé avec un ping externe de `/health` toutes les 10 min
+(ex. cron-job.org ou UptimeRobot, gratuits). Un seul service éveillé en continu tient dans les 750 h/mois du plan gratuit.
+
+### 11.3 Réglages (facultatifs, section `Capsules`)
+
+`IntervalMinutes` (60), `MaxStock` (10), `NotifyAt` (10), `WelcomeCapsules` (3), `EssencePerCapsule` (150), `MaxOpenAtOnce` (10).
+
+### 11.4 Mode debug
+
+Avec `ASPNETCORE_ENVIRONMENT=Development` (profil `http` en local), un panneau « Debug » apparaît sur la page :
+ajout de capsules / d'essence, remise à zéro. Les routes `/api/v1/capsules/debug/*` renvoient 404 dans tout autre environnement.
+

@@ -30,6 +30,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("ConnectionStrings:Default", "Host=unused");
         builder.UseSetting("Game:LoadDataDragon", "false");
         builder.UseSetting("Game:EnableTicker", "false");
+        builder.UseSetting("Capsules:LoadCatalog", "false");
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<DbContextOptions<AppDbContext>>();

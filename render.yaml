@@ -22,3 +22,7 @@ services:
         value: duelyst
       - key: Jwt__Audience
         value: duelyst-client
+      - key: Capsules__Vapid__PublicKey
+        sync: false   # notifications push des capsules, voir CONFIGURATION-EXTERNE.md
+      - key: Capsules__Vapid__PrivateKey
+        sync: false

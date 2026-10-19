@@ -199,3 +199,52 @@ public class Observation
     public int? Value { get; set; }
     public DateTimeOffset ReceivedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+/// <summary>Stock de capsules d'un joueur : une capsule gagnée par heure jusqu'au plafond, essence des doublons.</summary>
+public class CapsuleWallet
+{
+    public Guid UserId { get; set; }
+    /// <summary>Capsules en stock à <see cref="AccrualAnchor"/>.</summary>
+    public int Stored { get; set; }
+    /// <summary>Point de départ de l'heure en cours.</summary>
+    public DateTimeOffset AccrualAnchor { get; set; }
+    public int Essence { get; set; }
+    public int TotalOpened { get; set; }
+    /// <summary>Tirages consécutifs sans Épique ou mieux (garantie).</summary>
+    public int SinceEpic { get; set; }
+    /// <summary>Notification « stock plein » déjà envoyée (remise à zéro à l'ouverture).</summary>
+    public bool FullNotified { get; set; }
+}
+
+/// <summary>Objet possédé (champion ou skin) et nombre d'exemplaires obtenus.</summary>
+public class CollectionItem
+{
+    public Guid UserId { get; set; }
+    public Api.Domain.Capsules.CapsuleItemKind Kind { get; set; }
+    public int ItemId { get; set; }
+    public int Count { get; set; }
+    public DateTimeOffset FirstObtainedAt { get; set; }
+}
+
+/// <summary>Historique des ouvertures.</summary>
+public class CapsuleDrop
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public Api.Domain.Capsules.CapsuleItemKind Kind { get; set; }
+    public int ItemId { get; set; }
+    public Api.Domain.Capsules.Rarity Rarity { get; set; }
+    public bool IsNew { get; set; }
+    public DateTimeOffset OpenedAt { get; set; }
+}
+
+/// <summary>Abonnement Web Push d'un navigateur (PWA des capsules).</summary>
+public class PushSubscriptionEntity
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public string Endpoint { get; set; } = "";
+    public string P256dh { get; set; } = "";
+    public string Auth { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}

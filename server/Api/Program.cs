@@ -67,7 +67,16 @@ builder.Services.AddSingleton<LauncherReleaseService>();
 builder.Services.AddSingleton<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<ISeriesNotifier, SeriesNotifier>();
 builder.Services.AddScoped<SeriesService>();
+builder.Services.Configure<CapsuleOptions>(builder.Configuration.GetSection("Capsules"));
+builder.Services.Configure<VapidOptions>(builder.Configuration.GetSection("Capsules:Vapid"));
+builder.Services.AddSingleton<CapsuleCatalogService>();
+builder.Services.AddSingleton<CapsuleLocks>();
+builder.Services.AddSingleton<PushService>();
+builder.Services.AddScoped<CapsuleService>();
 builder.Services.AddHostedService<ReferenceDataLoader>();
+if (builder.Configuration.GetValue("Capsules:LoadCatalog", true))
+    builder.Services.AddHostedService<CapsuleCatalogLoader>();
+builder.Services.AddHostedService<CapsuleNotifier>();
 if (builder.Configuration.GetValue("Game:EnableTicker", true))
     builder.Services.AddHostedService<ArbitrationTicker>();
 

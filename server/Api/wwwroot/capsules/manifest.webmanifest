@@ -1,0 +1,23 @@
+{
+  "name": "Capsules · Duelyst",
+  "short_name": "Capsules",
+  "description": "Une capsule par heure : ouvre, collectionne, complète tes gammes.",
+  "id": "/capsules/",
+  "start_url": "/capsules/",
+  "scope": "/capsules/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0e14",
+  "theme_color": "#0b0e14",
+  "lang": "fr",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "shortcuts": [
+    { "name": "Collection", "url": "/capsules/?view=collection", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

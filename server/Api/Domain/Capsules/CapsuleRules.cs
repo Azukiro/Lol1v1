@@ -1,14 +1,14 @@
 namespace Api.Domain.Capsules;
 
 /// <summary>
-/// Rareté d'un objet de capsule. Les champions sont communs, les skins montent en rareté avec leur prix en boutique
-/// (standard ≤ 975 RP, 1350, 1820, prestige / mythique, 3250, exalté).
+/// Rareté d'un objet de capsule. Les skins montent en rareté avec leur prix en boutique
+/// (≤ 975 RP, 1350, 1820, prestige / mythique, 3250, exalté) ; les champions sont le palier le plus rare (EXALTED).
 /// </summary>
 public enum Rarity { COMMON, RARE, EPIC, LEGENDARY, MYTHIC, ULTIMATE, EXALTED }
 
 public enum CapsuleItemKind { CHAMPION, SKIN }
 
-/// <summary>STANDARD : gagnée chaque heure ou forgée ; PREMIUM : forgée plus cher, sans champion et à meilleurs taux.</summary>
+/// <summary>STANDARD : gagnée chaque heure ou forgée ; PREMIUM : forgée plus cher, sans skin commun et à meilleurs taux.</summary>
 public enum CapsuleType { STANDARD, PREMIUM }
 
 /// <summary>Règles pures des capsules : accumulation horaire, tirage pondéré, garantie, essence des doublons.</summary>
@@ -26,7 +26,7 @@ public static class CapsuleRules
         [Rarity.EXALTED] = 10,
     };
 
-    /// <summary>Poids de tirage (sur 10 000), capsule prestige : que des skins, Épique ou mieux dans 60 % des cas.</summary>
+    /// <summary>Poids de tirage (sur 10 000), capsule prestige : pas de skin commun, Épique ou mieux dans 60 % des cas.</summary>
     public static readonly IReadOnlyDictionary<Rarity, int> PremiumWeights = new Dictionary<Rarity, int>
     {
         [Rarity.RARE] = 4000,
@@ -82,14 +82,20 @@ public static class CapsuleRules
         return pool[^1].Key;
     }
 
-    /// <summary>Rareté d'un skin d'après le champ « rarity » de CommunityDragon.</summary>
+    /// <summary>Palier des champions : le plus rare.</summary>
+    public const Rarity ChampionRarity = Rarity.EXALTED;
+
+    /// <summary>
+    /// Rareté d'un skin d'après le champ « rarity » de CommunityDragon, un palier sous celui du jeu :
+    /// le palier le plus haut est réservé aux champions.
+    /// </summary>
     public static Rarity FromGameRarity(string? rarity) => rarity switch
     {
-        "kEpic" => Rarity.EPIC,
-        "kLegendary" => Rarity.LEGENDARY,
-        "kMythic" => Rarity.MYTHIC,
-        "kUltimate" => Rarity.ULTIMATE,
-        "kTranscendent" or "kExalted" => Rarity.EXALTED,
-        _ => Rarity.RARE,
+        "kEpic" => Rarity.RARE,
+        "kLegendary" => Rarity.EPIC,
+        "kMythic" => Rarity.LEGENDARY,
+        "kUltimate" => Rarity.MYTHIC,
+        "kTranscendent" or "kExalted" => Rarity.ULTIMATE,
+        _ => Rarity.COMMON,
     };
 }

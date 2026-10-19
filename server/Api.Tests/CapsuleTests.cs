@@ -54,10 +54,10 @@ public class CapsuleRulesTests
     }
 
     [Theory]
-    [InlineData("kNoRarity", Rarity.RARE)]
-    [InlineData("kEpic", Rarity.EPIC)]
-    [InlineData("kMythic", Rarity.MYTHIC)]
-    [InlineData("kTranscendent", Rarity.EXALTED)]
+    [InlineData("kNoRarity", Rarity.COMMON)]
+    [InlineData("kEpic", Rarity.RARE)]
+    [InlineData("kMythic", Rarity.LEGENDARY)]
+    [InlineData("kTranscendent", Rarity.ULTIMATE)]
     public void Game_rarity_maps_to_capsule_rarity(string game, Rarity expected) => Assert.Equal(expected, CapsuleRules.FromGameRarity(game));
 }
 
@@ -76,7 +76,7 @@ public class CapsuleFlowTests
         factory.Services.GetRequiredService<CapsuleCatalogService>().Set(new CapsuleCatalog
         {
             Champions = [new(1, "Annie", "Annie"), new(2, "Olaf", "Olaf")],
-            Skins = [new(1001, 1, 1, "Annie gothique", Rarity.RARE, [], true, null), new(1002, 1, 2, "Annie rouge", Rarity.EPIC, [5], false, null)],
+            Skins = [new(1001, 1, 1, "Annie gothique", Rarity.COMMON, [], true, null), new(1002, 1, 2, "Annie rouge", Rarity.EPIC, [5], false, null)],
             Lines = [new(5, "Gamme test")],
             LoadedAt = DateTimeOffset.UtcNow,
         });
@@ -148,7 +148,7 @@ public class CapsuleFlowTests
     }
 
     [Fact]
-    public async Task Premium_capsule_is_forged_with_essence_and_never_drops_a_champion()
+    public async Task Premium_capsule_is_forged_with_essence_and_never_drops_a_common_skin()
     {
         await using var factory = new ApiFactory();
         SeedCatalog(factory);
@@ -172,7 +172,7 @@ public class CapsuleFlowTests
 
         var opened = await (await http.PostAsJsonAsync("/api/v1/capsules/open", new { count = 2, type = "PREMIUM" }))
             .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<OpenCapsulesResponse>(ApiJson.Options);
-        Assert.All(opened!.Drops, d => Assert.Equal(CapsuleItemKind.SKIN, d.Kind));
+        Assert.All(opened!.Drops, d => Assert.NotEqual(Rarity.COMMON, d.Rarity));
         Assert.Equal(0, opened.State.PremiumAvailable);
         Assert.Equal(3, opened.State.Available);
     }
@@ -197,6 +197,24 @@ public class CapsuleFlowTests
         Assert.Equal("/reliques/", res.Headers.Location!.OriginalString);
         // L'API garde son nom interne.
         Assert.Equal(HttpStatusCode.Unauthorized, (await http.GetAsync("/api/v1/capsules/state")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Champions_only_drop_at_the_rarest_tier()
+    {
+        await using var factory = new ApiFactory();
+        SeedCatalog(factory);
+        var http = await Login(factory, "capsE");
+        await http.GetAsync("/api/v1/capsules/state");
+        var drops = new List<CapsuleDropDto>();
+        for (var round = 0; round < 10; round++)
+        {
+            factory.Clock.Advance(TimeSpan.FromHours(20));
+            drops.AddRange((await (await http.PostAsJsonAsync("/api/v1/capsules/open", new { count = 10 }))
+                .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<OpenCapsulesResponse>(ApiJson.Options))!.Drops);
+        }
+        Assert.All(drops, d => Assert.Equal(d.Kind == CapsuleItemKind.CHAMPION, d.Rarity == CapsuleRules.ChampionRarity));
+        Assert.True(CapsuleRules.StandardWeights[CapsuleRules.ChampionRarity] == CapsuleRules.StandardWeights.Values.Min());
     }
 }
 

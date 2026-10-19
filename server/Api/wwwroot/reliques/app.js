@@ -5,7 +5,7 @@ const CD = 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/
 const RARITIES = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'MYTHIC', 'ULTIMATE', 'EXALTED'];
 const LABEL = { COMMON: 'Commun', RARE: 'Rare', EPIC: 'Épique', LEGENDARY: 'Légendaire', MYTHIC: 'Mythique', ULTIMATE: 'Ultime', EXALTED: 'Exalté' };
 const COLOR = { COMMON: '#8a94a6', RARE: '#19e3ff', EPIC: '#a78bfa', LEGENDARY: '#ff8a3d', MYTHIC: '#ff3366', ULTIMATE: '#ffc94d', EXALTED: '#ffffff' };
-const CATALOG_KEY = 'capsules.catalog.v2';
+const CATALOG_KEY = 'capsules.catalog.v3';
 const rank = (r) => RARITIES.indexOf(r);
 
 const $ = (s, root = document) => root.querySelector(s);
@@ -66,7 +66,8 @@ function indexCatalog(data) {
   const byLine = new Map();
   const byChamp = new Map();
   const byRarity = Object.fromEntries(RARITIES.map((r) => [r, []]));
-  byRarity.COMMON = data.champions.map((c) => `CHAMPION:${c.id}`);
+  // Les champions occupent le palier le plus rare.
+  byRarity.EXALTED = data.champions.map((c) => `CHAMPION:${c.id}`);
   for (const s of data.skins) {
     byRarity[s.rarity].push(`SKIN:${s.id}`);
     for (const l of s.lines) (byLine.get(l) || byLine.set(l, []).get(l)).push(s.id);
@@ -82,7 +83,7 @@ async function loadCatalog() {
   const cached = JSON.parse(store.get(CATALOG_KEY) || 'null');
   if (cached && Date.now() - cached.at < 6 * 3600e3) { S.cat = indexCatalog(cached.data); return; }
   // Version dans l'URL : le catalogue est aussi en cache HTTP (6 h), un changement de format doit le contourner.
-  const data = await api('/capsules/catalog?v=2');
+  const data = await api('/capsules/catalog?v=3');
   store.set(CATALOG_KEY, JSON.stringify({ at: Date.now(), data }));
   S.cat = indexCatalog(data);
 }
@@ -91,7 +92,7 @@ function item(kind, id) {
   if (kind === 'CHAMPION') {
     const c = S.cat.champ.get(id);
     if (!c) return null;
-    return { key: `CHAMPION:${id}`, kind, id, name: c.name, sub: 'Champion', rarity: 'COMMON', champ: c,
+    return { key: `CHAMPION:${id}`, kind, id, name: c.name, sub: 'Champion', rarity: 'EXALTED', champ: c,
       art: `${DD}/loading/${c.alias}_0.jpg`, splash: `${DD}/splash/${c.alias}_0.jpg`, fb: null, lines: [] };
   }
   const s = S.cat.skin.get(id);
@@ -581,7 +582,7 @@ function oddsHTML() {
 
 function oddsNote() {
   return `Prix en essence : relique ${S.cat.price.STANDARD}, prestige ${S.cat.price.PREMIUM}. « Doublon » : essence reçue quand l'objet est déjà dans ta collection. `
-    + `Après ${S.cat.pityThreshold - 1} reliques sans Épique, la suivante est Épique ou mieux. La prestige ne contient que des skins.`;
+    + `Après ${S.cat.pityThreshold - 1} reliques sans Épique, la suivante est Épique ou mieux. La prestige ne contient pas de skin commun. Les champions sont le palier Exalté, le plus rare.`;
 }
 
 function renderOdds() {

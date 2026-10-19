@@ -66,7 +66,7 @@ public sealed class CapsuleService(
         if (stock < count) throw new AppException(stock == 0 ? $"Aucune relique{(premium ? " prestige" : "")} disponible." : $"Seulement {stock} relique(s) disponible(s).", 409);
 
         var owned = await db.CollectionItems.Where(c => c.UserId == userId).ToDictionaryAsync(c => (c.Kind, c.ItemId));
-        var available = Enum.GetValues<Rarity>().Where(r => r == Rarity.COMMON ? catalog.Champions.Count > 0 : catalog.SkinsByRarity[r].Any()).ToHashSet();
+        var available = Enum.GetValues<Rarity>().Where(r => r == CapsuleRules.ChampionRarity ? catalog.Champions.Count > 0 : catalog.SkinsByRarity[r].Any()).ToHashSet();
         var now = clock.GetUtcNow();
         var drops = new List<CapsuleDropDto>();
 
@@ -175,7 +175,7 @@ public sealed class CapsuleService(
     /// <summary>Champion ou skin de la rareté tirée ; un doublon est retiré une fois pour favoriser les nouveautés.</summary>
     private static (CapsuleItemKind Kind, int Id) Pick(CapsuleCatalog catalog, Rarity rarity, Dictionary<(CapsuleItemKind, int), CollectionItem> owned)
     {
-        (CapsuleItemKind, int) Draw() => rarity == Rarity.COMMON
+        (CapsuleItemKind, int) Draw() => rarity == CapsuleRules.ChampionRarity
             ? (CapsuleItemKind.CHAMPION, catalog.Champions[Random.Shared.Next(catalog.Champions.Count)].Id)
             : (CapsuleItemKind.SKIN, catalog.SkinsByRarity[rarity].ElementAt(Random.Shared.Next(catalog.SkinsByRarity[rarity].Count())).Id);
         var first = Draw();

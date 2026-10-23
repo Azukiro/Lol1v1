@@ -60,6 +60,7 @@ builder.Services.AddSignalR().AddJsonProtocol(o => o.PayloadSerializerOptions.Co
 // Client Electron : jeton Bearer, pas de cookie → toute origine acceptée.
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddHttpClient("ddragon", c => c.Timeout = TimeSpan.FromSeconds(20));
+builder.Services.AddHttpClient("keepawake", c => c.Timeout = TimeSpan.FromSeconds(30));
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SeriesLocks>();
@@ -107,6 +108,7 @@ builder.Services.AddHostedService<ReferenceDataLoader>();
 if (builder.Configuration.GetValue("Capsules:LoadCatalog", true))
     builder.Services.AddHostedService<CapsuleCatalogLoader>();
 builder.Services.AddHostedService<CapsuleNotifier>();
+builder.Services.AddHostedService<KeepAwake>();
 if (builder.Configuration.GetValue("Game:EnableTicker", true))
     builder.Services.AddHostedService<ArbitrationTicker>();
 

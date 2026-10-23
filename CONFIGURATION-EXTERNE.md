@@ -444,9 +444,11 @@ iOS : les notifications ne marchent qu'une fois la page ajoutée à l'écran d'a
 ### 11.2 Plan gratuit Render : mise en veille
 
 Le service s'endort après 15 min sans requête ; le notificateur (toutes les 5 min) ne tourne pas pendant la veille.
-Le workflow `.github/workflows/keepalive.yml` pingue `/health` toutes les 10 min pour l'éviter (URL modifiable via
-la variable de dépôt `API_URL`). GitHub peut retarder les tâches planifiées et les suspend après 60 jours sans activité
-sur le dépôt : en secours, un ping externe (cron-job.org, UptimeRobot, gratuits) fait le même travail.
+L'API se garde éveillée elle-même : le service `KeepAwake` appelle toutes les 10 min son propre `/health` via
+`RENDER_EXTERNAL_URL` (variable fournie par Render), ce qui passe par le proxy et compte comme trafic entrant.
+Le workflow `.github/workflows/keepalive.yml` reste en secours, mais GitHub décale ses tâches planifiées de plusieurs
+heures : il ne suffit pas seul. Il ne rattrape qu'une instance déjà endormie (redémarrage Render, par exemple) ;
+un ping externe (cron-job.org, UptimeRobot, gratuits) fait la même chose plus fiablement.
 Un seul service éveillé en continu tient dans les 750 h/mois du plan gratuit.
 
 Côté page, un réveil reste supporté : la PWA s'affiche depuis son cache avec le dernier état connu, un bandeau

@@ -1,3 +1,4 @@
+# Secours du service KeepAwake de l'API (qui se pingue lui-même) : GitHub décale ces tâches de plusieurs heures.
 # Garde l'API Render (plan gratuit) éveillée : sans requête pendant 15 min, le service s'endort
 # et le premier appel attend jusqu'à une minute (démarrage à froid). Un ping toutes les 10 min l'évite
 # et laisse tourner le notificateur des reliques. Un seul service éveillé tient dans les 750 h/mois gratuites.

@@ -5,7 +5,7 @@ const CD = 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/
 const RARITIES = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'MYTHIC', 'ULTIMATE', 'EXALTED'];
 const LABEL = { COMMON: 'Commun', RARE: 'Rare', EPIC: 'Épique', LEGENDARY: 'Légendaire', MYTHIC: 'Mythique', ULTIMATE: 'Ultime', EXALTED: 'Exalté' };
 const COLOR = { COMMON: '#8a94a6', RARE: '#19e3ff', EPIC: '#a78bfa', LEGENDARY: '#ff8a3d', MYTHIC: '#ff3366', ULTIMATE: '#ffc94d', EXALTED: '#ffffff' };
-const CATALOG_KEY = 'capsules.catalog.v4';
+const CATALOG_KEY = 'capsules.catalog.v5';
 const rank = (r) => RARITIES.indexOf(r);
 
 const $ = (s, root = document) => root.querySelector(s);
@@ -139,7 +139,7 @@ async function loadCatalog() {
   const cached = JSON.parse(store.get(CATALOG_KEY) || 'null');
   if (cached && Date.now() - cached.at < 6 * 3600e3) { S.cat = indexCatalog(cached.data); return; }
   // Version dans l'URL : le catalogue est aussi en cache HTTP (6 h), un changement de format doit le contourner.
-  const data = await api('/capsules/catalog?v=4', { retry: true });
+  const data = await api('/capsules/catalog?v=5', { retry: true });
   store.set(CATALOG_KEY, JSON.stringify({ at: Date.now(), data }));
   S.cat = indexCatalog(data);
 }
@@ -627,6 +627,7 @@ function showChampion(id) {
   const own = its.filter((it) => lens().has(it.key)).length;
   openSheet(`<div class="detail-body" style="margin-top:0;padding-top:22px">
     <h2>${esc(c.name)}</h2><p class="muted">${own} / ${its.length} obtenus</p>
+    ${c.talent ? `<div class="talent-card"><span class="kicker">Talent d'arène</span>${talentHTML(c.talent, true)}</div>` : ''}
     <div class="grid">${its.map((it) => { const o = ownedOf(it.key); return cardHTML(it, { missing: !o, count: o?.count }); }).join('')}</div></div>`);
 }
 
@@ -776,7 +777,30 @@ const CLASS = {
 };
 const RING = ['ASSASSIN', 'MAGE', 'MARKSMAN', 'TANK', 'FIGHTER', 'SUPPORT'];
 const ROLE_FIT = [['FIGHTER', 'TANK'], ['FIGHTER', 'ASSASSIN', 'TANK'], ['MAGE', 'ASSASSIN'], ['MARKSMAN'], ['SUPPORT', 'TANK']];
-const TUTO_KEY = 'capsules.tuto.arena';
+const TUTO_KEY = 'capsules.tuto.arena.v2';
+const TIER = {
+  BRONZE: { label: 'Bronze', color: '#d08a5b' },
+  SILVER: { label: 'Argent', color: '#c3cfe2' },
+  GOLD: { label: 'Or', color: '#ffc94d' },
+  PLATINUM: { label: 'Platine', color: '#3ddcc4' },
+  DIAMOND: { label: 'Diamant', color: '#6fb7ff' },
+  MASTER: { label: 'Maître', color: '#d08bff' },
+};
+const tierBadge = (t, big = false) => `<span class="tier${big ? ' big' : ''}" style="--tc:${TIER[t].color}">${TIER[t].label}</span>`;
+const SLOT_LABEL = { P: 'Passif', Q: 'A', W: 'Z', E: 'E', R: 'R' };
+
+/** Talent d'un champion : icône du sort, nom, touche ; avec la description en version détaillée. */
+function talentHTML(t, full = false) {
+  if (!t) return '';
+  const icon = t.icon ? `<img src="${esc(t.icon)}" alt="" loading="lazy">` : '<svg viewBox="0 0 24 24"><use href="#cls-MAGE"/></svg>';
+  return `<span class="talent${full ? ' full' : ''}" title="${esc(t.description)}"><span class="talent-ico">${icon}</span>
+    <span class="talent-txt"><b>${esc(t.spell)} <em>${SLOT_LABEL[t.slot] || t.slot}</em></b>${full ? `<span>${esc(t.description)}</span>` : ''}</span></span>`;
+}
+
+function daysLeft(iso) {
+  const d = Math.max(0, Date.parse(iso) - now()) / 86400e3;
+  return d >= 1 ? `${Math.floor(d)} j` : `${Math.max(1, Math.ceil(d * 24))} h`;
+}
 
 const clsIcon = (c, extra = '') => (CLASS[c]
   ? `<svg class="cls ${extra}" style="--cc:${CLASS[c].color}" viewBox="0 0 24 24" role="img" aria-label="${CLASS[c].label}"><use href="#cls-${c}"/></svg>` : '');
@@ -828,6 +852,14 @@ function renderArenaHead() {
   $('#arena-rating').textContent = a.rating;
   $('#arena-record').textContent = a.wins + a.losses ? `${a.wins} V · ${a.losses} D` : 'Aucun combat pour l\'instant';
   $('#arena-rank').textContent = a.rank ? `#${a.rank}` : '—';
+  const s = a.season;
+  const span = s.nextTierAt ? s.nextTierAt - s.tierFloor : 1;
+  const pct = s.nextTierAt ? Math.min(100, Math.max(0, ((a.rating - s.tierFloor) / span) * 100)) : 100;
+  const next = Object.keys(TIER)[Object.keys(TIER).indexOf(s.tier) + 1];
+  $('#arena-season').innerHTML = `<div class="season-top">${tierBadge(s.tier)}<span class="muted">Saison ${s.number} · fin dans ${daysLeft(s.endsAt)}</span></div>
+    <div class="tier-bar" style="--tc:${TIER[s.tier].color}"><i style="width:${pct}%"></i></div>
+    <span class="tier-next">${s.nextTierAt ? `${TIER[next].label} à ${s.nextTierAt} pts · encore ${s.nextTierAt - a.rating}` : 'Palier maximal atteint'}</span>`;
+  if (a.lastSeason && !S.seasonShown) { S.seasonShown = true; showSeasonEnd(a.lastSeason); }
   $('#reward-pips').innerHTML = Array.from({ length: a.rewardedPerDay }, (_, i) => `<i class="${i < a.rewardedToday ? 'on' : ''}${i % 2 ? ' pair' : ''}"></i>`).join('');
   const left = a.rewardedPerDay - a.rewardedToday;
   $('#reward-text').innerHTML = left > 0
@@ -836,10 +868,11 @@ function renderArenaHead() {
 }
 
 function unitCell(u) {
-  return `<div class="unit r-${u.rarity}">
+  return `<div class="unit r-${u.rarity}" data-unit="${u.role}" role="button" tabindex="0">
     <div class="unit-art">${unitImg(u)}<span class="role">${ROLES[u.role]}</span><span class="unit-cls">${u.classes.slice(0, 2).map((c) => clsIcon(c)).join('')}</span></div>
     <b>${esc(u.champion)}</b>
     <span class="fit ${u.fitPercent > 0 ? 'up' : u.fitPercent < 0 ? 'down' : ''}" title="${fitLabel(u.fitPercent)}">${u.fitPercent ? `${signed(u.fitPercent)} % ${u.fitPercent > 0 ? 'poste' : 'hors poste'}` : 'Neutre'}</span>
+    ${talentHTML(u.talent)}
   </div>`;
 }
 
@@ -888,7 +921,7 @@ function ladderRow(e) {
   return `<div class="lrow${mine ? ' me' : ''}${e.rank <= 3 ? ` podium p${e.rank}` : ''}">
     <span class="rank">${e.rank}</span><span class="avatar">${avatarInner(e)}</span>
     <span class="who"><b>${esc(e.displayName)}${mine ? ' (toi)' : ''}</b><span>${e.wins} V · ${e.losses} D</span></span>
-    <b class="pts">${e.rating}</b></div>`;
+    ${tierBadge(tierOf(e.rating))}<b class="pts">${e.rating}</b></div>`;
 }
 
 async function renderLadder() {
@@ -897,9 +930,10 @@ async function renderLadder() {
   try {
     const l = await api('/capsules/ladder');
     if (S.arenaTab !== 'ladder') return;
-    if (!l.top.length) { body.innerHTML = '<p class="empty-note">Le classement est vide : lance le premier combat !</p>'; return; }
+    const head = S.arena ? `<div class="ladder-head">${tierBadge(S.arena.season.tier)}<span>Saison ${S.arena.season.number} · fin dans ${daysLeft(S.arena.season.endsAt)}</span></div>` : '';
+    if (!l.top.length) { body.innerHTML = `${head}<p class="empty-note">Personne n'a encore combattu cette saison : lance le premier combat !</p>`; return; }
     const meIn = l.me && l.top.some((e) => e.userId === l.me.userId);
-    body.innerHTML = `<div class="ladder">${l.top.map(ladderRow).join('')}${l.me && !meIn ? `<div class="lgap">···</div>${ladderRow(l.me)}` : ''}</div>`;
+    body.innerHTML = `${head}<div class="ladder">${l.top.map(ladderRow).join('')}${l.me && !meIn ? `<div class="lgap">···</div>${ladderRow(l.me)}` : ''}</div>`;
   } catch (e) { body.innerHTML = `<p class="empty-note">${esc(e.message)}</p>`; }
 }
 
@@ -926,6 +960,7 @@ function muSide(u, right = false) {
     <span class="mu-pic">${unitImg(u)}</span>
     <span class="mu-txt"><b>${esc(u.champion)}</b>
       <span>${u.classes.slice(0, 1).map((c) => `${clsIcon(c, 'sm')}${CLASS[c].label}`).join('')}${u.fitPercent ? ` <em class="${u.fitPercent > 0 ? 'up' : 'down'}">${signed(u.fitPercent)} %</em>` : ''}</span>
+      ${talentHTML(u.talent)}
     </span></span>`;
 }
 
@@ -954,6 +989,10 @@ async function openFoe(id) {
       <div class="matchups">${ROLES.map((r, i) => matchupRow(r, p.mine.units[i], p.theirs.units[i])).join('')}</div>
       <div class="vs-syn"><div><span class="kicker">Tes bonus</span>${synergyHTML(p.mine.synergies)}</div>
         <div><span class="kicker">Ses bonus</span>${synergyHTML(p.theirs.synergies)}</div></div>
+      <details class="talents-vs"><summary>Talents en jeu</summary>
+        <div><span class="kicker">Ton équipe</span>${p.mine.units.map((u) => `<div class="tv-row"><b>${esc(u.champion)}</b>${talentHTML(u.talent, true)}</div>`).join('')}</div>
+        <div><span class="kicker">En face</span>${p.theirs.units.map((u) => `<div class="tv-row"><b>${esc(u.champion)}</b>${talentHTML(u.talent, true)}</div>`).join('')}</div>
+      </details>
       <p class="hint">Astuce : ton roster défend aussi. Le changer pour contrer ce joueur change aussi ta défense.</p>
       <button class="btn primary big block" id="attack-go" ${wait > 0 ? 'disabled' : ''}>${wait > 0 ? `Attends sa riposte · ${fmtWait(wait)}` : 'Lancer le combat'}</button>
       <button class="btn ghost block" data-goto="collection">Ajuster mon roster</button>
@@ -980,20 +1019,22 @@ async function openBattle(id) {
 // Rejeu : les événements défilent, le score suit ; « Passer » saute à la fin.
 const replay = { skip: false, wake: () => {}, battle: null };
 const bpause = (ms) => (replay.skip ? Promise.resolve() : new Promise((r) => { const t = setTimeout(r, ms); replay.wake = () => { clearTimeout(t); r(); }; }));
-const EV_DELAY = { GANK: 650, FIRST_BLOOD: 1000, KILL: 800, TOWER: 650, OBJECTIVE: 900, FIGHT: 1300, ACE: 900, END: 700 };
+const EV_DELAY = { GANK: 650, FIRST_BLOOD: 1000, KILL: 800, TOWER: 650, OBJECTIVE: 900, FIGHT: 1300, ACE: 900, END: 700, TALENT: 1050 };
 const EV_ICON = { GANK: '#cls-ASSASSIN', FIRST_BLOOD: '#cls-ASSASSIN', KILL: '#cls-FIGHTER', TOWER: '#ico-tower', OBJECTIVE: '#cls-MAGE', FIGHT: '#ico-arena', ACE: '#ico-arena', END: '#capsule-mini-24' };
 
-async function playBattle(b) {
-  replay.battle = b;
-  const mineA = b.attacker.userId === S.user?.id;
+/** Rejoue un combat ; en spectateur (lien partagé), l'attaquant est à gauche et rien n'est « à toi ». */
+async function playBattle(b, { spectator = false } = {}) {
+  replay.battle = b; replay.spectator = spectator;
+  const mineA = spectator || b.attacker.userId === S.user?.id;
   const me = mineA ? 'A' : 'B';
   const [mine, theirs] = mineA ? [b.a, b.b] : [b.b, b.a];
   const [pMe, pThem] = mineA ? [b.attacker, b.defender] : [b.defender, b.attacker];
   const won = mineA === b.attackerWon;
   const el = $('#battle');
-  el.hidden = false; el.className = 'battle';
+  el.hidden = false; el.className = `battle${spectator ? ' spectator' : ''}`;
   $('#b-me-av').innerHTML = avatarInner(pMe); $('#b-them-av').innerHTML = avatarInner(pThem);
-  $('#b-me-name').textContent = mineA ? 'Toi' : 'Toi (défense)'; $('#b-them-name').textContent = pThem.displayName;
+  $('#b-me-name').textContent = spectator ? pMe.displayName : mineA ? 'Toi' : 'Toi (défense)'; $('#b-them-name').textContent = pThem.displayName;
+  $('#b-share').hidden = true;
   $('#b-lanes').innerHTML = ROLES.map((r, i) => `<div class="bl">
       <span class="bu r-${mine.units[i].rarity}">${unitImg(mine.units[i])}<em data-kd="m${i}"></em></span>
       <span class="bl-mid"><b>${esc(mine.units[i].champion)}</b><span class="role">${r}</span><b>${esc(theirs.units[i].champion)}</b></span>
@@ -1020,10 +1061,12 @@ async function playBattle(b) {
     score(ev);
     const li = document.createElement('li');
     li.className = `ev ${mineEv ? 'me' : 'them'} k-${ev.kind}`;
-    li.innerHTML = `<svg viewBox="0 0 24 24"><use href="${EV_ICON[ev.kind]}"/></svg><span class="t">${ev.minute}'</span><span class="txt">${esc(ev.text)}</span>`;
+    const icon = ev.icon ? `<img class="ev-ico" src="${esc(ev.icon)}" alt="">` : `<svg viewBox="0 0 24 24"><use href="${EV_ICON[ev.kind] || '#ico-arena'}"/></svg>`;
+    li.innerHTML = `${icon}<span class="t">${ev.minute}'</span><span class="txt">${esc(ev.text)}</span>`;
     $('#b-feed').prepend(li);
     if (!replay.skip) {
       if (ev.kind === 'FIGHT' || ev.kind === 'ACE') { audio.tone(mineEv ? 520 : 180, 0.25, 'sawtooth', 0.08); buzz(mineEv ? [30, 20, 60] : 60); }
+      else if (ev.kind === 'TALENT') { audio.tone(mineEv ? 880 : 330, 0.18, 'sine', 0.1); audio.tone(mineEv ? 1320 : 440, 0.22, 'sine', 0.06, 0.08); }
       else if (ev.kind !== 'GANK') audio.tone(mineEv ? 660 : 240, 0.12, 'triangle', 0.1);
     }
     await bpause(EV_DELAY[ev.kind] || 700);
@@ -1033,6 +1076,20 @@ async function playBattle(b) {
   theirs.units.forEach((u, i) => { $(`[data-kd="t${i}"]`).textContent = `${u.kills}/${u.deaths}`; });
   const mvp = [...mine.units].sort((x, y) => (y.kills * 2 - y.deaths) - (x.kills * 2 - x.deaths))[0];
   const delta = pMe.ratingAfter - pMe.ratingBefore;
+  if (spectator) {
+    const winner = b.attackerWon ? b.attacker : b.defender;
+    $('#b-end').innerHTML = `<div class="end-title">Victoire de ${esc(winner.displayName)}</div>
+      <div class="end-chips"><span class="chip">MVP · ${esc([...(b.attackerWon ? b.a : b.b).units].sort((x, y) => (y.kills * 2 - y.deaths) - (x.kills * 2 - x.deaths))[0].champion)}</span>
+        <span class="chip">${b.minutes} min</span></div>
+      ${S.token ? '' : '<p class="muted">Ouvre des reliques, compose ton roster et défie tes amis.</p>'}`;
+    $('#b-end').hidden = false;
+    el.classList.add('won');
+    audio.chime(4);
+    $('#b-skip').hidden = true; $('#b-replay').hidden = false; $('#b-close').hidden = false;
+    $('#b-close').textContent = S.token ? 'Continuer' : 'Jouer aussi';
+    return;
+  }
+  $('#b-close').textContent = 'Continuer';
   $('#b-end').innerHTML = `<div class="end-title">${won ? 'Victoire' : 'Défaite'}</div>
     <div class="end-chips"><span class="chip ${delta >= 0 ? 'up' : 'down'}">${signed(delta)} pts · ${pMe.ratingAfter}</span>
       ${mineA && b.essence ? `<span class="chip ess">+${b.essence} essence</span>` : ''}
@@ -1042,13 +1099,71 @@ async function playBattle(b) {
   $('#b-end').hidden = false;
   el.classList.add(won ? 'won' : 'lost');
   if (won) { audio.chime(5); buzz([60, 40, 120]); } else { audio.tone(150, 0.6, 'sawtooth', 0.08); buzz(90); }
-  $('#b-skip').hidden = true; $('#b-replay').hidden = false; $('#b-close').hidden = false;
+  $('#b-skip').hidden = true; $('#b-replay').hidden = false; $('#b-close').hidden = false; $('#b-share').hidden = false;
 }
 
 function closeBattle() {
   $('#battle').hidden = true;
-  replay.battle = null; replay.skip = true; replay.wake();
+  const wasSpectator = replay.spectator;
+  replay.battle = null; replay.skip = true; replay.wake(); replay.spectator = false;
+  if (new URLSearchParams(location.search).has('replay')) history.replaceState(null, '', location.pathname);
+  if (wasSpectator && !S.token) { showAuth(); return; }
   if (S.view === 'arena') loadArena();
+}
+
+/** Lien public du combat : partage natif, sinon copie dans le presse-papiers. */
+async function shareBattle() {
+  const b = replay.battle; if (!b) return;
+  try {
+    const { code } = await api(`/capsules/battles/${b.id}/share`, { method: 'POST' });
+    const url = `${location.origin}/reliques/?replay=${encodeURIComponent(code)}`;
+    const title = `${b.attacker.displayName} contre ${b.defender.displayName}`;
+    if (navigator.share) { try { await navigator.share({ title, text: `Regarde ce combat : ${title}`, url }); return; } catch (e) { if (e.name === 'AbortError') return; } }
+    await navigator.clipboard.writeText(url);
+    toast('Lien du replay copié');
+  } catch (e) { toast(e.message, true); }
+}
+
+/** Replay partagé (?replay=code) : visible sans compte. */
+async function openSharedReplay(code) {
+  try {
+    if (!S.cat) await loadCatalog();
+    const b = await api(`/replays/${encodeURIComponent(code)}`, { retry: true });
+    const participant = S.user && (b.attacker.userId === S.user.id || b.defender.userId === S.user.id);
+    await playBattle(b, { spectator: !participant });
+  } catch (e) { toast(e.message, true); if (!S.token) showAuth(); }
+}
+
+function tierOf(rating) {
+  const steps = [['MASTER', 1350], ['DIAMOND', 1250], ['PLATINUM', 1150], ['GOLD', 1050], ['SILVER', 950]];
+  return (steps.find(([, min]) => rating >= min) || ['BRONZE'])[0];
+}
+
+/** Bilan de fin de saison : palier, rang et reliques reçues. */
+function showSeasonEnd(r) {
+  const rewards = [r.rewardStandard ? `+${r.rewardStandard} relique${r.rewardStandard > 1 ? 's' : ''}` : '', r.rewardPremium ? `+${r.rewardPremium} prestige` : '']
+    .filter(Boolean).join(' · ');
+  openSheet(`<div class="season-end" style="--tc:${TIER[r.tier].color}">
+    <span class="kicker">Saison ${r.number} terminée</span>
+    <div class="season-crest"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 4 56 14v18c0 14-10 24-24 28C18 56 8 46 8 32V14z"/></svg>${tierBadge(r.tier, true)}</div>
+    <div class="facts"><div><b>#${r.rank}</b><span>Rang</span></div><div><b>${r.rating}</b><span>Cote finale</span></div><div><b>${r.wins} V · ${r.losses} D</b><span>Bilan</span></div></div>
+    <p class="season-reward">${rewards ? `<b>${rewards}</b> ajoutées à ton stock` : `Joue au moins 5 combats dans une saison pour recevoir des reliques.`}</p>
+    <p class="muted">Nouvelle saison : ta cote repart à mi-chemin de 1000. À toi de grimper !</p>
+    <button class="btn primary big block" id="season-ok">${rewards ? 'Récupérer' : 'C\'est parti'}</button>
+  </div>`);
+  $('#season-ok').onclick = async () => {
+    closeSheet();
+    try {
+      await api(`/capsules/seasons/${r.id}/seen`, { method: 'POST' });
+      setWallet(await api('/capsules/state'));
+      if (rewards) { audio.chime(5); buzz([60, 40, 120]); toast(`${rewards} : bonne ouverture !`); }
+    } catch (e) { toast(e.message, true); }
+  };
+}
+
+function showUnitTalent(role) {
+  const u = S.arena?.team?.units[role]; if (!u?.talent) return;
+  openSheet(`<div class="unit-sheet"><span class="kicker">${ROLES[u.role]} · talent d'arène</span><h2>${esc(u.champion)}</h2>${talentHTML(u.talent, true)}</div>`);
 }
 
 // ---------- Tuto (stories) ----------
@@ -1057,8 +1172,10 @@ const TUTO = [
   { kicker: 'Règle 1', title: 'Chacun à sa place', text: 'Une classe à l\'aise à son poste prend jusqu\'à +10 %. Hors de son poste : −10 %.', art: () => tutoRoles() },
   { kicker: 'Règle 2', title: 'Le cycle des contres', text: 'Chaque classe domine les deux suivantes. Contre ton vis-à-vis et prends +12 %.', art: () => tutoRing() },
   { kicker: 'Règle 3', title: 'Les bonus s\'empilent', text: 'Skins d\'une même gamme, composition équilibrée, rareté : tout ajoute de la puissance.', art: () => tutoSynergy() },
+  { kicker: 'Règle 4', title: 'Chaque champion a son talent', text: 'Le sort qui fait son identité change la partie : Destinée rejoint une autre lane, Retour temporel renverse un combat, Grappin attrape une cible.', art: () => tutoTalents() },
   { kicker: 'Le match', title: 'Lanes, dragons, teamfights', text: 'Gagner ses lanes rapporte de l\'or. L\'or et les dragons font pencher les teamfights. Le premier à 2 l\'emporte.', art: () => tutoTimeline() },
-  { kicker: 'Récompenses', title: 'Grimpe et remplis ta forge', text: '2 victoires = 1 relique, jusqu\'à 4 victoires payées par jour. Un seul défi par joueur jusqu\'à sa riposte (ou 24 h).', art: () => tutoRewards(), cta: 'Entrer dans l\'arène' },
+  { kicker: 'Récompenses', title: 'Grimpe et remplis ta forge', text: '2 victoires = 1 relique, jusqu\'à 4 victoires payées par jour. Un seul défi par joueur jusqu\'à sa riposte (ou 24 h).', art: () => tutoRewards() },
+  { kicker: 'Saisons', title: 'Un mois, un classement', text: 'Grimpe de Bronze à Maître. En fin de mois, ton palier te rapporte des reliques, puis tout le monde repart pour une nouvelle saison.', art: () => tutoSeasons(), cta: 'Entrer dans l\'arène' },
 ];
 const tuto = { i: 0, x: 0 };
 
@@ -1087,6 +1204,17 @@ function tutoSynergy() {
   const rows = [['Gamme ×3', '+6 %', 'var(--violet)'], ['Compo équilibrée', '+5 %', 'var(--green)'], ['Exalté', '+12 %', 'var(--yellow)']];
   return `<div class="ta-syn">${rows.map(([l, v, c], i) => `<div class="ta-chip" style="--i:${i};--c:${c}"><span>${l}</span><b>${v}</b></div>`).join('')}
     <div class="ta-power"><span class="kicker">Puissance</span><i><i></i></i></div></div>`;
+}
+
+function tutoTalents() {
+  const picks = [4, 26, 53].map((id) => S.cat?.champ.get(id)).filter((c) => c?.talent);
+  return `<div class="ta-talents">${picks.map((c, i) => `<div class="ta-talent" style="--i:${i}">
+    <span class="ta-portrait"><img src="${esc(`${DD}/loading/${c.alias}_0.jpg`)}" alt=""></span>
+    <div><b>${esc(c.name)}</b>${talentHTML(c.talent, true)}</div></div>`).join('')}</div>`;
+}
+
+function tutoSeasons() {
+  return `<div class="ta-tiers">${Object.keys(TIER).map((t, i) => `<span class="ta-tier" style="--i:${i};--tc:${TIER[t].color};--h:${30 + i * 13}%">${TIER[t].label}</span>`).join('')}</div>`;
 }
 
 function tutoTimeline() {
@@ -1153,6 +1281,8 @@ function bindArena() {
   $('#b-skip').onclick = () => { replay.skip = true; replay.wake(); };
   $('#b-replay').onclick = () => replay.battle && playBattle(replay.battle);
   $('#b-close').onclick = closeBattle;
+  $('#b-share').onclick = shareBattle;
+  $('#arena-team').addEventListener('click', (e) => { const u = e.target.closest('[data-unit]'); if (u) showUnitTalent(+u.dataset.unit); });
 }
 
 // ---------- Navigation ----------
@@ -1196,17 +1326,17 @@ function setupInstall() {
   $('#install-menu').onclick = () => { $('#menu').hidden = true; showInstall(); };
 }
 
-const NEWS_KEY = 'capsules.news.arena';
+const NEWS_KEY = 'capsules.news.arena-v2';
 
 async function maybeShowNews() {
   if (store.get(NEWS_KEY) || !$('#tuto').hidden) return;
   store.set(NEWS_KEY, '1');
   openSheet(`<div class="news">
     <span class="kicker">Nouveau</span>
-    <h2>L'arène est ouverte</h2>
-    <div class="news-item"><b>Ton roster combat</b><span>Défie tes amis et tous les joueurs : tes 5 champions contre les leurs, même s'ils sont hors ligne.</span></div>
-    <div class="news-item"><b>Cote et classement</b><span>Chaque combat fait bouger ta cote. Grimpe dans le classement global.</span></div>
-    <div class="news-item"><b>De l'essence à gagner</b><span>2 victoires = 1 relique, jusqu'à 4 victoires payées par jour.</span></div>
+    <h2>Arène : saison 1</h2>
+    <div class="news-item"><b>Un talent par champion</b><span>Chaque champion combat avec le sort qui fait son identité : Destinée, Requiem, Retour temporel…</span></div>
+    <div class="news-item"><b>Saisons mensuelles</b><span>Grimpe de Bronze à Maître : ton palier en fin de mois te rapporte des reliques.</span></div>
+    <div class="news-item"><b>Replays à partager</b><span>Envoie le lien d'un combat : tes amis le regardent même sans compte.</span></div>
     <button class="btn primary block" data-news-go="arena">Entrer dans l'arène</button>
   </div>`);
   $$('[data-news-go]').forEach((b) => (b.onclick = () => { closeSheet(); setView(b.dataset.newsGo); }));
@@ -1502,6 +1632,8 @@ bind();
 setupInstall();
 setInterval(tick, 1000);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
-const startView = new URLSearchParams(location.search).get('view');
+const params = new URLSearchParams(location.search);
+const startView = params.get('view');
 if (startView === 'collection' || startView === 'arena') S.view = startView;
 if (S.token) { start(); setView(S.view); } else showAuth();
+if (params.get('replay')) openSharedReplay(params.get('replay'));

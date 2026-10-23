@@ -75,8 +75,9 @@ public sealed class CapsulesController(
     [HttpGet("players/{playerId:guid}")]
     public Task<PlayerCollectionDto> Player(Guid playerId) => social.GetPlayerAsync(User.UserId(), playerId);
 
-    /// <summary>Catalogue complet (identique pour tous), mis en cache par le navigateur.</summary>
+    /// <summary>Catalogue complet (identique pour tous, lisible sans compte pour les replays partagés), mis en cache par le navigateur.</summary>
     [HttpGet("catalog")]
+    [AllowAnonymous]
     public async Task<CapsuleCatalogDto> Catalog()
     {
         var catalog = await catalogs.GetAsync(HttpContext.RequestAborted);

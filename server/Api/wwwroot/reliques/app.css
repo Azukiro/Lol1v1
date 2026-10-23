@@ -710,3 +710,69 @@ button.slot:active { transform: scale(.97); }
   .units { gap: 12px; }
   .arena-tabs { top: calc(62px + var(--safe-t)); }
 }
+
+/* ---------- Arène V2 : talents, saisons, partage ---------- */
+.talent { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; color: #d9c48a; }
+.talent-ico { flex: none; width: 18px; height: 18px; border-radius: 5px; overflow: hidden; background: var(--panel-2); box-shadow: 0 0 0 1px rgba(255, 201, 77, .5); display: grid; place-items: center; }
+.talent-ico img { width: 100%; height: 100%; object-fit: cover; }
+.talent-ico svg { width: 12px; height: 12px; color: var(--yellow); }
+.talent-txt { display: grid; min-width: 0; }
+.talent-txt b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.talent-txt em { font-style: normal; font-size: 9px; font-weight: 700; padding: 0 4px; border-radius: 4px; background: rgba(255, 201, 77, .15); color: var(--yellow); margin-left: 2px; }
+.talent.full { align-items: flex-start; gap: 10px; font-size: 13px; color: var(--text); }
+.talent.full .talent-ico { width: 40px; height: 40px; border-radius: 9px; box-shadow: 0 0 0 1.5px rgba(255, 201, 77, .6), 0 0 14px rgba(255, 201, 77, .25); }
+.talent.full .talent-ico svg { width: 22px; height: 22px; }
+.talent.full .talent-txt b { white-space: normal; font-size: 15px; color: var(--yellow); }
+.talent.full .talent-txt span { color: #c3cad8; font-size: 13px; line-height: 1.4; }
+.talent-card { display: grid; gap: 8px; margin: 12px 0 14px; padding: 12px 14px; border-radius: 14px; background: linear-gradient(120deg, rgba(255, 201, 77, .08), transparent 70%), var(--panel); border: 1px solid rgba(255, 201, 77, .3); }
+.unit { cursor: pointer; }
+.unit .talent { margin-top: 1px; }
+.unit-sheet { display: grid; gap: 12px; padding: 24px 18px 10px; }
+
+.tier { --tc: var(--muted); display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font-family: var(--display); font-weight: 700; font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--tc); background: color-mix(in srgb, var(--tc) 14%, transparent); border: 1px solid color-mix(in srgb, var(--tc) 50%, transparent); white-space: nowrap; }
+.tier.big { font-size: 26px; padding: 6px 18px; letter-spacing: .16em; box-shadow: 0 0 30px color-mix(in srgb, var(--tc) 35%, transparent); }
+.hero-season { grid-column: 1 / -1; display: grid; gap: 6px; }
+.season-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+.tier-bar { height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+.tier-bar i { display: block; height: 100%; border-radius: 3px; background: var(--tc); box-shadow: 0 0 10px var(--tc); transition: width .6s cubic-bezier(.2, .8, .2, 1); }
+.tier-next { font-size: 12px; color: var(--muted); }
+.ladder-head { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); padding: 2px 2px 6px; }
+.lrow .tier { font-size: 10px; padding: 1px 7px; }
+
+.talents-vs { border-radius: 12px; background: var(--panel); border: 1px solid var(--line); padding: 0 12px; }
+.talents-vs summary { cursor: pointer; padding: 12px 0; font-family: var(--display); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; font-size: 13px; color: var(--yellow); }
+.talents-vs[open] { padding-bottom: 12px; }
+.talents-vs > div { display: grid; gap: 8px; margin-top: 8px; }
+.tv-row { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--line); }
+.tv-row > b { font-size: 12px; color: var(--muted); }
+.tv-row .talent.full .talent-ico { width: 32px; height: 32px; }
+.mu-txt .talent { margin-top: 2px; }
+.mu-side.right .talent { flex-direction: row-reverse; }
+
+.ev-ico { width: 22px; height: 22px; border-radius: 6px; flex: none; object-fit: cover; box-shadow: 0 0 0 1px rgba(255, 201, 77, .6); }
+.ev.k-TALENT { border-left-color: var(--yellow); background: linear-gradient(90deg, rgba(255, 201, 77, .14), var(--panel)); }
+.ev.k-TALENT .txt { color: #ffe3a3; }
+.battle.spectator .battle-score .me .avatar { border-color: var(--cyan); }
+
+.season-end { --tc: var(--yellow); display: grid; justify-items: center; gap: 14px; padding: 28px 18px 10px; text-align: center; }
+.season-end .kicker { color: var(--tc); }
+.season-crest { position: relative; display: grid; place-items: center; width: 150px; height: 150px; }
+.season-crest svg { position: absolute; inset: 0; width: 100%; height: 100%; fill: color-mix(in srgb, var(--tc) 12%, transparent); stroke: var(--tc); stroke-width: 1.5; filter: drop-shadow(0 0 24px color-mix(in srgb, var(--tc) 45%, transparent)); animation: throb 2.4s ease-in-out infinite; }
+.season-crest .tier { position: relative; }
+.season-end .facts { width: 100%; }
+.season-reward { margin: 0; font-size: 15px; }
+.season-reward b { color: var(--tc); }
+
+.ta-talents { display: grid; gap: 10px; width: 100%; max-width: 380px; }
+.ta-talent { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 14px; background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 201, 77, .3); text-align: left; }
+.ta-talent > div { display: grid; gap: 4px; min-width: 0; }
+.ta-talent > div > b { font-family: var(--display); text-transform: uppercase; letter-spacing: .08em; }
+.ta-talent .talent.full .talent-txt span { font-size: 12px; }
+.ta-talent .talent.full .talent-ico { width: 30px; height: 30px; }
+.ta-portrait { flex: none; width: 54px; height: 72px; border-radius: 10px; overflow: hidden; background: var(--panel-2); box-shadow: 0 0 0 1.5px rgba(255, 201, 77, .5); }
+.ta-portrait img { width: 100%; height: 100%; object-fit: cover; object-position: center 20%; }
+.ta-tiers { display: flex; align-items: flex-end; gap: 6px; height: 220px; width: 100%; max-width: 380px; }
+.ta-tier { flex: 1; height: var(--h); display: grid; align-content: start; justify-items: center; padding-top: 8px; border-radius: 10px 10px 0 0;
+  background: linear-gradient(color-mix(in srgb, var(--tc) 45%, transparent), transparent); border-top: 2px solid var(--tc);
+  font-family: var(--display); font-weight: 700; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--tc); }

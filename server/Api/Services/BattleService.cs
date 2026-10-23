@@ -39,6 +39,7 @@ public sealed class BattleService(
 
     public async Task<ArenaDto> GetArenaAsync(Guid userId)
     {
+        await EnsureSeasonAsync();
         var catalog = await catalogs.GetAsync();
         var now = clock.GetUtcNow();
         var profile = await db.BattleProfiles.FirstOrDefaultAsync(p => p.UserId == userId);
@@ -69,9 +70,15 @@ public sealed class BattleService(
 
         var (dayStart, dayEnd) = Today(now);
         var rewarded = await db.RelicBattles.CountAsync(b => b.AttackerId == userId && b.Essence > 0 && b.CreatedAt >= dayStart);
-        return new ArenaDto(rating, profile?.Wins ?? 0, profile?.Losses ?? 0, profile is null ? null : await RankAsync(profile),
+        var ranked = profile is { } p && p.Wins + p.Losses > 0;
+        var last = await db.SeasonResults.Where(r => r.UserId == userId && !r.Seen).OrderByDescending(r => r.SeasonId).FirstOrDefaultAsync();
+        var seasonId = SeasonId(now);
+        return new ArenaDto(rating, profile?.Wins ?? 0, profile?.Losses ?? 0, ranked ? await RankAsync(profile!) : null,
             rewarded, _o.RewardedWinsPerDay, WinEssence, dayEnd, _o.RematchHours,
-            team is not null, team is null ? null : BattleRules.Analyze(team, LineNames(catalog)), opponents);
+            team is not null, team is null ? null : BattleRules.Analyze(team, LineNames(catalog)), opponents,
+            new SeasonDto(seasonId, Seasons.Number(seasonId), SeasonEnd(now), Seasons.TierOf(rating), Seasons.Floor(rating), Seasons.NextThreshold(rating),
+                profile?.PeakRating ?? rating),
+            last is null ? null : ToDto(last));
     }
 
     public async Task<BattlePreviewDto> PreviewAsync(Guid userId, Guid opponentId)
@@ -90,6 +97,7 @@ public sealed class BattleService(
     public async Task<BattleDto> AttackAsync(Guid userId, Guid opponentId)
     {
         if (opponentId == userId) throw new AppException("Tu ne peux pas t'attaquer toi-même.");
+        await EnsureSeasonAsync();
         var catalog = await catalogs.GetAsync();
         // Verrous des deux joueurs, toujours dans le même ordre : pas d'interblocage entre deux attaques croisées.
         var (first, second) = userId.CompareTo(opponentId) < 0 ? (userId, opponentId) : (opponentId, userId);
@@ -120,6 +128,8 @@ public sealed class BattleService(
         defender.Rating = Math.Max(0, defender.Rating - delta);
         if (won) { attacker.Wins++; defender.Losses++; } else { attacker.Losses++; defender.Wins++; }
         attacker.UpdatedAt = defender.UpdatedAt = now;
+        attacker.PeakRating = Math.Max(attacker.PeakRating, attacker.Rating);
+        defender.PeakRating = Math.Max(defender.PeakRating, defender.Rating);
         battle.AttackerRatingAfter = attacker.Rating;
         battle.DefenderRatingAfter = defender.Rating;
 
@@ -171,6 +181,7 @@ public sealed class BattleService(
     /// <summary>Classement global : joueurs ayant au moins un combat, par cote.</summary>
     public async Task<LadderDto> LadderAsync(Guid userId)
     {
+        await EnsureSeasonAsync();
         var ranked = db.BattleProfiles.Where(p => p.Wins + p.Losses > 0);
         var top = await ranked.OrderByDescending(p => p.Rating).ThenByDescending(p => p.Wins).ThenBy(p => p.UpdatedAt).Take(100).ToListAsync();
         var ids = top.Select(p => p.UserId).Append(userId).ToList();
@@ -229,7 +240,8 @@ public sealed class BattleService(
             }
             if (!catalog.ChampionById.TryGetValue(championId, out var champ)) return null;
             var classes = (champ.Roles ?? []).Select(BattleRules.ParseClass).OfType<ChampionClass>().ToArray();
-            units.Add(new BattleUnit(slot.Kind, slot.ItemId, champ.Name, champ.Id, rarity, classes, lines));
+            var talent = Talents.For(champ.Alias, classes, champ.Spells?.Select(sp => (sp.Name, sp.Icon)).ToList());
+            units.Add(new BattleUnit(slot.Kind, slot.ItemId, champ.Name, champ.Id, rarity, classes, lines, talent));
         }
         return units.Count == BattleRules.TeamSize ? units : null;
     }
@@ -261,21 +273,127 @@ public sealed class BattleService(
     {
         var profile = await db.BattleProfiles.FirstOrDefaultAsync(p => p.UserId == userId);
         if (profile is not null) return profile;
-        profile = new BattleProfile { UserId = userId, Rating = _o.StartRating, UpdatedAt = now };
+        profile = new BattleProfile { UserId = userId, Rating = _o.StartRating, PeakRating = _o.StartRating, SeasonId = SeasonId(now), UpdatedAt = now };
         db.BattleProfiles.Add(profile);
         return profile;
+    }
+
+    private TimeZoneInfo Zone
+    {
+        get
+        {
+            try { return TimeZoneInfo.FindSystemTimeZoneById(_o.TimeZone); }
+            catch (Exception) { return TimeZoneInfo.Utc; }
+        }
     }
 
     /// <summary>Journée en cours (minuit à minuit, fuseau configuré, UTC si inconnu).</summary>
     private (DateTimeOffset Start, DateTimeOffset End) Today(DateTimeOffset now)
     {
-        TimeZoneInfo tz;
-        try { tz = TimeZoneInfo.FindSystemTimeZoneById(_o.TimeZone); }
-        catch (Exception) { tz = TimeZoneInfo.Utc; }
-        var local = TimeZoneInfo.ConvertTime(now, tz);
-        var midnight = local.Date;
+        var tz = Zone;
+        var midnight = TimeZoneInfo.ConvertTime(now, tz).Date;
         DateTimeOffset At(DateTime d) => new(d, tz.GetUtcOffset(d));
         return (At(midnight), At(midnight.AddDays(1)));
+    }
+
+    private string SeasonId(DateTimeOffset now) => Seasons.IdOf(TimeZoneInfo.ConvertTime(now, Zone));
+
+    /// <summary>Fin de la saison en cours : le premier du mois suivant à minuit (heure locale).</summary>
+    private DateTimeOffset SeasonEnd(DateTimeOffset now)
+    {
+        var tz = Zone;
+        var local = TimeZoneInfo.ConvertTime(now, tz);
+        var next = new DateTime(local.Year, local.Month, 1).AddMonths(1);
+        return new DateTimeOffset(next, tz.GetUtcOffset(next));
+    }
+
+    private static readonly SemaphoreSlim SeasonGate = new(1, 1);
+
+    /// <summary>
+    /// Bascule de saison, au premier passage après le changement de mois : chaque profil d'une saison passée est archivé
+    /// (rang, palier, reliques versées dans le portefeuille), puis sa cote est remise à niveau.
+    /// </summary>
+    public async Task EnsureSeasonAsync()
+    {
+        var current = SeasonId(clock.GetUtcNow());
+        if (!await db.BattleProfiles.AnyAsync(p => p.SeasonId != current)) return;
+        await SeasonGate.WaitAsync();
+        try
+        {
+            var stale = await db.BattleProfiles.Where(p => p.SeasonId != current).ToListAsync();
+            var now = clock.GetUtcNow();
+            foreach (var season in stale.GroupBy(p => p.SeasonId))
+            {
+                var done = (await db.SeasonResults.Where(r => r.SeasonId == season.Key).Select(r => r.UserId).ToListAsync()).ToHashSet();
+                var ranked = season.Where(p => p.Wins + p.Losses > 0)
+                    .OrderByDescending(p => p.Rating).ThenByDescending(p => p.Wins).ThenBy(p => p.UpdatedAt).ToList();
+                var ids = ranked.Select(p => p.UserId).ToList();
+                var wallets = await db.CapsuleWallets.Where(w => ids.Contains(w.UserId)).ToDictionaryAsync(w => w.UserId);
+                for (var i = 0; i < ranked.Count; i++)
+                {
+                    var p = ranked[i];
+                    if (done.Contains(p.UserId)) continue;
+                    var tier = Seasons.TierOf(p.Rating);
+                    var (standard, premium) = p.Wins + p.Losses >= Seasons.MinGamesForReward ? Seasons.Reward(tier) : (0, 0);
+                    db.SeasonResults.Add(new SeasonResult
+                    {
+                        UserId = p.UserId, SeasonId = season.Key, Rating = p.Rating, PeakRating = Math.Max(p.PeakRating, p.Rating),
+                        Wins = p.Wins, Losses = p.Losses, Rank = i + 1, Tier = tier, RewardStandard = standard, RewardPremium = premium, CreatedAt = now,
+                    });
+                    if (wallets.TryGetValue(p.UserId, out var w)) { w.Stored += standard; w.PremiumStored += premium; }
+                }
+                foreach (var p in season)
+                {
+                    p.Rating = Seasons.SoftReset(p.Rating, _o.StartRating);
+                    p.PeakRating = p.Rating;
+                    p.Wins = p.Losses = 0;
+                    p.SeasonId = current;
+                }
+            }
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException e)
+        {
+            // Un portefeuille a bougé pendant la bascule : nouvelle tentative au prochain passage.
+            logger.LogWarning(e, "Bascule de saison reportée");
+            db.ChangeTracker.Clear();
+        }
+        finally { SeasonGate.Release(); }
+    }
+
+    /// <summary>Marque le bilan de fin de saison comme vu.</summary>
+    public async Task MarkSeasonSeenAsync(Guid userId, string seasonId)
+    {
+        var result = await db.SeasonResults.FirstOrDefaultAsync(r => r.UserId == userId && r.SeasonId == seasonId);
+        if (result is null) return;
+        result.Seen = true;
+        await db.SaveChangesAsync();
+    }
+
+    private static SeasonResultDto ToDto(SeasonResult r) =>
+        new(r.SeasonId, Seasons.Number(r.SeasonId), r.Rating, r.PeakRating, r.Wins, r.Losses, r.Rank, r.Tier, r.RewardStandard, r.RewardPremium);
+
+    private const string ShareAlphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+    /// <summary>Lien de rejeu public : code créé au premier partage, réservé aux participants.</summary>
+    public async Task<ShareDto> ShareAsync(Guid userId, Guid battleId)
+    {
+        var battle = await db.RelicBattles.FirstOrDefaultAsync(b => b.Id == battleId && (b.AttackerId == userId || b.DefenderId == userId))
+            ?? throw new AppException("Combat introuvable.", 404);
+        if (battle.ShareCode is null)
+        {
+            battle.ShareCode = System.Security.Cryptography.RandomNumberGenerator.GetString(ShareAlphabet, 10);
+            await db.SaveChangesAsync();
+        }
+        return new ShareDto(battle.ShareCode);
+    }
+
+    /// <summary>Rejeu public d'un combat partagé.</summary>
+    public async Task<BattleDto> GetSharedAsync(string code)
+    {
+        var battle = code.Length is > 0 and <= 16 ? await db.RelicBattles.FirstOrDefaultAsync(b => b.ShareCode == code) : null;
+        if (battle is null) throw new AppException("Ce replay n'existe pas ou plus.", 404);
+        return await ToDtoAsync(battle, JsonSerializer.Deserialize<BattleOutcome>(battle.Result, Json)!);
     }
 
     private static string Wait(TimeSpan left) =>

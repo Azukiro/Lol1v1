@@ -69,9 +69,19 @@ namespace Api.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("losses");
 
+                    b.Property<int>("PeakRating")
+                        .HasColumnType("integer")
+                        .HasColumnName("peak_rating");
+
                     b.Property<int>("Rating")
                         .HasColumnType("integer")
                         .HasColumnName("rating");
+
+                    b.Property<string>("SeasonId")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)")
+                        .HasColumnName("season_id");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -467,8 +477,17 @@ namespace Api.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("seed");
 
+                    b.Property<string>("ShareCode")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("share_code");
+
                     b.HasKey("Id")
                         .HasName("pk_relic_battle");
+
+                    b.HasIndex("ShareCode")
+                        .IsUnique()
+                        .HasDatabaseName("ix_relic_battle_share_code");
 
                     b.HasIndex("AttackerId", "CreatedAt")
                         .HasDatabaseName("ix_relic_battle_attacker_id_created_at");
@@ -705,6 +724,65 @@ namespace Api.Data.Migrations
                         .HasName("pk_round_assignment");
 
                     b.ToTable("round_assignment", (string)null);
+                });
+
+            modelBuilder.Entity("Api.Data.SeasonResult", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("SeasonId")
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)")
+                        .HasColumnName("season_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("Losses")
+                        .HasColumnType("integer")
+                        .HasColumnName("losses");
+
+                    b.Property<int>("PeakRating")
+                        .HasColumnType("integer")
+                        .HasColumnName("peak_rating");
+
+                    b.Property<int>("Rank")
+                        .HasColumnType("integer")
+                        .HasColumnName("rank");
+
+                    b.Property<int>("Rating")
+                        .HasColumnType("integer")
+                        .HasColumnName("rating");
+
+                    b.Property<int>("RewardPremium")
+                        .HasColumnType("integer")
+                        .HasColumnName("reward_premium");
+
+                    b.Property<int>("RewardStandard")
+                        .HasColumnType("integer")
+                        .HasColumnName("reward_standard");
+
+                    b.Property<bool>("Seen")
+                        .HasColumnType("boolean")
+                        .HasColumnName("seen");
+
+                    b.Property<string>("Tier")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("tier");
+
+                    b.Property<int>("Wins")
+                        .HasColumnType("integer")
+                        .HasColumnName("wins");
+
+                    b.HasKey("UserId", "SeasonId")
+                        .HasName("pk_season_result");
+
+                    b.ToTable("season_result", (string)null);
                 });
 
             modelBuilder.Entity("Api.Data.Series", b =>
@@ -1106,6 +1184,16 @@ namespace Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_round_assignment_round_round_id");
+                });
+
+            modelBuilder.Entity("Api.Data.SeasonResult", b =>
+                {
+                    b.HasOne("Api.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_season_result_user_user_id");
                 });
 
             modelBuilder.Entity("Api.Data.SeriesPlayer", b =>

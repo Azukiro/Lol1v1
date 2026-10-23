@@ -4,7 +4,9 @@ using Api.Domain.Capsules;
 namespace Api.Services;
 
 /// <summary>Champion tirable ; Roles = classes CommunityDragon (assassin, mage, marksman, tank, fighter, support), principale en premier.</summary>
-public sealed record CatalogChampion(int Id, string Name, string Alias, string[]? Roles = null);
+public sealed record CatalogChampion(int Id, string Name, string Alias, string[]? Roles = null, CatalogSpell[]? Spells = null);
+/// <summary>Sort d'un champion (nom localisé, icône Data Dragon) ; Spells = passif, Q, W, E, R dans cet ordre.</summary>
+public sealed record CatalogSpell(string Name, string? Icon);
 /// <summary>Skin tirable ; LoadPath = image d'écran de chargement côté CommunityDragon (secours si Data Dragon n'a pas l'image).</summary>
 public sealed record CatalogSkin(int Id, int ChampionId, int Num, string Name, Rarity Rarity, int[] Lines, bool Legacy, string? LoadPath);
 public sealed record CatalogLine(int Id, string Name);
@@ -74,6 +76,8 @@ public sealed class CapsuleCatalogService(IHttpClientFactory httpFactory, IConfi
                 // Ids ≥ 10 000 : variantes de modes temporaires (ex. Jade_*), pas de vrais champions.
                 .Where(c => c.Id is > 0 and < 10_000).OrderBy(c => c.Name).ToList();
             var known = champions.Select(c => c.Id).ToHashSet();
+            var kits = await LoadKitsAsync(http, ct);
+            champions = champions.Select(c => kits.TryGetValue(c.Id, out var kit) ? c with { Spells = kit } : c).ToList();
 
             using var lineDoc = JsonDocument.Parse(await http.GetStringAsync($"{baseUrl}/skinlines.json", ct));
             var lines = lineDoc.RootElement.EnumerateArray()
@@ -109,6 +113,41 @@ public sealed class CapsuleCatalogService(IHttpClientFactory httpFactory, IConfi
         catch (Exception ex)
         {
             logger.LogWarning(ex, "CommunityDragon injoignable, catalogue des capsules non chargé");
+        }
+    }
+
+    /// <summary>
+    /// Kits des champions (noms localisés des sorts et icônes) depuis Data Dragon, pour les talents de combat.
+    /// Facultatif : en cas d'échec, les talents gardent un nom générique.
+    /// </summary>
+    private async Task<Dictionary<int, CatalogSpell[]>> LoadKitsAsync(HttpClient http, CancellationToken ct)
+    {
+        const string dd = "https://ddragon.leagueoflegends.com";
+        try
+        {
+            var versions = await http.GetFromJsonAsync<string[]>($"{dd}/api/versions.json", ct);
+            var version = versions![0];
+            var locale = config["Game:Locale"] ?? "fr_FR";
+            using var doc = JsonDocument.Parse(await http.GetStringAsync($"{dd}/cdn/{version}/data/{locale}/championFull.json", ct));
+            var kits = new Dictionary<int, CatalogSpell[]>();
+            foreach (var p in doc.RootElement.GetProperty("data").EnumerateObject())
+            {
+                var c = p.Value;
+                var passive = c.GetProperty("passive");
+                var spells = new List<CatalogSpell>
+                {
+                    new(passive.GetProperty("name").GetString() ?? "", $"{dd}/cdn/{version}/img/passive/{passive.GetProperty("image").GetProperty("full").GetString()}"),
+                };
+                spells.AddRange(c.GetProperty("spells").EnumerateArray().Select(sp =>
+                    new CatalogSpell(sp.GetProperty("name").GetString() ?? "", $"{dd}/cdn/{version}/img/spell/{sp.GetProperty("image").GetProperty("full").GetString()}")));
+                if (spells.Count == 5 && int.TryParse(c.GetProperty("key").GetString(), out var id)) kits[id] = [.. spells];
+            }
+            return kits;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Kits des champions indisponibles (Data Dragon) : talents sans nom de sort");
+            return [];
         }
     }
 

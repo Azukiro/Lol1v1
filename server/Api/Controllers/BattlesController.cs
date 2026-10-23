@@ -28,6 +28,28 @@ public sealed class BattlesController(BattleService battles) : ControllerBase
     [HttpGet("battles/{battleId:guid}")]
     public Task<BattleDto> Battle(Guid battleId) => battles.GetAsync(User.UserId(), battleId);
 
+    [HttpPost("battles/{battleId:guid}/share")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
+    public Task<ShareDto> Share(Guid battleId) => battles.ShareAsync(User.UserId(), battleId);
+
+    [HttpPost("seasons/{seasonId}/seen")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
+    public async Task<IActionResult> SeasonSeen(string seasonId)
+    {
+        await battles.MarkSeasonSeenAsync(User.UserId(), seasonId);
+        return NoContent();
+    }
+
     [HttpGet("ladder")]
     public Task<LadderDto> Ladder() => battles.LadderAsync(User.UserId());
+}
+
+/// <summary>Rejeux partagés : lisibles sans compte, via le code du lien.</summary>
+[ApiController]
+[AllowAnonymous]
+[Route("api/v1/replays")]
+public sealed class ReplaysController(BattleService battles) : ControllerBase
+{
+    [HttpGet("{code}")]
+    public Task<BattleDto> Get(string code) => battles.GetSharedAsync(code);
 }

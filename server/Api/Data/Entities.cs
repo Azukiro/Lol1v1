@@ -270,7 +270,29 @@ public class BattleProfile
     public int Rating { get; set; }
     public int Wins { get; set; }
     public int Losses { get; set; }
+    /// <summary>Saison de la cote ("2026-10") ; une saison passée est archivée puis remise à niveau.</summary>
+    public string SeasonId { get; set; } = "";
+    /// <summary>Meilleure cote de la saison.</summary>
+    public int PeakRating { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>Bilan d'un joueur en fin de saison, avec les reliques versées.</summary>
+public class SeasonResult
+{
+    public Guid UserId { get; set; }
+    public string SeasonId { get; set; } = "";
+    public int Rating { get; set; }
+    public int PeakRating { get; set; }
+    public int Wins { get; set; }
+    public int Losses { get; set; }
+    public int Rank { get; set; }
+    public Api.Domain.Battle.Tier Tier { get; set; }
+    public int RewardStandard { get; set; }
+    public int RewardPremium { get; set; }
+    /// <summary>Bilan déjà montré au joueur.</summary>
+    public bool Seen { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }
 
 /// <summary>Combat asynchrone : roster de l'attaquant contre le roster du défenseur, figé au moment de l'attaque.</summary>
@@ -287,6 +309,8 @@ public class RelicBattle
     public int DefenderRatingAfter { get; set; }
     /// <summary>Essence gagnée par l'attaquant (0 hors victoire ou au-delà du plafond quotidien).</summary>
     public int Essence { get; set; }
+    /// <summary>Code du lien public de rejeu (créé au premier partage).</summary>
+    public string? ShareCode { get; set; }
     /// <summary>Déroulé et bilans (jsonb, <see cref="Api.Domain.Battle.BattleOutcome"/>).</summary>
     public string Result { get; set; } = "{}";
     public DateTimeOffset CreatedAt { get; set; }

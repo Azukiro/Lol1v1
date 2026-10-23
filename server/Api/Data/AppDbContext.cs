@@ -21,6 +21,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<CapsuleDrop> CapsuleDrops => Set<CapsuleDrop>();
     public DbSet<PushSubscriptionEntity> PushSubscriptions => Set<PushSubscriptionEntity>();
     public DbSet<RelicFriend> RelicFriends => Set<RelicFriend>();
+    public DbSet<BattleProfile> BattleProfiles => Set<BattleProfile>();
+    public DbSet<RelicBattle> RelicBattles => Set<RelicBattle>();
 
     /// <summary>Incrémente le jeton de concurrence des portefeuilles modifiés (stock, essence, roster…).</summary>
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
@@ -174,6 +176,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasKey(x => new { x.UserId, x.FriendId });
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<User>().WithMany().HasForeignKey(x => x.FriendId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<BattleProfile>(e =>
+        {
+            e.ToTable("battle_profile", t => t.HasCheckConstraint("ck_battle_profile_counts", "rating >= 0 AND wins >= 0 AND losses >= 0"));
+            e.HasKey(x => x.UserId);
+            e.HasIndex(x => x.Rating);
+            e.HasOne<User>().WithOne().HasForeignKey<BattleProfile>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<RelicBattle>(e =>
+        {
+            e.ToTable("relic_battle", t => t.HasCheckConstraint("ck_relic_battle_not_self", "attacker_id <> defender_id"));
+            e.Property(x => x.Result).HasColumnType("jsonb");
+            e.HasIndex(x => new { x.AttackerId, x.CreatedAt });
+            e.HasIndex(x => new { x.DefenderId, x.CreatedAt });
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.AttackerId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.DefenderId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<PushSubscriptionEntity>(e =>

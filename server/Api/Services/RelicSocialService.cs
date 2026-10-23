@@ -113,7 +113,7 @@ public sealed class RelicSocialService(AppDbContext db)
         return new PlayerCollectionDto(card, items.Select(i => new OwnedItemDto(i.Kind, i.ItemId, i.Count, i.FirstObtainedAt)).ToList());
     }
 
-    private async Task<Dictionary<Guid, PlayerCardDto>> CardsAsync(List<Guid> ids, HashSet<Guid> added)
+    public async Task<Dictionary<Guid, PlayerCardDto>> CardsAsync(List<Guid> ids, HashSet<Guid> added)
     {
         if (ids.Count == 0) return [];
         var users = await db.Users.Include(u => u.RiotAccount).Where(u => ids.Contains(u.Id)).ToListAsync();

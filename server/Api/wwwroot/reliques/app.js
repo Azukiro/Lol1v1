@@ -5,7 +5,7 @@ const CD = 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/
 const RARITIES = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'MYTHIC', 'ULTIMATE', 'EXALTED'];
 const LABEL = { COMMON: 'Commun', RARE: 'Rare', EPIC: 'Épique', LEGENDARY: 'Légendaire', MYTHIC: 'Mythique', ULTIMATE: 'Ultime', EXALTED: 'Exalté' };
 const COLOR = { COMMON: '#8a94a6', RARE: '#19e3ff', EPIC: '#a78bfa', LEGENDARY: '#ff8a3d', MYTHIC: '#ff3366', ULTIMATE: '#ffc94d', EXALTED: '#ffffff' };
-const CATALOG_KEY = 'capsules.catalog.v3';
+const CATALOG_KEY = 'capsules.catalog.v4';
 const rank = (r) => RARITIES.indexOf(r);
 
 const $ = (s, root = document) => root.querySelector(s);
@@ -139,7 +139,7 @@ async function loadCatalog() {
   const cached = JSON.parse(store.get(CATALOG_KEY) || 'null');
   if (cached && Date.now() - cached.at < 6 * 3600e3) { S.cat = indexCatalog(cached.data); return; }
   // Version dans l'URL : le catalogue est aussi en cache HTTP (6 h), un changement de format doit le contourner.
-  const data = await api('/capsules/catalog?v=3', { retry: true });
+  const data = await api('/capsules/catalog?v=4', { retry: true });
   store.set(CATALOG_KEY, JSON.stringify({ at: Date.now(), data }));
   S.cat = indexCatalog(data);
 }
@@ -765,6 +765,396 @@ async function openPlayer(userId) {
   } catch (e) { toast(e.message, true); }
 }
 
+// ---------- Arène : combats roster contre roster ----------
+const CLASS = {
+  ASSASSIN: { label: 'Assassin', color: '#ff3366' },
+  MAGE: { label: 'Mage', color: '#a78bfa' },
+  MARKSMAN: { label: 'Tireur', color: '#ffc94d' },
+  TANK: { label: 'Tank', color: '#3ddc84' },
+  FIGHTER: { label: 'Combattant', color: '#ff8a3d' },
+  SUPPORT: { label: 'Soutien', color: '#19e3ff' },
+};
+const RING = ['ASSASSIN', 'MAGE', 'MARKSMAN', 'TANK', 'FIGHTER', 'SUPPORT'];
+const ROLE_FIT = [['FIGHTER', 'TANK'], ['FIGHTER', 'ASSASSIN', 'TANK'], ['MAGE', 'ASSASSIN'], ['MARKSMAN'], ['SUPPORT', 'TANK']];
+const TUTO_KEY = 'capsules.tuto.arena';
+
+const clsIcon = (c, extra = '') => (CLASS[c]
+  ? `<svg class="cls ${extra}" style="--cc:${CLASS[c].color}" viewBox="0 0 24 24" role="img" aria-label="${CLASS[c].label}"><use href="#cls-${c}"/></svg>` : '');
+const signed = (n) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0');
+const fitLabel = (f) => (f >= 10 ? 'Idéal' : f > 0 ? 'Bon' : f < 0 ? 'Hors poste' : 'Neutre');
+const unitItem = (u) => (S.cat ? item(u.kind, u.itemId) : null);
+const unitImg = (u) => { const it = unitItem(u); return it ? `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt="">` : ''; };
+
+function fmtWait(ms) {
+  const m = Math.ceil(ms / 60000);
+  return m >= 60 ? `dans ${Math.ceil(m / 60)} h` : `dans ${m} min`;
+}
+
+function ago(iso) {
+  const s = (now() - Date.parse(iso)) / 1000;
+  if (s < 60) return 'à l\'instant';
+  if (s < 3600) return `il y a ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `il y a ${Math.floor(s / 3600)} h`;
+  return `il y a ${Math.floor(s / 86400)} j`;
+}
+
+function avatarInner(p) {
+  return `${esc((p.displayName[0] || '?').toUpperCase())}${p.profileIconId ? `<img src="https://ddragon.leagueoflegends.com/cdn/img/profileicon/${+p.profileIconId}.png" alt="">` : ''}`;
+}
+
+const synergyHTML = (list) => `<div class="synergies">${list.length
+  ? list.map((s) => `<span class="syn${s.includes('−') ? ' bad' : ''}">${esc(s)}</span>`).join('')
+  : '<span class="syn none">Aucune synergie</span>'}</div>`;
+
+async function loadArena({ quiet = false } = {}) {
+  try {
+    if (!S.cat) await loadCatalog();
+    S.arena = await api('/capsules/arena', { retry: true });
+    renderArenaBadge();
+    if (S.view !== 'arena') return;
+    renderArenaHead();
+    renderArenaTeam();
+    renderArenaBody();
+  } catch (e) { if (!quiet) toast(e.message, true); }
+}
+
+function renderArenaBadge() {
+  const n = S.arena?.opponents.filter((o) => o.revenge).length || 0;
+  const b = $('#arena-badge'); b.hidden = !n; b.textContent = n;
+}
+
+function renderArenaHead() {
+  const a = S.arena;
+  $('#arena-rating').textContent = a.rating;
+  $('#arena-record').textContent = a.wins + a.losses ? `${a.wins} V · ${a.losses} D` : 'Aucun combat pour l\'instant';
+  $('#arena-rank').textContent = a.rank ? `#${a.rank}` : '—';
+  $('#reward-pips').innerHTML = Array.from({ length: a.rewardedPerDay }, (_, i) => `<i class="${i < a.rewardedToday ? 'on' : ''}${i % 2 ? ' pair' : ''}"></i>`).join('');
+  const left = a.rewardedPerDay - a.rewardedToday;
+  $('#reward-text').innerHTML = left > 0
+    ? `<b>+${a.winEssence}</b> essence par victoire · encore <b>${left}</b> aujourd'hui`
+    : 'Essence du jour empochée · la cote compte toujours';
+}
+
+function unitCell(u) {
+  return `<div class="unit r-${u.rarity}">
+    <div class="unit-art">${unitImg(u)}<span class="role">${ROLES[u.role]}</span><span class="unit-cls">${u.classes.slice(0, 2).map((c) => clsIcon(c)).join('')}</span></div>
+    <b>${esc(u.champion)}</b>
+    <span class="fit ${u.fitPercent > 0 ? 'up' : u.fitPercent < 0 ? 'down' : ''}" title="${fitLabel(u.fitPercent)}">${u.fitPercent ? `${signed(u.fitPercent)} % ${u.fitPercent > 0 ? 'poste' : 'hors poste'}` : 'Neutre'}</span>
+  </div>`;
+}
+
+function renderArenaTeam() {
+  const a = S.arena;
+  const el = $('#arena-team');
+  if (!a.rosterReady) {
+    el.innerHTML = `<div class="team-empty"><b>Ton roster n'est pas complet</b><span>Remplis les 5 postes pour entrer dans l'arène.</span>
+      <button class="btn primary small" data-goto="collection">Compléter mon roster</button></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="section-head"><h2>Ton équipe</h2><span class="power">Puissance <b>${a.team.power}</b></span></div>
+    <div class="units">${a.team.units.map(unitCell).join('')}</div>
+    <div class="team-foot">${synergyHTML(a.team.synergies)}<button class="btn ghost small" data-goto="collection">Modifier</button></div>`;
+}
+
+function renderArenaBody() {
+  const tab = S.arenaTab || 'foes';
+  $$('[data-arena]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.arena === tab)));
+  if (tab === 'foes') renderFoes();
+  else if (tab === 'ladder') renderLadder();
+  else renderHistory();
+}
+
+function foeHTML(o) {
+  const p = o.player;
+  const wait = o.availableAt ? Date.parse(o.availableAt) - now() : 0;
+  const status = o.revenge ? '<span class="cta revenge">Revanche</span>'
+    : wait > 0 ? `<span class="cta wait">${fmtWait(wait)}</span>` : '<span class="cta">Défier</span>';
+  return `<button class="foe${o.revenge ? ' hot' : ''}" data-foe="${p.userId}" type="button">
+    <span class="avatar">${avatarInner(p)}</span>
+    <span class="who"><b>${esc(p.displayName)}</b><span>${o.rating} pts${o.friend ? ' · ami' : ''}</span></span>
+    <span class="mini-roster">${p.roster.map((s) => { const it = s && S.cat && item(s.kind, s.itemId); return it ? `<img loading="lazy" class="r-${it.rarity}" src="${esc(it.art)}" alt="">` : '<i></i>'; }).join('')}</span>
+    ${status}
+  </button>`;
+}
+
+function renderFoes() {
+  const list = S.arena.opponents;
+  $('#arena-body').innerHTML = list.length ? `<div class="foes">${list.map(foeHTML).join('')}</div>`
+    : '<p class="empty-note">Personne à défier pour l\'instant. Ajoute des amis : dès que leur roster est complet, ils apparaissent ici.</p>';
+}
+
+function ladderRow(e) {
+  const mine = e.userId === S.user?.id;
+  return `<div class="lrow${mine ? ' me' : ''}${e.rank <= 3 ? ` podium p${e.rank}` : ''}">
+    <span class="rank">${e.rank}</span><span class="avatar">${avatarInner(e)}</span>
+    <span class="who"><b>${esc(e.displayName)}${mine ? ' (toi)' : ''}</b><span>${e.wins} V · ${e.losses} D</span></span>
+    <b class="pts">${e.rating}</b></div>`;
+}
+
+async function renderLadder() {
+  const body = $('#arena-body');
+  body.innerHTML = '<p class="empty-note">Chargement du classement…</p>';
+  try {
+    const l = await api('/capsules/ladder');
+    if (S.arenaTab !== 'ladder') return;
+    if (!l.top.length) { body.innerHTML = '<p class="empty-note">Le classement est vide : lance le premier combat !</p>'; return; }
+    const meIn = l.me && l.top.some((e) => e.userId === l.me.userId);
+    body.innerHTML = `<div class="ladder">${l.top.map(ladderRow).join('')}${l.me && !meIn ? `<div class="lgap">···</div>${ladderRow(l.me)}` : ''}</div>`;
+  } catch (e) { body.innerHTML = `<p class="empty-note">${esc(e.message)}</p>`; }
+}
+
+async function renderHistory() {
+  const body = $('#arena-body');
+  body.innerHTML = '<p class="empty-note">Chargement…</p>';
+  try {
+    const list = await api('/capsules/battles');
+    if (S.arenaTab !== 'history') return;
+    body.innerHTML = list.length ? `<div class="history">${list.map((h) => `
+      <button class="hrow ${h.won ? 'win' : 'loss'}" data-battle="${h.id}" type="button">
+        <span class="res">${h.won ? 'V' : 'D'}</span>
+        <span class="who"><b>${h.attacked ? 'Attaque' : 'Défense'} · ${esc(h.opponentName)}</b><span>${ago(h.createdAt)}${h.essence ? ` · +${h.essence} essence` : ''}</span></span>
+        <b class="delta ${h.ratingDelta >= 0 ? 'up' : 'down'}">${signed(h.ratingDelta)}</b>
+        <svg class="play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      </button>`).join('')}</div>`
+      : '<p class="empty-note">Aucun combat pour l\'instant. Tes attaques et tes défenses s\'afficheront ici.</p>';
+  } catch (e) { body.innerHTML = `<p class="empty-note">${esc(e.message)}</p>`; }
+}
+
+// Aperçu : vis-à-vis poste par poste, contres et synergies, avant de lancer.
+function muSide(u, right = false) {
+  return `<span class="mu-side${right ? ' right' : ''} r-${u.rarity}">
+    <span class="mu-pic">${unitImg(u)}</span>
+    <span class="mu-txt"><b>${esc(u.champion)}</b>
+      <span>${u.classes.slice(0, 1).map((c) => `${clsIcon(c, 'sm')}${CLASS[c].label}`).join('')}${u.fitPercent ? ` <em class="${u.fitPercent > 0 ? 'up' : 'down'}">${signed(u.fitPercent)} %</em>` : ''}</span>
+    </span></span>`;
+}
+
+function matchupRow(role, a, b) {
+  const c = a.counterPercent;
+  return `<div class="mu ${c > 0 ? 'win' : c < 0 ? 'lose' : ''}">
+    ${muSide(a)}
+    <span class="mu-mid"><span class="role">${role}</span>${c ? `<em>${c > 0 ? 'Contre' : 'Contré'}<br>${signed(c)} %</em>` : '<em class="eq">=</em>'}</span>
+    ${muSide(b, true)}
+  </div>`;
+}
+
+async function openFoe(id) {
+  try {
+    const p = await api(`/capsules/battles/preview/${id}`);
+    const wait = p.availableAt ? Date.parse(p.availableAt) - now() : 0;
+    const diff = p.mine.power - p.theirs.power;
+    openSheet(`<div class="preview">
+      <span class="kicker">Aperçu du combat</span>
+      <h2>Toi contre ${esc(p.opponent.displayName)}</h2>
+      <div class="vs-head">
+        <div><span class="kicker">Ta puissance</span><b>${p.mine.power}</b></div>
+        <span class="vs-badge ${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? 'Favori' : 'Outsider'}</span>
+        <div class="right"><span class="kicker">${p.rating} pts</span><b>${p.theirs.power}</b></div>
+      </div>
+      <div class="matchups">${ROLES.map((r, i) => matchupRow(r, p.mine.units[i], p.theirs.units[i])).join('')}</div>
+      <div class="vs-syn"><div><span class="kicker">Tes bonus</span>${synergyHTML(p.mine.synergies)}</div>
+        <div><span class="kicker">Ses bonus</span>${synergyHTML(p.theirs.synergies)}</div></div>
+      <p class="hint">Astuce : ton roster défend aussi. Le changer pour contrer ce joueur change aussi ta défense.</p>
+      <button class="btn primary big block" id="attack-go" ${wait > 0 ? 'disabled' : ''}>${wait > 0 ? `Attends sa riposte · ${fmtWait(wait)}` : 'Lancer le combat'}</button>
+      <button class="btn ghost block" data-goto="collection">Ajuster mon roster</button>
+    </div>`);
+    $('#attack-go').onclick = () => attack(id);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function attack(id) {
+  const btn = $('#attack-go');
+  btn.disabled = true; btn.textContent = 'Combat en cours…';
+  try {
+    const b = await api('/capsules/battles', { method: 'POST', body: { opponentId: id } });
+    closeSheet();
+    if (b.essence && S.wallet) { S.wallet.essence += b.essence; renderWallet(); saveSnapshot(); }
+    await playBattle(b);
+  } catch (e) { toast(e.message, true); btn.disabled = false; btn.textContent = 'Lancer le combat'; }
+}
+
+async function openBattle(id) {
+  try { await playBattle(await api(`/capsules/battles/${id}`)); } catch (e) { toast(e.message, true); }
+}
+
+// Rejeu : les événements défilent, le score suit ; « Passer » saute à la fin.
+const replay = { skip: false, wake: () => {}, battle: null };
+const bpause = (ms) => (replay.skip ? Promise.resolve() : new Promise((r) => { const t = setTimeout(r, ms); replay.wake = () => { clearTimeout(t); r(); }; }));
+const EV_DELAY = { GANK: 650, FIRST_BLOOD: 1000, KILL: 800, TOWER: 650, OBJECTIVE: 900, FIGHT: 1300, ACE: 900, END: 700 };
+const EV_ICON = { GANK: '#cls-ASSASSIN', FIRST_BLOOD: '#cls-ASSASSIN', KILL: '#cls-FIGHTER', TOWER: '#ico-tower', OBJECTIVE: '#cls-MAGE', FIGHT: '#ico-arena', ACE: '#ico-arena', END: '#capsule-mini-24' };
+
+async function playBattle(b) {
+  replay.battle = b;
+  const mineA = b.attacker.userId === S.user?.id;
+  const me = mineA ? 'A' : 'B';
+  const [mine, theirs] = mineA ? [b.a, b.b] : [b.b, b.a];
+  const [pMe, pThem] = mineA ? [b.attacker, b.defender] : [b.defender, b.attacker];
+  const won = mineA === b.attackerWon;
+  const el = $('#battle');
+  el.hidden = false; el.className = 'battle';
+  $('#b-me-av').innerHTML = avatarInner(pMe); $('#b-them-av').innerHTML = avatarInner(pThem);
+  $('#b-me-name').textContent = mineA ? 'Toi' : 'Toi (défense)'; $('#b-them-name').textContent = pThem.displayName;
+  $('#b-lanes').innerHTML = ROLES.map((r, i) => `<div class="bl">
+      <span class="bu r-${mine.units[i].rarity}">${unitImg(mine.units[i])}<em data-kd="m${i}"></em></span>
+      <span class="bl-mid"><b>${esc(mine.units[i].champion)}</b><span class="role">${r}</span><b>${esc(theirs.units[i].champion)}</b></span>
+      <span class="bu r-${theirs.units[i].rarity}">${unitImg(theirs.units[i])}<em data-kd="t${i}"></em></span></div>`).join('');
+  $('#b-feed').innerHTML = '';
+  $('#b-end').hidden = true;
+  $('#b-skip').hidden = false; $('#b-replay').hidden = true; $('#b-close').hidden = true;
+  const score = (ev) => {
+    const [km, kt, tm, tt, gm, gt] = me === 'A'
+      ? [ev.killsA, ev.killsB, ev.towersA, ev.towersB, ev.goldA, ev.goldB] : [ev.killsB, ev.killsA, ev.towersB, ev.towersA, ev.goldB, ev.goldA];
+    const bump = (sel, v) => { const n = $(sel); if (n.textContent !== String(v)) { n.textContent = v; n.classList.remove('bump'); void n.offsetWidth; n.classList.add('bump'); } };
+    bump('#b-k-me', km); bump('#b-k-them', kt);
+    $('#b-t-me').textContent = tm; $('#b-t-them').textContent = tt;
+    $('#b-g-me').textContent = gm.toFixed(1); $('#b-g-them').textContent = gt.toFixed(1);
+    $('#b-g-fill').style.width = `${gm + gt ? (gm / (gm + gt)) * 100 : 50}%`;
+    $('#b-clock').textContent = `${String(ev.minute).padStart(2, '0')}:00`;
+  };
+  score({ minute: 0, killsA: 0, killsB: 0, towersA: 0, towersB: 0, goldA: 0, goldB: 0 });
+  replay.skip = false;
+  await bpause(500);
+  for (const ev of b.events) {
+    if (el.hidden || replay.battle !== b) return;
+    const mineEv = ev.side === me;
+    score(ev);
+    const li = document.createElement('li');
+    li.className = `ev ${mineEv ? 'me' : 'them'} k-${ev.kind}`;
+    li.innerHTML = `<svg viewBox="0 0 24 24"><use href="${EV_ICON[ev.kind]}"/></svg><span class="t">${ev.minute}'</span><span class="txt">${esc(ev.text)}</span>`;
+    $('#b-feed').prepend(li);
+    if (!replay.skip) {
+      if (ev.kind === 'FIGHT' || ev.kind === 'ACE') { audio.tone(mineEv ? 520 : 180, 0.25, 'sawtooth', 0.08); buzz(mineEv ? [30, 20, 60] : 60); }
+      else if (ev.kind !== 'GANK') audio.tone(mineEv ? 660 : 240, 0.12, 'triangle', 0.1);
+    }
+    await bpause(EV_DELAY[ev.kind] || 700);
+  }
+  if (replay.battle !== b) return;
+  mine.units.forEach((u, i) => { $(`[data-kd="m${i}"]`).textContent = `${u.kills}/${u.deaths}`; });
+  theirs.units.forEach((u, i) => { $(`[data-kd="t${i}"]`).textContent = `${u.kills}/${u.deaths}`; });
+  const mvp = [...mine.units].sort((x, y) => (y.kills * 2 - y.deaths) - (x.kills * 2 - x.deaths))[0];
+  const delta = pMe.ratingAfter - pMe.ratingBefore;
+  $('#b-end').innerHTML = `<div class="end-title">${won ? 'Victoire' : 'Défaite'}</div>
+    <div class="end-chips"><span class="chip ${delta >= 0 ? 'up' : 'down'}">${signed(delta)} pts · ${pMe.ratingAfter}</span>
+      ${mineA && b.essence ? `<span class="chip ess">+${b.essence} essence</span>` : ''}
+      <span class="chip">MVP · ${esc(mvp.champion)}</span></div>
+    ${mineA && won && !b.essence ? '<p class="muted">Essence du jour déjà empochée : la victoire compte pour la cote.</p>' : ''}
+    ${!won ? '<p class="muted">Regarde les vis-à-vis : un contre bien placé change tout.</p>' : ''}`;
+  $('#b-end').hidden = false;
+  el.classList.add(won ? 'won' : 'lost');
+  if (won) { audio.chime(5); buzz([60, 40, 120]); } else { audio.tone(150, 0.6, 'sawtooth', 0.08); buzz(90); }
+  $('#b-skip').hidden = true; $('#b-replay').hidden = false; $('#b-close').hidden = false;
+}
+
+function closeBattle() {
+  $('#battle').hidden = true;
+  replay.battle = null; replay.skip = true; replay.wake();
+  if (S.view === 'arena') loadArena();
+}
+
+// ---------- Tuto (stories) ----------
+const TUTO = [
+  { kicker: 'L\'arène', title: 'Ton roster part au combat', text: 'Tes 5 champions affrontent ceux d\'un autre joueur, poste contre poste. Son roster se défend même quand il dort.', art: () => tutoRoster() },
+  { kicker: 'Règle 1', title: 'Chacun à sa place', text: 'Une classe à l\'aise à son poste prend jusqu\'à +10 %. Hors de son poste : −10 %.', art: () => tutoRoles() },
+  { kicker: 'Règle 2', title: 'Le cycle des contres', text: 'Chaque classe domine les deux suivantes. Contre ton vis-à-vis et prends +12 %.', art: () => tutoRing() },
+  { kicker: 'Règle 3', title: 'Les bonus s\'empilent', text: 'Skins d\'une même gamme, composition équilibrée, rareté : tout ajoute de la puissance.', art: () => tutoSynergy() },
+  { kicker: 'Le match', title: 'Lanes, dragons, teamfights', text: 'Gagner ses lanes rapporte de l\'or. L\'or et les dragons font pencher les teamfights. Le premier à 2 l\'emporte.', art: () => tutoTimeline() },
+  { kicker: 'Récompenses', title: 'Grimpe et remplis ta forge', text: '2 victoires = 1 relique, jusqu\'à 4 victoires payées par jour. Un seul défi par joueur jusqu\'à sa riposte (ou 24 h).', art: () => tutoRewards(), cta: 'Entrer dans l\'arène' },
+];
+const tuto = { i: 0, x: 0 };
+
+function tutoRoster() {
+  const slots = S.arena?.team?.units ?? S.roster.map((s) => s && { kind: s.kind, itemId: s.itemId });
+  const arts = slots.map((s) => s && S.cat && item(s.kind, s.itemId));
+  return `<div class="ta-roster">${ROLES.map((r, i) => `<span class="ta-card${arts[i] ? ` r-${arts[i].rarity}` : ''}" style="--i:${i}">
+    ${arts[i] ? `<img src="${esc(arts[i].art)}" alt="">` : ''}<em>${r}</em></span>`).join('')}</div>
+    <div class="ta-vs">VS</div>`;
+}
+
+function tutoRoles() {
+  return `<div class="ta-roles">${ROLES.map((r, i) => `<div class="ta-role" style="--i:${i}"><b>${r}</b><span>${ROLE_FIT[i].map((c) => `<span class="ta-cls">${clsIcon(c)}${CLASS[c].label}</span>`).join('')}</span></div>`).join('')}</div>`;
+}
+
+function tutoRing() {
+  const pts = RING.map((c, i) => {
+    const a = (i / RING.length) * Math.PI * 2 - Math.PI / 2;
+    return `<span class="ta-node${i === 0 ? ' on' : ''}${i === 1 || i === 2 ? ' prey' : ''}" style="left:${50 + Math.cos(a) * 40}%;top:${50 + Math.sin(a) * 40}%">${clsIcon(c)}<em>${CLASS[c].label}</em></span>`;
+  }).join('');
+  return `<div class="ta-ring"><svg class="ta-orbit" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40"/></svg>${pts}</div>
+    <p class="ta-caption">Assassin bat Mage et Tireur</p>`;
+}
+
+function tutoSynergy() {
+  const rows = [['Gamme ×3', '+6 %', 'var(--violet)'], ['Compo équilibrée', '+5 %', 'var(--green)'], ['Exalté', '+12 %', 'var(--yellow)']];
+  return `<div class="ta-syn">${rows.map(([l, v, c], i) => `<div class="ta-chip" style="--i:${i};--c:${c}"><span>${l}</span><b>${v}</b></div>`).join('')}
+    <div class="ta-power"><span class="kicker">Puissance</span><i><i></i></i></div></div>`;
+}
+
+function tutoTimeline() {
+  const steps = [['3\'', 'Lanes', 'Duels et ganks'], ['12\'', 'Dragons', 'Bonus d\'équipe'], ['20\'', 'Teamfights', 'Premier à 2']];
+  return `<div class="ta-time">${steps.map(([t, l, s], i) => `<div class="ta-step" style="--i:${i}"><span class="dot">${t}</span><b>${l}</b><span>${s}</span></div>`).join('')}</div>`;
+}
+
+function tutoRewards() {
+  return `<div class="ta-rew">
+    <div class="ta-eq"><span class="ta-win">V</span><span class="op">+</span><span class="ta-win">V</span><span class="op">=</span>
+      <svg viewBox="0 0 64 64"><use href="#capsule-mini"/></svg></div>
+    <div class="ta-elo"><span class="kicker">Cote</span><b>1000 → 1016</b></div>
+    <div class="ta-podium"><i style="--h:60%"></i><i style="--h:90%"></i><i style="--h:40%"></i></div></div>`;
+}
+
+function showTuto() {
+  tuto.i = 0;
+  store.set(NEWS_KEY, '1');
+  closeSheet();
+  $('#tuto-track').innerHTML = TUTO.map((t, i) => `<section class="tuto-slide" data-slide="${i}">
+    <div class="tuto-art">${t.art()}</div>
+    <div class="tuto-copy"><span class="kicker">${t.kicker}</span><h2>${t.title}</h2><p>${t.text}</p></div></section>`).join('');
+  $('#tuto-bars').innerHTML = TUTO.map(() => '<i><i></i></i>').join('');
+  $('#tuto').hidden = false;
+  tutoGo(0);
+}
+
+function tutoGo(i) {
+  if (i >= TUTO.length) { closeTuto(); return; }
+  tuto.i = Math.max(0, i);
+  $$('.tuto-slide').forEach((s, k) => { s.classList.toggle('on', k === tuto.i); s.classList.toggle('past', k < tuto.i); });
+  $$('#tuto-bars > i').forEach((b, k) => { b.className = k < tuto.i ? 'done' : k === tuto.i ? 'cur' : ''; });
+  $('#tuto-prev').disabled = tuto.i === 0;
+  $('#tuto-next').textContent = TUTO[tuto.i].cta || 'Suivant';
+  buzz(10);
+}
+
+function closeTuto() {
+  $('#tuto').hidden = true;
+  store.set(TUTO_KEY, '1');
+}
+
+function bindArena() {
+  $$('[data-arena]').forEach((b) => (b.onclick = () => { S.arenaTab = b.dataset.arena; renderArenaBody(); }));
+  $('#tuto-btn').onclick = showTuto;
+  $('#tuto-menu').onclick = () => { $('#menu').hidden = true; showTuto(); };
+  $('#tuto-next').onclick = () => tutoGo(tuto.i + 1);
+  $('#tuto-prev').onclick = () => tutoGo(tuto.i - 1);
+  $('#tuto-x').onclick = closeTuto;
+  // Toucher à droite avance, à gauche recule ; balayage horizontal.
+  const track = $('#tuto-track');
+  track.addEventListener('click', (e) => tutoGo(tuto.i + (e.clientX > innerWidth / 3 ? 1 : -1)));
+  track.addEventListener('touchstart', (e) => { tuto.x = e.touches[0].clientX; }, { passive: true });
+  track.addEventListener('touchend', (e) => {
+    const dx = e.changedTouches[0].clientX - tuto.x;
+    if (Math.abs(dx) > 50) { e.preventDefault(); tutoGo(tuto.i + (dx < 0 ? 1 : -1)); }
+  });
+  addEventListener('keydown', (e) => {
+    if ($('#tuto').hidden) return;
+    if (e.key === 'ArrowRight') tutoGo(tuto.i + 1);
+    else if (e.key === 'ArrowLeft') tutoGo(tuto.i - 1);
+    else if (e.key === 'Escape') closeTuto();
+  });
+  $('#b-skip').onclick = () => { replay.skip = true; replay.wake(); };
+  $('#b-replay').onclick = () => replay.battle && playBattle(replay.battle);
+  $('#b-close').onclick = closeBattle;
+}
+
 // ---------- Navigation ----------
 function setView(v, { friend = false } = {}) {
   // Quitter la collection d'un ami : retour à la sienne.
@@ -773,6 +1163,7 @@ function setView(v, { friend = false } = {}) {
   $('#view-open').hidden = v !== 'open';
   $('#view-collection').hidden = v !== 'collection';
   $('#view-friends').hidden = v !== 'friends';
+  $('#view-arena').hidden = v !== 'arena';
   const tab = friend ? 'friends' : v;
   $$('[data-view]').forEach((b) => (b.dataset.view === tab ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current')));
   if (v === 'collection') {
@@ -782,6 +1173,11 @@ function setView(v, { friend = false } = {}) {
     renderCollection();
   }
   if (v === 'friends') loadFriends();
+  if (v === 'arena') {
+    if (S.arena) { renderArenaHead(); renderArenaTeam(); renderArenaBody(); }
+    // Tuto à la première visite, une fois le roster connu (ses cartes illustrent la première story).
+    loadArena().then(() => { if (!store.get(TUTO_KEY) && S.view === 'arena' && $('#tuto').hidden) showTuto(); });
+  }
   scrollTo({ top: 0 });
 }
 
@@ -800,18 +1196,18 @@ function setupInstall() {
   $('#install-menu').onclick = () => { $('#menu').hidden = true; showInstall(); };
 }
 
-const NEWS_KEY = 'capsules.news.friends-roster';
+const NEWS_KEY = 'capsules.news.arena';
 
 async function maybeShowNews() {
-  if (store.get(NEWS_KEY)) return;
+  if (store.get(NEWS_KEY) || !$('#tuto').hidden) return;
   store.set(NEWS_KEY, '1');
   openSheet(`<div class="news">
     <span class="kicker">Nouveau</span>
-    <h2>Amis et roster</h2>
-    <div class="news-item"><b>Collections de tes amis</b><span>Ajoute un ami avec son Riot ID ou son pseudo, puis explore sa collection et son roster.</span></div>
-    <div class="news-item"><b>Ton roster</b><span>Mets en avant 5 objets de ta collection, un par poste : Top, Jungle, Mid, Bot, Support.</span></div>
-    <button class="btn primary block" data-news-go="collection">Composer mon roster</button>
-    <button class="btn ghost block" data-news-go="friends">Voir mes amis</button>
+    <h2>L'arène est ouverte</h2>
+    <div class="news-item"><b>Ton roster combat</b><span>Défie tes amis et tous les joueurs : tes 5 champions contre les leurs, même s'ils sont hors ligne.</span></div>
+    <div class="news-item"><b>Cote et classement</b><span>Chaque combat fait bouger ta cote. Grimpe dans le classement global.</span></div>
+    <div class="news-item"><b>De l'essence à gagner</b><span>2 victoires = 1 relique, jusqu'à 4 victoires payées par jour.</span></div>
+    <button class="btn primary block" data-news-go="arena">Entrer dans l'arène</button>
   </div>`);
   $$('[data-news-go]').forEach((b) => (b.onclick = () => { closeSheet(); setView(b.dataset.newsGo); }));
   // Le popup d'installation attend la fermeture de celui-ci.
@@ -980,6 +1376,7 @@ async function start() {
     setWallet(state);
     renderAll();
     saveSnapshot();
+    if (S.view !== 'arena') loadArena({ quiet: true });
   } catch (e) {
     toast(e.message, true);
     // Nouvelle tentative au prochain retour sur l'app.
@@ -1030,6 +1427,12 @@ function bind() {
     if (clear) { setSlot(+clear.dataset.pickClear, null); return; }
     const slot = e.target.closest('[data-slot]');
     if (slot) { showSlotPicker(+slot.dataset.slot); return; }
+    const foe = e.target.closest('[data-foe]');
+    if (foe) { openFoe(foe.dataset.foe); return; }
+    const fight = e.target.closest('[data-battle]');
+    if (fight) { openBattle(fight.dataset.battle); return; }
+    const go = e.target.closest('[data-goto]');
+    if (go) { closeSheet(); setView(go.dataset.goto); return; }
     const player = e.target.closest('[data-player]');
     if (player) { openPlayer(player.dataset.player); return; }
     const unfriend = e.target.closest('[data-unfriend]');
@@ -1053,14 +1456,15 @@ function bind() {
     if (await addFriend({ query: input.value })) input.value = '';
   });
   $('#owner-back').onclick = () => setView('friends');
+  bindArena();
   $('#owner-follow').onclick = async () => {
     const p = await addFriend({ userId: S.friend.userId });
     if (p) { S.friend.added = true; $('#owner-follow').hidden = true; }
   };
   $('#sheet').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeSheet(); });
-  addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#tuto').hidden) closeSheet(); });
 
-  $$('.segmented button').forEach((b) => (b.onclick = () => { S.coll.group = b.dataset.group; if (b.dataset.group !== 'rarity') S.coll.rarity = null; syncSegmented(); renderCollection(); }));
+  $$('.coll-controls .segmented button').forEach((b) => (b.onclick = () => { S.coll.group = b.dataset.group; if (b.dataset.group !== 'rarity') S.coll.rarity = null; syncSegmented(); renderCollection(); }));
   let t;
   $('#search').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { S.coll.q = e.target.value; renderCollection(); }, 150); });
   $('#show-missing').addEventListener('change', (e) => { S.coll.missing = e.target.checked; renderCollection(); });
@@ -1089,7 +1493,7 @@ function bind() {
   });
 }
 
-function syncSegmented() { $$('.segmented button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.group === S.coll.group))); }
+function syncSegmented() { $$('.coll-controls .segmented button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.group === S.coll.group))); }
 
 // ---------- Démarrage ----------
 fetch('/health', { cache: 'no-store' }).catch(() => {});
@@ -1098,5 +1502,6 @@ bind();
 setupInstall();
 setInterval(tick, 1000);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
-if (new URLSearchParams(location.search).get('view') === 'collection') S.view = 'collection';
+const startView = new URLSearchParams(location.search).get('view');
+if (startView === 'collection' || startView === 'arena') S.view = startView;
 if (S.token) { start(); setView(S.view); } else showAuth();

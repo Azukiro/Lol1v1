@@ -59,6 +59,40 @@ namespace Api.Data.Migrations
                     b.ToTable("ban", (string)null);
                 });
 
+            modelBuilder.Entity("Api.Data.BattleProfile", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("Losses")
+                        .HasColumnType("integer")
+                        .HasColumnName("losses");
+
+                    b.Property<int>("Rating")
+                        .HasColumnType("integer")
+                        .HasColumnName("rating");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int>("Wins")
+                        .HasColumnType("integer")
+                        .HasColumnName("wins");
+
+                    b.HasKey("UserId")
+                        .HasName("pk_battle_profile");
+
+                    b.HasIndex("Rating")
+                        .HasDatabaseName("ix_battle_profile_rating");
+
+                    b.ToTable("battle_profile", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_battle_profile_counts", "rating >= 0 AND wins >= 0 AND losses >= 0");
+                        });
+                });
+
             modelBuilder.Entity("Api.Data.CapsuleDrop", b =>
                 {
                     b.Property<Guid>("Id")
@@ -379,6 +413,73 @@ namespace Api.Data.Migrations
                         .HasDatabaseName("ix_push_subscription_user_id");
 
                     b.ToTable("push_subscription", (string)null);
+                });
+
+            modelBuilder.Entity("Api.Data.RelicBattle", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AttackerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("attacker_id");
+
+                    b.Property<int>("AttackerRatingAfter")
+                        .HasColumnType("integer")
+                        .HasColumnName("attacker_rating_after");
+
+                    b.Property<int>("AttackerRatingBefore")
+                        .HasColumnType("integer")
+                        .HasColumnName("attacker_rating_before");
+
+                    b.Property<bool>("AttackerWon")
+                        .HasColumnType("boolean")
+                        .HasColumnName("attacker_won");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("DefenderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("defender_id");
+
+                    b.Property<int>("DefenderRatingAfter")
+                        .HasColumnType("integer")
+                        .HasColumnName("defender_rating_after");
+
+                    b.Property<int>("DefenderRatingBefore")
+                        .HasColumnType("integer")
+                        .HasColumnName("defender_rating_before");
+
+                    b.Property<int>("Essence")
+                        .HasColumnType("integer")
+                        .HasColumnName("essence");
+
+                    b.Property<string>("Result")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("result");
+
+                    b.Property<int>("Seed")
+                        .HasColumnType("integer")
+                        .HasColumnName("seed");
+
+                    b.HasKey("Id")
+                        .HasName("pk_relic_battle");
+
+                    b.HasIndex("AttackerId", "CreatedAt")
+                        .HasDatabaseName("ix_relic_battle_attacker_id_created_at");
+
+                    b.HasIndex("DefenderId", "CreatedAt")
+                        .HasDatabaseName("ix_relic_battle_defender_id_created_at");
+
+                    b.ToTable("relic_battle", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_relic_battle_not_self", "attacker_id <> defender_id");
+                        });
                 });
 
             modelBuilder.Entity("Api.Data.RelicFriend", b =>
@@ -848,6 +949,16 @@ namespace Api.Data.Migrations
                         .HasConstraintName("fk_ban_series_series_id");
                 });
 
+            modelBuilder.Entity("Api.Data.BattleProfile", b =>
+                {
+                    b.HasOne("Api.Data.User", null)
+                        .WithOne()
+                        .HasForeignKey("Api.Data.BattleProfile", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_battle_profile_user_user_id");
+                });
+
             modelBuilder.Entity("Api.Data.CapsuleDrop", b =>
                 {
                     b.HasOne("Api.Data.User", null)
@@ -927,6 +1038,23 @@ namespace Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_push_subscription_user_user_id");
+                });
+
+            modelBuilder.Entity("Api.Data.RelicBattle", b =>
+                {
+                    b.HasOne("Api.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("AttackerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_relic_battle_user_attacker_id");
+
+                    b.HasOne("Api.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("DefenderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_relic_battle_user_defender_id");
                 });
 
             modelBuilder.Entity("Api.Data.RelicFriend", b =>

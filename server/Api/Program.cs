@@ -77,6 +77,8 @@ builder.Services.AddSingleton<CapsuleLocks>();
 builder.Services.AddSingleton<PushService>();
 builder.Services.AddScoped<CapsuleService>();
 builder.Services.AddScoped<RelicSocialService>();
+builder.Services.Configure<BattleOptions>(builder.Configuration.GetSection("Battles"));
+builder.Services.AddScoped<BattleService>();
 // Render termine TLS sur son proxy : l'adresse client vient du dernier saut de X-Forwarded-For (non falsifiable par le client).
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
 {

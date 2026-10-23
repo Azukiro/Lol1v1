@@ -155,7 +155,7 @@ public sealed class CapsuleService(
     public CapsuleCatalogDto ToCatalogDto(CapsuleCatalog c)
     {
         return new CapsuleCatalogDto(
-            c.Champions.Select(x => new CatalogChampionDto(x.Id, x.Name, x.Alias)).ToList(),
+            c.Champions.Select(x => new CatalogChampionDto(x.Id, x.Name, x.Alias, x.Roles ?? [])).ToList(),
             c.Skins.Select(x => new CatalogSkinDto(x.Id, x.ChampionId, x.Num, x.Name, x.Rarity, x.Lines, x.Legacy, x.LoadPath)).ToList(),
             c.Lines.Select(x => new CatalogLineDto(x.Id, x.Name)).ToList(),
             Enum.GetValues<CapsuleType>().Select(t =>

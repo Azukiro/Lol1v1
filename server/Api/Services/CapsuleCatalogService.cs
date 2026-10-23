@@ -3,7 +3,8 @@ using Api.Domain.Capsules;
 
 namespace Api.Services;
 
-public sealed record CatalogChampion(int Id, string Name, string Alias);
+/// <summary>Champion tirable ; Roles = classes CommunityDragon (assassin, mage, marksman, tank, fighter, support), principale en premier.</summary>
+public sealed record CatalogChampion(int Id, string Name, string Alias, string[]? Roles = null);
 /// <summary>Skin tirable ; LoadPath = image d'écran de chargement côté CommunityDragon (secours si Data Dragon n'a pas l'image).</summary>
 public sealed record CatalogSkin(int Id, int ChampionId, int Num, string Name, Rarity Rarity, int[] Lines, bool Legacy, string? LoadPath);
 public sealed record CatalogLine(int Id, string Name);
@@ -17,6 +18,12 @@ public sealed class CapsuleCatalog
 
     private ILookup<Rarity, CatalogSkin>? _byRarity;
     public ILookup<Rarity, CatalogSkin> SkinsByRarity => _byRarity ??= Skins.ToLookup(s => s.Rarity);
+
+    private Dictionary<int, CatalogSkin>? _skinById;
+    public IReadOnlyDictionary<int, CatalogSkin> SkinById => _skinById ??= Skins.ToDictionary(s => s.Id);
+
+    private Dictionary<int, CatalogChampion>? _championById;
+    public IReadOnlyDictionary<int, CatalogChampion> ChampionById => _championById ??= Champions.ToDictionary(c => c.Id);
 
     public bool IsEmpty => Champions.Count == 0;
 }
@@ -61,7 +68,9 @@ public sealed class CapsuleCatalogService(IHttpClientFactory httpFactory, IConfi
 
             using var champDoc = JsonDocument.Parse(await http.GetStringAsync($"{baseUrl}/champion-summary.json", ct));
             var champions = champDoc.RootElement.EnumerateArray()
-                .Select(c => new CatalogChampion(c.GetProperty("id").GetInt32(), c.GetProperty("name").GetString()!, c.GetProperty("alias").GetString()!))
+                .Select(c => new CatalogChampion(c.GetProperty("id").GetInt32(), c.GetProperty("name").GetString()!, c.GetProperty("alias").GetString()!,
+                    c.TryGetProperty("roles", out var roles) && roles.ValueKind == JsonValueKind.Array
+                        ? roles.EnumerateArray().Select(r => r.GetString() ?? "").Where(r => r.Length > 0).ToArray() : []))
                 // Ids ≥ 10 000 : variantes de modes temporaires (ex. Jade_*), pas de vrais champions.
                 .Where(c => c.Id is > 0 and < 10_000).OrderBy(c => c.Name).ToList();
             var known = champions.Select(c => c.Id).ToHashSet();

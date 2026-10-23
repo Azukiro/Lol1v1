@@ -262,3 +262,32 @@ public class RelicFriend
     public Guid FriendId { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+/// <summary>Cote de combat d'un joueur (ladder global des reliques).</summary>
+public class BattleProfile
+{
+    public Guid UserId { get; set; }
+    public int Rating { get; set; }
+    public int Wins { get; set; }
+    public int Losses { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>Combat asynchrone : roster de l'attaquant contre le roster du défenseur, figé au moment de l'attaque.</summary>
+public class RelicBattle
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid AttackerId { get; set; }
+    public Guid DefenderId { get; set; }
+    public int Seed { get; set; }
+    public bool AttackerWon { get; set; }
+    public int AttackerRatingBefore { get; set; }
+    public int AttackerRatingAfter { get; set; }
+    public int DefenderRatingBefore { get; set; }
+    public int DefenderRatingAfter { get; set; }
+    /// <summary>Essence gagnée par l'attaquant (0 hors victoire ou au-delà du plafond quotidien).</summary>
+    public int Essence { get; set; }
+    /// <summary>Déroulé et bilans (jsonb, <see cref="Api.Domain.Battle.BattleOutcome"/>).</summary>
+    public string Result { get; set; } = "{}";
+    public DateTimeOffset CreatedAt { get; set; }
+}

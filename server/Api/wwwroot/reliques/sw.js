@@ -1,5 +1,5 @@
 // Service worker des reliques : coquille hors ligne, cache des illustrations, notifications push.
-const SHELL = 'capsules-shell-v2';
+const SHELL = 'capsules-shell-v3';
 const ART = 'capsules-art-v1';
 const SHELL_FILES = ['./', 'index.html', 'app.css', 'app.js', 'icon.svg', 'manifest.webmanifest', 'icons/icon-192.png'];
 const ART_HOSTS = ['ddragon.leagueoflegends.com', 'raw.communitydragon.org'];

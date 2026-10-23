@@ -595,9 +595,9 @@ button.slot:active { transform: scale(.97); }
 .hud-gold { height: 4px; border-radius: 2px; background: var(--pink); overflow: hidden; box-shadow: 0 0 10px rgba(255, 51, 102, .4); }
 .hud-gold i { display: block; height: 100%; width: 50%; background: linear-gradient(90deg, #0fb4cc, var(--cyan)); box-shadow: 0 0 10px var(--cyan); transition: width .6s; }
 
-.stage { position: relative; display: grid; place-items: center; min-height: 0; container-type: size; }
-.stage.shake { animation: map-shake .35s; }
-.stage.shake-hard { animation: map-shake .6s cubic-bezier(.36, .07, .19, .97); }
+.b-stage { position: relative; display: grid; place-items: center; min-height: 0; container-type: size; }
+.b-stage.shake { animation: map-shake .35s; }
+.b-stage.shake-hard { animation: map-shake .6s cubic-bezier(.36, .07, .19, .97); }
 @keyframes map-shake { 10%, 90% { transform: translate(-1px, 1px); } 20%, 80% { transform: translate(3px, -2px); } 30%, 50%, 70% { transform: translate(-5px, 3px) rotate(-.4deg); } 40%, 60% { transform: translate(5px, -3px) rotate(.4deg); } }
 .map { position: relative; width: min(100cqw, 100cqh); height: min(100cqw, 100cqh); border-radius: 18px; overflow: hidden;
   box-shadow: 0 0 0 1px var(--line-2), 0 30px 60px rgba(0, 0, 0, .6), inset 0 0 60px rgba(0, 0, 0, .7); }

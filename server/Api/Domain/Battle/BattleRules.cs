@@ -20,10 +20,15 @@ public sealed record UnitReport(
 
 public sealed record TeamReport(List<UnitReport> Units, List<string> Synergies, int Power);
 
-/// <summary>Événement de la partie, avec le score après l'événement (or en milliers) ; Icon = sort utilisé (talent).</summary>
+/// <summary>
+/// Événement de la partie, avec le score après l'événement (or en milliers). Pour l'animation : Icon = sort utilisé (talent),
+/// Actor = poste de l'auteur (camp Side), Target = poste de la cible (camp adverse), Place = lieu (top, mid, bot, dragon, ancient,
+/// fight-dragon, fight-mid, fight-ancient pour les teamfights, base),
+/// Down = postes adverses éliminés et Lost = postes perdus par le camp Side (teamfight).
+/// </summary>
 public sealed record BattleEvent(
     int Minute, BattleEventKind Kind, BattleSide Side, string Text, int KillsA, int KillsB, int TowersA, int TowersB, double GoldA, double GoldB,
-    string? Icon = null);
+    string? Icon = null, int? Actor = null, int? Target = null, string? Place = null, int[]? Down = null, int[]? Lost = null);
 
 public sealed record BattleOutcome(BattleSide Winner, int Minutes, TeamReport A, TeamReport B, List<BattleEvent> Events);
 
@@ -175,11 +180,16 @@ public static class BattleRules
 
         private bool Wins(double a, double b, double k) => rng.NextDouble() < Math.Pow(a, k) / (Math.Pow(a, k) + Math.Pow(b, k));
 
-        private void Emit(BattleEventKind kind, int side, string text, string? icon = null) =>
-            _events.Add(new BattleEvent(_minute, kind, (BattleSide)side, text, _kills[0], _kills[1], _towers[0], _towers[1], Gold(0), Gold(1), icon));
+        private void Emit(BattleEventKind kind, int side, string text, string? icon = null,
+            int? actor = null, int? target = null, string? place = null, int[]? down = null, int[]? lost = null) =>
+            _events.Add(new BattleEvent(_minute, kind, (BattleSide)side, text, _kills[0], _kills[1], _towers[0], _towers[1], Gold(0), Gold(1),
+                icon, actor, target, place, down, lost));
 
         /// <summary>Événement de talent : « {champion} … {sort} », avec l'icône du sort.</summary>
-        private void EmitTalent(int side, int role, string text) => Emit(BattleEventKind.TALENT, side, text, TalentOf(side, role)?.Icon);
+        private void EmitTalent(int side, int role, string text, int? target = null, string? place = null) =>
+            Emit(BattleEventKind.TALENT, side, text, TalentOf(side, role)?.Icon, role, target, place);
+
+        private static readonly string[] LaneNames = ["top", "mid", "bot"];
 
         private string Spell(int side, int role) => TalentOf(side, role)?.Spell ?? "son ultime";
 
@@ -213,7 +223,7 @@ public static class BattleRules
             }
 
             _minute += rng.Next(2, 4);
-            Objective("le premier dragon", 0.04);
+            Objective("le premier dragon", 0.04, "dragon");
 
             _minute += rng.Next(2, 4);
             for (var lane = 0; lane < 3; lane++)
@@ -221,7 +231,8 @@ public static class BattleRules
                 if (lanesWon[lane] is not { } side) continue;
                 _towers[side]++;
                 var who = lane == 2 ? Bot : lane == 0 ? Top : Mid;
-                Emit(BattleEventKind.TOWER, side, $"{Name(side, who)} fait tomber la première tour du {(lane == 2 ? "bot" : RoleNames[who])}");
+                Emit(BattleEventKind.TOWER, side, $"{Name(side, who)} fait tomber la première tour du {(lane == 2 ? "bot" : RoleNames[who])}",
+                    actor: who, place: LaneNames[lane]);
             }
             for (var side = 0; side < 2; side++)
             {
@@ -229,26 +240,26 @@ public static class BattleRules
                 foreach (var r in With(side, TalentEffect.POKE))
                 {
                     _towers[side]++;
-                    EmitTalent(side, r, $"{Name(side, r)} assiège une tour de plus avec {Spell(side, r)}");
+                    EmitTalent(side, r, $"{Name(side, r)} assiège une tour de plus avec {Spell(side, r)}", place: LaneNames[lanesWon.ToList().IndexOf(side)]);
                 }
             }
 
             _minute += rng.Next(3, 5);
-            Objective("le deuxième dragon", 0.04);
+            Objective("le deuxième dragon", 0.04, "dragon");
 
             var fights = new int[2];
             var fightIndex = 0;
             while (fights[0] < 2 && fights[1] < 2)
             {
                 _minute += rng.Next(3, 6);
-                if (fightIndex == 2) Objective("le gardien ancien", 0.08);
+                if (fightIndex == 2) Objective("le gardien ancien", 0.08, "ancient");
                 var winner = Teamfight(++fightIndex);
                 fights[winner]++;
             }
             var champion = fights[0] == 2 ? 0 : 1;
             _minute += rng.Next(1, 3);
             _towers[champion] += 2;
-            Emit(BattleEventKind.END, champion, "La base adverse tombe : victoire !");
+            Emit(BattleEventKind.END, champion, "La base adverse tombe : victoire !", place: "base");
 
             var final = new TeamReport[2];
             for (var s = 0; s < 2; s++)
@@ -283,7 +294,7 @@ public static class BattleRules
             foreach (var (s, r, _) in roams)
             {
                 power[s] += Power(s, r) * 0.4;
-                EmitTalent(s, r, $"{Name(s, r)} utilise {Spell(s, r)} et rejoint le {label}");
+                EmitTalent(s, r, $"{Name(s, r)} utilise {Spell(s, r)} et rejoint le {label}", place: label);
             }
 
             int? ganker = null;
@@ -293,8 +304,8 @@ public static class BattleRules
                 ganker = Wins(Power(0, Jungle) * (gankTalent[0] ? 1.6 : 1), Power(1, Jungle) * (gankTalent[1] ? 1.6 : 1), 4) ? 0 : 1;
                 var g = ganker.Value;
                 power[g] += Power(g, Jungle) * (roles.Length == 1 ? 0.5 : 0.35) * (gankTalent[g] ? 1.35 : 1);
-                if (gankTalent[g]) EmitTalent(g, Jungle, $"{Name(g, Jungle)} surgit au {label} avec {Spell(g, Jungle)}");
-                else Emit(BattleEventKind.GANK, g, $"{Name(g, Jungle)} gank le {label}");
+                if (gankTalent[g]) EmitTalent(g, Jungle, $"{Name(g, Jungle)} surgit au {label} avec {Spell(g, Jungle)}", place: label);
+                else Emit(BattleEventKind.GANK, g, $"{Name(g, Jungle)} gank le {label}", actor: Jungle, place: label);
             }
 
             var winner = Wins(power[0], power[1], 5) ? 0 : 1;
@@ -306,12 +317,13 @@ public static class BattleRules
             var text = first ? $"Premier sang : {Name(winner, killer)} élimine {Name(1 - winner, victim)} au {label}"
                 : $"{Name(winner, killer)} élimine {Name(1 - winner, victim)} au {label}";
             Emit(first ? BattleEventKind.FIRST_BLOOD : BattleEventKind.KILL, winner,
-                dominance ? $"{text} grâce à {Spell(winner, killer)}" : text, dominance ? TalentOf(winner, killer)?.Icon : null);
+                dominance ? $"{text} grâce à {Spell(winner, killer)}" : text, dominance ? TalentOf(winner, killer)?.Icon : null,
+                actor: killer, target: victim, place: label);
             return winner;
         }
 
         /// <summary>Objectif neutre disputé par la jungle (et le support), avantage d'or compris ; bonus de puissance au vainqueur.</summary>
-        private void Objective(string name, double buff)
+        private void Objective(string name, double buff, string place)
         {
             var p = new double[2];
             for (var s = 0; s < 2; s++)
@@ -320,14 +332,15 @@ public static class BattleRules
             _buff[winner] += buff;
             _objectives[winner]++;
             if (With(winner, TalentEffect.OBJECTIVE).FirstOrDefault(-1) is var r and >= 0)
-                EmitTalent(winner, r, $"{Name(winner, r)} sécurise {name} avec {Spell(winner, r)}");
-            else Emit(BattleEventKind.OBJECTIVE, winner, $"{Name(winner, Jungle)} sécurise {name}");
+                EmitTalent(winner, r, $"{Name(winner, r)} sécurise {name} avec {Spell(winner, r)}", place: place);
+            else Emit(BattleEventKind.OBJECTIVE, winner, $"{Name(winner, Jungle)} sécurise {name}", actor: Jungle, place: place);
         }
 
         /// <summary>Teamfight : la puissance d'équipe pondérée par l'or, les objectifs et les talents décide ; renvoie le camp gagnant.</summary>
         private int Teamfight(int index)
         {
             var down = new[] { new HashSet<int>(), new HashSet<int>() };
+            var place = index switch { 1 => "fight-dragon", 2 => "fight-mid", _ => "fight-ancient" };
 
             // Avant le combat : un adversaire attrapé ne participe pas.
             for (var s = 0; s < 2; s++)
@@ -336,7 +349,7 @@ public static class BattleRules
                 var victim = rng.Next(TeamSize);
                 if (!down[1 - s].Add(victim)) continue;
                 Kill(s, r, victim);
-                EmitTalent(s, r, $"{Name(s, r)} attrape {Name(1 - s, victim)} avec {Spell(s, r)}");
+                EmitTalent(s, r, $"{Name(s, r)} attrape {Name(1 - s, victim)} avec {Spell(s, r)}", victim, place);
             }
             var mult = new[] { 1.0, 1.0 };
             for (var s = 0; s < 2; s++)
@@ -345,7 +358,7 @@ public static class BattleRules
                     foreach (var r in With(s, TalentEffect.ENGAGE))
                     {
                         mult[s] *= 1.10;
-                        EmitTalent(s, r, $"{Name(s, r)} engage avec {Spell(s, r)}");
+                        EmitTalent(s, r, $"{Name(s, r)} engage avec {Spell(s, r)}", place: place);
                     }
                 mult[s] *= Math.Pow(1.05, With(s, TalentEffect.TEAMFIGHT).Count())
                     * Math.Pow(1.03, With(s, TalentEffect.PROTECT).Count())
@@ -369,7 +382,7 @@ public static class BattleRules
             {
                 _revived[1 - winner] = true;
                 winner = 1 - winner;
-                EmitTalent(winner, rv, $"{Name(winner, rv)} : {Spell(winner, rv)} ! Le combat bascule");
+                EmitTalent(winner, rv, $"{Name(winner, rv)} : {Spell(winner, rv)} ! Le combat bascule", place: place);
             }
             var loser = 1 - winner;
 
@@ -378,21 +391,23 @@ public static class BattleRules
             winKills = Math.Max(1, winKills);
             var loseKills = Math.Max(0, rng.Next(0, Math.Min(3, winKills)) - With(winner, TalentEffect.PROTECT).Count());
             var victims = alive.OrderBy(_ => rng.Next()).Take(winKills).ToList();
+            var fallen = Enumerable.Range(0, TeamSize).Where(r => !down[winner].Contains(r)).OrderBy(_ => rng.Next()).Take(loseKills).ToList();
             Skirmish(winner, victims.Take(winKills - Bonus(winner, victims)).ToList());
-            Skirmish(loser, Enumerable.Range(0, TeamSize).Where(r => !down[winner].Contains(r)).OrderBy(_ => rng.Next()).Take(loseKills).ToList());
+            Skirmish(loser, fallen);
             var ace = down[loser].Count + winKills >= TeamSize;
             _towers[winner] += ace ? 2 : 1;
-            Emit(BattleEventKind.FIGHT, winner, $"Teamfight {index} remporté {winKills} à {loseKills}, la tour suivante tombe");
+            Emit(BattleEventKind.FIGHT, winner, $"Teamfight {index} remporté {winKills} à {loseKills}, la tour suivante tombe",
+                place: place, down: [.. victims], lost: [.. fallen]);
             CreditBonusKills(winner, victims);
             foreach (var r in With(winner, TalentEffect.PROTECT).Take(1))
-                EmitTalent(winner, r, $"{Name(winner, r)} protège un allié avec {Spell(winner, r)}");
-            if (ace) Emit(BattleEventKind.ACE, winner, "ACE : toute l'équipe adverse est à terre");
+                EmitTalent(winner, r, $"{Name(winner, r)} protège un allié avec {Spell(winner, r)}", place: place);
+            if (ace) Emit(BattleEventKind.ACE, winner, "ACE : toute l'équipe adverse est à terre", place: place);
 
             for (var s = 0; s < 2; s++)
                 foreach (var r in With(s, TalentEffect.SPLITPUSH))
                 {
                     _towers[s]++;
-                    EmitTalent(s, r, $"{Name(s, r)} fait tomber une tour en side lane avec {Spell(s, r)}");
+                    EmitTalent(s, r, $"{Name(s, r)} fait tomber une tour en side lane avec {Spell(s, r)}", place: r == Bot || r == Support ? "bot" : "top");
                 }
             _lastFightWinner = winner;
             return winner;
@@ -412,7 +427,7 @@ public static class BattleRules
                 Kill(side, r, victim);
                 EmitTalent(side, r, Has(side, r, TalentEffect.EXECUTE)
                     ? $"{Name(side, r)} achève {Name(1 - side, victim)} avec {Spell(side, r)}"
-                    : $"{Name(side, r)} enchaîne sur {Name(1 - side, victim)} avec {Spell(side, r)}");
+                    : $"{Name(side, r)} enchaîne sur {Name(1 - side, victim)} avec {Spell(side, r)}", victim);
             }
         }
 

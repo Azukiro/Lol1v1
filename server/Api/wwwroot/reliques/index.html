@@ -226,25 +226,50 @@
     </div>
   </div>
 
-  <!-- Combat rejoué -->
+  <!-- Combat rejoué : carte animée façon jeu -->
   <div id="battle" class="battle" hidden role="dialog" aria-modal="true" aria-label="Combat">
-    <div class="battle-score">
-      <div class="side me"><span class="avatar" id="b-me-av"></span><b id="b-me-name"></b></div>
-      <div class="score">
-        <div class="kills"><b id="b-k-me">0</b><span>–</span><b id="b-k-them">0</b></div>
-        <div class="clock" id="b-clock">00:00</div>
+    <div class="hud">
+      <div class="hud-side me"><span class="avatar" id="b-me-av"></span><div><b id="b-me-name"></b><span><svg viewBox="0 0 24 24"><use href="#ico-tower"/></svg><i id="b-t-me">0</i> · <i id="b-g-me">0</i>k</span></div></div>
+      <div class="hud-score"><b id="b-k-me">0</b><span class="clock" id="b-clock">00:00</span><b id="b-k-them">0</b></div>
+      <div class="hud-side them"><div><b id="b-them-name"></b><span><i id="b-g-them">0</i>k · <i id="b-t-them">0</i><svg viewBox="0 0 24 24"><use href="#ico-tower"/></svg></span></div><span class="avatar" id="b-them-av"></span></div>
+    </div>
+    <div class="hud-gold"><i id="b-g-fill"></i></div>
+
+    <div class="stage" id="b-stage">
+      <div class="map" id="b-map">
+        <svg class="map-bg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <radialGradient id="map-glow-me" cx=".1" cy=".9" r=".45"><stop offset="0" stop-color="#19e3ff" stop-opacity=".28"/><stop offset="1" stop-color="#19e3ff" stop-opacity="0"/></radialGradient>
+            <radialGradient id="map-glow-them" cx=".9" cy=".1" r=".45"><stop offset="0" stop-color="#ff3366" stop-opacity=".28"/><stop offset="1" stop-color="#ff3366" stop-opacity="0"/></radialGradient>
+            <pattern id="map-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M5 0H0V5" fill="none" stroke="#ffffff" stroke-opacity=".035" stroke-width=".3"/></pattern>
+          </defs>
+          <rect width="100" height="100" fill="#0c1a1c"/>
+          <rect width="100" height="100" fill="url(#map-grid)"/>
+          <rect width="100" height="100" fill="url(#map-glow-me)"/>
+          <rect width="100" height="100" fill="url(#map-glow-them)"/>
+          <path class="river" d="M2 2 L98 98"/>
+          <path class="lane" d="M9 90 L9 9 L90 9"/>
+          <path class="lane" d="M12 88 L88 12"/>
+          <path class="lane" d="M10 91 L91 91 L91 10"/>
+          <circle class="pit" cx="66" cy="66" r="5"/>
+          <circle class="pit" cx="34" cy="34" r="5"/>
+          <circle class="base me" cx="10" cy="90" r="9"/>
+          <circle class="base them" cx="90" cy="10" r="9"/>
+        </svg>
+        <div class="pit-icon dragon" id="b-dragon"><svg viewBox="0 0 24 24"><path d="M12 2c2 3 6 4 8 3-1 3-3 4-3 6 2 0 3 1 4 2-3 1-5 0-6 0 0 3-2 6-3 9-1-3-3-6-3-9-1 0-3 1-6 0 1-1 2-2 4-2 0-2-2-3-3-6 2 1 6 0 8-3z"/></svg></div>
+        <div class="pit-icon ancient" id="b-ancient"><svg viewBox="0 0 24 24"><path d="M12 2 15 9l7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z"/></svg></div>
+        <div class="map-layer" id="b-towers"></div>
+        <div class="map-layer" id="b-tokens"></div>
+        <canvas class="map-fx" id="b-fx"></canvas>
       </div>
-      <div class="side them"><b id="b-them-name"></b><span class="avatar" id="b-them-av"></span></div>
+      <div class="callout" id="b-callout" hidden></div>
+      <div class="announce" id="b-announce" hidden></div>
     </div>
-    <div class="battle-stats">
-      <span><svg viewBox="0 0 24 24"><use href="#ico-tower"/></svg><b id="b-t-me">0</b></span>
-      <span class="gold"><b id="b-g-me">0</b>k <i class="goldbar"><i id="b-g-fill"></i></i> <b id="b-g-them">0</b>k</span>
-      <span><b id="b-t-them">0</b><svg viewBox="0 0 24 24"><use href="#ico-tower"/></svg></span>
-    </div>
-    <div class="battle-lanes" id="b-lanes"></div>
-    <ol class="battle-feed" id="b-feed" aria-live="polite"></ol>
-    <div class="battle-end" id="b-end" hidden></div>
+
+    <ol class="killfeed" id="b-feed" aria-live="polite"></ol>
+    <div class="postgame" id="b-end" hidden></div>
     <div class="battle-actions">
+      <button class="btn ghost small" id="b-speed" aria-label="Vitesse">×1</button>
       <button class="btn ghost" id="b-skip">Passer</button>
       <button class="btn ghost" id="b-replay" hidden>Revoir</button>
       <button class="btn ghost" id="b-share" hidden>Partager</button>

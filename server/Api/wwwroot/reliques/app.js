@@ -1016,90 +1016,429 @@ async function openBattle(id) {
   try { await playBattle(await api(`/capsules/battles/${id}`)); } catch (e) { toast(e.message, true); }
 }
 
-// Rejeu : les événements défilent, le score suit ; « Passer » saute à la fin.
-const replay = { skip: false, wake: () => {}, battle: null };
-const bpause = (ms) => (replay.skip ? Promise.resolve() : new Promise((r) => { const t = setTimeout(r, ms); replay.wake = () => { clearTimeout(t); r(); }; }));
-const EV_DELAY = { GANK: 650, FIRST_BLOOD: 1000, KILL: 800, TOWER: 650, OBJECTIVE: 900, FIGHT: 1300, ACE: 900, END: 700, TALENT: 1050 };
-const EV_ICON = { GANK: '#cls-ASSASSIN', FIRST_BLOOD: '#cls-ASSASSIN', KILL: '#cls-FIGHTER', TOWER: '#ico-tower', OBJECTIVE: '#cls-MAGE', FIGHT: '#ico-arena', ACE: '#ico-arena', END: '#capsule-mini-24' };
+// Rejeu animé : carte vue de dessus, jetons des champions, effets et annonces façon jeu ; « Passer » saute à la fin.
+const replay = { skip: false, wake: () => {}, battle: null, speed: 1, spectator: false };
+const bpause = (ms) => (replay.skip ? Promise.resolve() : new Promise((r) => { const t = setTimeout(r, ms / replay.speed); replay.wake = () => { clearTimeout(t); r(); }; }));
+
+// Coordonnées en % de la carte pour le camp « me » (base en bas à gauche) ; le camp adverse est le miroir (x, y) → (y, x).
+const MAP = {
+  base: [10, 90],
+  fountain: [[8, 86], [12, 86], [10, 90], [14, 90], [10, 94]],
+  rest: [[9, 32], [28, 66], [40, 60], [70, 91], [64, 88]],
+  duel: { top: { 0: [9, 17] }, mid: { 2: [45, 55] }, bot: { 3: [82, 91], 4: [77, 87] } },
+  gank: { top: [12, 24], mid: [41, 52], bot: [73, 89] },
+  pit: { dragon: [66, 66], ancient: [34, 34] },
+  pitSide: { dragon: [[0, 0], [61, 71], [0, 0], [0, 0], [57, 74]], ancient: [[0, 0], [29, 39], [0, 0], [0, 0], [25, 42]] },
+  fight: { 'fight-dragon': [66, 66], 'fight-mid': [50, 50], 'fight-ancient': [34, 34] },
+  cluster: [[-7, 3], [-3, 7], [-10, 9], [-5, 12], [-12, 14]],
+  siege: [[-14, 4], [-10, 9], [-6, 13], [-17, 10], [-12, 16]],
+  towers: [['top', [9, 36]], ['top', [9, 60]], ['mid', [38, 62]], ['mid', [26, 74]], ['bot', [64, 91]], ['bot', [40, 91]]],
+  nexus: [16, 84],
+};
+const LANE_OF_ROLE = ['top', null, 'mid', 'bot', 'bot'];
+const mirror = ([x, y]) => [y, x];
+const P = (k, pt) => (k === 'me' ? pt : mirror(pt));
+const add = ([x, y], [dx, dy]) => [x + dx, y + dy];
+const champIcon = (u) => `${CD}v1/champion-icons/${u.kind === 'CHAMPION' ? u.itemId : Math.floor(u.itemId / 1000)}.png`;
+
+// Particules de la carte (étincelles, ondes de choc, traits, débris).
+const bfx = {
+  c: null, ctx: null, parts: [], raf: 0, w: 0, h: 0,
+  fit() {
+    this.c = $('#b-fx'); this.ctx = this.c.getContext('2d');
+    const r = $('#b-map').getBoundingClientRect(); const d = devicePixelRatio || 1;
+    this.w = r.width; this.h = r.height; this.c.width = r.width * d; this.c.height = r.height * d; this.ctx.setTransform(d, 0, 0, d, 0, 0);
+  },
+  px([x, y]) { return [(x / 100) * this.w, (y / 100) * this.h]; },
+  burst(pt, color, n = 26, power = 1) {
+    if (replay.skip) return;
+    const [x, y] = this.px(pt);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2; const v = (1 + Math.random() * 3.5) * power;
+      this.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1, decay: 0.02 + Math.random() * 0.03, size: 1 + Math.random() * 2.4, color: Math.random() < 0.3 ? '#fff' : color });
+    }
+    this.parts.push({ ring: true, x, y, r: 4, life: 1, color, power });
+    this.run();
+  },
+  slash(a, b, color) {
+    if (replay.skip) return;
+    const [x1, y1] = this.px(a); const [x2, y2] = this.px(b);
+    this.parts.push({ line: true, x1, y1, x2, y2, life: 1, color });
+    this.run();
+  },
+  debris(pt, color) {
+    if (replay.skip) return;
+    const [x, y] = this.px(pt);
+    for (let i = 0; i < 22; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.4; const v = 1 + Math.random() * 3;
+      this.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, g: 0.12, life: 1, decay: 0.018, size: 1.5 + Math.random() * 2.5, color: Math.random() < 0.5 ? '#8a94a6' : color, square: true });
+    }
+    this.run();
+  },
+  run() { if (!this.raf) this.raf = requestAnimationFrame(() => this.loop()); },
+  loop() {
+    const { ctx } = this;
+    ctx.clearRect(0, 0, this.w, this.h);
+    ctx.globalCompositeOperation = 'lighter';
+    this.parts = this.parts.filter((p) => p.life > 0);
+    for (const p of this.parts) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      if (p.ring) {
+        p.r += 2.2 * p.power; p.life -= 0.04;
+        ctx.strokeStyle = p.color; ctx.lineWidth = 1 + 3 * p.life;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke();
+      } else if (p.line) {
+        p.life -= 0.06;
+        ctx.strokeStyle = p.color; ctx.lineWidth = 1 + 4 * p.life; ctx.shadowColor = p.color; ctx.shadowBlur = 12;
+        ctx.beginPath(); ctx.moveTo(p.x1, p.y1); ctx.lineTo(p.x2, p.y2); ctx.stroke(); ctx.shadowBlur = 0;
+      } else {
+        p.vx *= 0.95; p.vy = p.vy * 0.95 + (p.g || 0); p.x += p.vx; p.y += p.vy; p.life -= p.decay;
+        ctx.fillStyle = p.color;
+        if (p.square) ctx.fillRect(p.x, p.y, p.size, p.size);
+        else { ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.4 + p.life), 0, Math.PI * 2); ctx.fill(); }
+      }
+    }
+    ctx.globalAlpha = 1;
+    this.raf = this.parts.length ? requestAnimationFrame(() => this.loop()) : 0;
+    if (!this.raf) ctx.clearRect(0, 0, this.w, this.h);
+  },
+};
+
+const TEAM_COLOR = { me: '#19e3ff', them: '#ff3366' };
+const R = {};
+
+function token(k, role) { return R.tok[k][role]; }
+function at(k, role) { return R.pos[k][role]; }
+function move(k, role, pt) {
+  R.pos[k][role] = pt;
+  const el = token(k, role);
+  el.style.left = `${pt[0]}%`; el.style.top = `${pt[1]}%`;
+}
+function die(k, role, color) {
+  if (!R.alive[k][role]) return;
+  R.alive[k][role] = false;
+  token(k, role).classList.add('dead');
+  bfx.burst(at(k, role), color || TEAM_COLOR[k === 'me' ? 'them' : 'me'], 30, 1.1);
+}
+function revive(k, role, pt) {
+  if (R.alive[k][role]) return;
+  R.alive[k][role] = true;
+  const el = token(k, role);
+  el.classList.remove('dead');
+  move(k, role, P(k, MAP.fountain[role]));
+  if (pt) setTimeout(() => move(k, role, pt), 60);
+}
+function reviveAll(toRest = true) {
+  for (const k of ['me', 'them']) for (let r = 0; r < 5; r++) revive(k, r, toRest ? P(k, MAP.rest[r]) : null);
+}
+function pulse(k, role, cls = 'cast') {
+  const el = token(k, role); el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+}
+function shake(strong = false) {
+  if (replay.skip) return;
+  const s = $('#b-stage'); s.classList.remove('shake', 'shake-hard'); void s.offsetWidth; s.classList.add(strong ? 'shake-hard' : 'shake');
+}
+
+function announce(title, sub = '', tone = 'me', ms = 1400) {
+  if (replay.skip) return;
+  const el = $('#b-announce');
+  el.className = `announce ${tone}`; el.innerHTML = `<b>${esc(title)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}`;
+  el.hidden = false; void el.offsetWidth; el.classList.add('go');
+  clearTimeout(R.announceT); R.announceT = setTimeout(() => { el.hidden = true; }, ms / replay.speed);
+}
+
+function callout(k, role, ev) {
+  if (replay.skip) return;
+  const u = R.units[k][role];
+  const el = $('#b-callout');
+  el.className = `callout ${k}`;
+  el.innerHTML = `<span class="co-ico">${ev.icon ? `<img src="${esc(ev.icon)}" alt="">` : ''}</span>
+    <span class="co-txt"><em>${esc(u.champion)}</em><b>${esc(u.talent?.spell || 'Talent')}</b></span>`;
+  el.hidden = false; void el.offsetWidth; el.classList.add('go');
+  clearTimeout(R.calloutT); R.calloutT = setTimeout(() => { el.hidden = true; }, 1300 / replay.speed);
+}
+
+function feed(html, k) {
+  const li = document.createElement('li');
+  li.className = `kf ${k}`; li.innerHTML = html;
+  const list = $('#b-feed'); list.prepend(li);
+  while (list.children.length > 4) list.lastChild.remove();
+}
+const face = (k, role) => `<img class="kf-face ${k}" src="${esc(champIcon(R.units[k][role]))}" alt="">`;
+const KF_ICON = {
+  kill: '<svg viewBox="0 0 24 24"><use href="#cls-FIGHTER"/></svg>', tower: '<svg viewBox="0 0 24 24"><use href="#ico-tower"/></svg>',
+  dragon: '<svg viewBox="0 0 24 24"><use href="#cls-MAGE"/></svg>', fight: '<svg viewBox="0 0 24 24"><use href="#ico-arena"/></svg>',
+};
+
+/** Fait tomber les tours gagnées depuis l'événement précédent, de préférence dans la lane indiquée ; nexus à la fin. */
+function updateTowers(ev, prev) {
+  for (const side of ['A', 'B']) {
+    const now = side === 'A' ? ev.towersA : ev.towersB;
+    const before = side === 'A' ? prev.towersA : prev.towersB;
+    const victim = (side === R.me) ? 'them' : 'me';
+    for (let i = 0; i < now - before; i++) {
+      const lane = ['top', 'mid', 'bot'].includes(ev.place) ? ev.place : null;
+      const list = R.towers[victim];
+      const t = list.find((x) => !x.down && x.lane === lane) || list.find((x) => !x.down);
+      if (!t) break;
+      t.down = true; t.el.classList.add('down');
+      bfx.debris(t.pt, TEAM_COLOR[victim]);
+      if (!replay.skip) audio.tone(120, 0.3, 'square', 0.05);
+    }
+  }
+}
+
+function scoreboard(ev) {
+  const [km, kt, tm, tt, gm, gt] = R.me === 'A'
+    ? [ev.killsA, ev.killsB, ev.towersA, ev.towersB, ev.goldA, ev.goldB] : [ev.killsB, ev.killsA, ev.towersB, ev.towersA, ev.goldB, ev.goldA];
+  const bump = (sel, v) => { const n = $(sel); if (n.textContent !== String(v)) { n.textContent = v; n.classList.remove('bump'); void n.offsetWidth; n.classList.add('bump'); } };
+  bump('#b-k-me', km); bump('#b-k-them', kt);
+  $('#b-t-me').textContent = tm; $('#b-t-them').textContent = tt;
+  $('#b-g-me').textContent = gm.toFixed(1); $('#b-g-them').textContent = gt.toFixed(1);
+  $('#b-g-fill').style.width = `${gm + gt ? (gm / (gm + gt)) * 100 : 50}%`;
+  $('#b-clock').textContent = `${String(ev.minute).padStart(2, '0')}:00`;
+}
+
+/** Les deux équipes se regroupent autour du lieu du teamfight. */
+async function enterFight(place) {
+  R.fight = place;
+  reviveAll(false);
+  const c = MAP.fight[place] || [50, 50];
+  for (const k of ['me', 'them']) for (let r = 0; r < 5; r++) {
+    const off = MAP.cluster[r];
+    move(k, r, P(k, add(c, off)));
+  }
+  await bpause(800);
+}
+
+async function stepEvent(ev, prev) {
+  const k = ev.side === R.me ? 'me' : 'them';
+  const o = k === 'me' ? 'them' : 'me';
+  const place = ev.place;
+  const color = TEAM_COLOR[k];
+  const viewerWins = k === 'me';
+
+  if (place?.startsWith('fight-')) { if (R.fight !== place) await enterFight(place); }
+  else if (place) {
+    if (R.fight) R.fight = null;
+    reviveAll(true);
+  }
+
+  switch (ev.kind) {
+    case 'GANK':
+      if (ev.actor != null && MAP.gank[place]) { move(k, ev.actor, P(k, MAP.gank[place])); pulse(k, ev.actor, 'dash'); }
+      await bpause(650);
+      break;
+    case 'KILL':
+    case 'FIRST_BLOOD': {
+      if (ev.actor == null) { await bpause(700); break; }
+      const duel = MAP.duel[place] || {};
+      for (const [role, pt] of Object.entries(duel)) { move('me', +role, pt); move('them', +role, mirror(pt)); }
+      await bpause(500);
+      const target = at(o, ev.target);
+      const from = at(k, ev.actor);
+      move(k, ev.actor, [from[0] + (target[0] - from[0]) * 0.6, from[1] + (target[1] - from[1]) * 0.6]);
+      pulse(k, ev.actor, 'dash');
+      await bpause(220);
+      bfx.slash(at(k, ev.actor), target, color);
+      die(o, ev.target, color);
+      shake();
+      if (!replay.skip) { audio.tone(viewerWins ? 700 : 220, 0.14, 'sawtooth', 0.08); buzz(30); }
+      feed(`${face(k, ev.actor)}${ev.icon ? `<img class="kf-spell" src="${esc(ev.icon)}" alt="">` : KF_ICON.kill}${face(o, ev.target)}`, k);
+      if (ev.kind === 'FIRST_BLOOD') announce('Premier sang', R.units[k][ev.actor].champion, k, 1500);
+      await bpause(900);
+      break;
+    }
+    case 'TALENT': {
+      const actor = ev.actor;
+      if (actor == null) { await bpause(800); break; }
+      callout(k, actor, ev);
+      pulse(k, actor, 'cast');
+      bfx.burst(at(k, actor), '#ffc94d', 18, 0.7);
+      if (!replay.skip) { audio.tone(880, 0.16, 'sine', 0.09); audio.tone(1320, 0.22, 'sine', 0.06, 0.08); }
+      if (ev.target != null) {
+        await bpause(350);
+        bfx.slash(at(k, actor), at(o, ev.target), '#ffc94d');
+        die(o, ev.target, '#ffc94d');
+        feed(`${face(k, actor)}<img class="kf-spell" src="${esc(ev.icon || '')}" alt="">${face(o, ev.target)}`, k);
+      } else if (MAP.gank[place]) {
+        move(k, actor, P(k, MAP.gank[place]));
+        feed(`${face(k, actor)}<img class="kf-spell" src="${esc(ev.icon || '')}" alt=""><span class="kf-txt">${esc(place)}</span>`, k);
+      } else if (MAP.pit[place]) {
+        await objective(k, place, actor, ev);
+        break;
+      } else {
+        feed(`${face(k, actor)}<img class="kf-spell" src="${esc(ev.icon || '')}" alt=""><span class="kf-txt">${esc(R.units[k][actor].talent?.spell || '')}</span>`, k);
+      }
+      await bpause(1100);
+      break;
+    }
+    case 'OBJECTIVE':
+      await objective(k, place, ev.actor ?? 1, ev);
+      break;
+    case 'TOWER':
+      if (ev.actor != null && MAP.gank[place]) move(k, ev.actor, P(k, MAP.gank[place]));
+      feed(`${face(k, ev.actor ?? 0)}${KF_ICON.tower}<span class="kf-txt">${esc(place || '')}</span>`, k);
+      await bpause(250);
+      break;
+    case 'FIGHT': {
+      if (!replay.skip) { audio.burst(2); buzz([40, 30, 80]); }
+      for (let i = 0; i < 3; i++) {
+        const a = R.alive.me.findIndex(Boolean); const b = R.alive.them.findIndex(Boolean);
+        if (a >= 0 && b >= 0) bfx.slash(at('me', a), at('them', b), i % 2 ? TEAM_COLOR.them : TEAM_COLOR.me);
+        bfx.burst(MAP.fight[place] || [50, 50], i % 2 ? TEAM_COLOR.them : TEAM_COLOR.me, 20, 1.3);
+        shake(i === 2);
+        await bpause(240);
+      }
+      for (const r of ev.down || []) { die(o, r, color); await bpause(170); }
+      for (const r of ev.lost || []) { die(k, r, TEAM_COLOR[o]); await bpause(170); }
+      const won = (ev.down || []).length;
+      announce(viewerWins ? 'Teamfight gagné' : 'Teamfight perdu', `${won} à ${(ev.lost || []).length}`, k, 1500);
+      feed(`${KF_ICON.fight}<span class="kf-txt">Teamfight ${won}–${(ev.lost || []).length}</span>`, k);
+      await bpause(1300);
+      break;
+    }
+    case 'ACE':
+      announce('Ace', viewerWins ? 'Toute l\'équipe adverse est à terre' : 'Toute ton équipe est à terre', k, 1500);
+      shake(true);
+      if (!replay.skip) audio.burst(3);
+      await bpause(1200);
+      break;
+    case 'END': {
+      R.fight = null;
+      reviveAll(false);
+      const enemyBase = P(o, MAP.base);
+      for (let r = 0; r < 5; r++) if (R.alive[k][r]) move(k, r, P(k, add(mirror(MAP.base), MAP.siege[r])));
+      await bpause(900);
+      R.nexus[o].classList.add('down');
+      bfx.burst(enemyBase, TEAM_COLOR[o], 90, 2.2);
+      bfx.debris(enemyBase, TEAM_COLOR[o]);
+      shake(true);
+      if (!replay.skip) { audio.burst(5); buzz([80, 40, 160]); }
+      await bpause(900);
+      break;
+    }
+    default:
+      await bpause(600);
+  }
+  updateTowers(ev, prev);
+  scoreboard(ev);
+}
+
+/** Objectif neutre : les deux jungles (et supports) se ruent sur la fosse, le vainqueur l'emporte. */
+async function objective(k, place, actor, ev) {
+  const pit = MAP.pit[place] || MAP.pit.dragon;
+  const sides = MAP.pitSide[place] || MAP.pitSide.dragon;
+  for (const side of ['me', 'them']) for (const r of [1, 4]) move(side, r, P(side, sides[r]));
+  const icon = $(place === 'ancient' ? '#b-ancient' : '#b-dragon');
+  icon.classList.remove('taken', 'me', 'them'); icon.classList.add('contest');
+  await bpause(700);
+  if (actor !== 1 && actor !== 4) move(k, actor, add(P(k, sides[1]), [2, -2]));
+  bfx.burst(pit, TEAM_COLOR[k], 50, 1.6);
+  icon.classList.remove('contest'); icon.classList.add('taken', k);
+  shake();
+  if (!replay.skip) audio.chime(3);
+  if (ev.kind === 'TALENT') callout(k, actor, ev);
+  announce(place === 'ancient' ? 'Gardien ancien' : 'Dragon', `${R.units[k][actor].champion} · ${k === 'me' ? (R.spectatorNames ? R.spectatorNames.me : 'ton équipe') : (R.spectatorNames ? R.spectatorNames.them : 'équipe adverse')}`, k, 1300);
+  feed(`${face(k, actor)}${KF_ICON.dragon}<span class="kf-txt">${place === 'ancient' ? 'Gardien ancien' : 'Dragon'}</span>`, k);
+  await bpause(1000);
+}
+
+function buildMap(mine, theirs) {
+  R.units = { me: mine.units, them: theirs.units };
+  R.tok = { me: [], them: [] }; R.pos = { me: [], them: [] }; R.alive = { me: [], them: [] };
+  R.towers = { me: [], them: [] }; R.nexus = {}; R.fight = null;
+  const towers = $('#b-towers'); const tokens = $('#b-tokens');
+  towers.innerHTML = ''; tokens.innerHTML = '';
+  for (const k of ['me', 'them']) {
+    for (const [lane, pt0] of MAP.towers) {
+      const pt = P(k, pt0);
+      const el = document.createElement('span');
+      el.className = `tower ${k}`; el.style.left = `${pt[0]}%`; el.style.top = `${pt[1]}%`;
+      el.innerHTML = '<svg viewBox="0 0 24 24"><use href="#ico-tower"/></svg>';
+      towers.append(el);
+      R.towers[k].push({ el, lane, pt, down: false });
+    }
+    const n = P(k, MAP.nexus);
+    const nexus = document.createElement('span');
+    nexus.className = `nexus ${k}`; nexus.style.left = `${n[0]}%`; nexus.style.top = `${n[1]}%`;
+    towers.append(nexus); R.nexus[k] = nexus;
+    R.units[k].forEach((u, r) => {
+      const el = document.createElement('span');
+      el.className = `token ${k} r-${u.rarity}`;
+      el.innerHTML = `<img src="${esc(champIcon(u))}" alt="${esc(u.champion)}"><i class="skull"></i>`;
+      tokens.append(el);
+      R.tok[k][r] = el; R.alive[k][r] = true;
+      move(k, r, P(k, MAP.fountain[r]));
+    });
+  }
+  $('#b-dragon').className = 'pit-icon dragon';
+  $('#b-ancient').className = 'pit-icon ancient';
+}
 
 /** Rejoue un combat ; en spectateur (lien partagé), l'attaquant est à gauche et rien n'est « à toi ». */
 async function playBattle(b, { spectator = false } = {}) {
   replay.battle = b; replay.spectator = spectator;
   const mineA = spectator || b.attacker.userId === S.user?.id;
-  const me = mineA ? 'A' : 'B';
+  R.me = mineA ? 'A' : 'B';
   const [mine, theirs] = mineA ? [b.a, b.b] : [b.b, b.a];
   const [pMe, pThem] = mineA ? [b.attacker, b.defender] : [b.defender, b.attacker];
+  R.spectatorNames = spectator ? { me: pMe.displayName, them: pThem.displayName } : null;
   const won = mineA === b.attackerWon;
   const el = $('#battle');
   el.hidden = false; el.className = `battle${spectator ? ' spectator' : ''}`;
   $('#b-me-av').innerHTML = avatarInner(pMe); $('#b-them-av').innerHTML = avatarInner(pThem);
   $('#b-me-name').textContent = spectator ? pMe.displayName : mineA ? 'Toi' : 'Toi (défense)'; $('#b-them-name').textContent = pThem.displayName;
-  $('#b-share').hidden = true;
-  $('#b-lanes').innerHTML = ROLES.map((r, i) => `<div class="bl">
-      <span class="bu r-${mine.units[i].rarity}">${unitImg(mine.units[i])}<em data-kd="m${i}"></em></span>
-      <span class="bl-mid"><b>${esc(mine.units[i].champion)}</b><span class="role">${r}</span><b>${esc(theirs.units[i].champion)}</b></span>
-      <span class="bu r-${theirs.units[i].rarity}">${unitImg(theirs.units[i])}<em data-kd="t${i}"></em></span></div>`).join('');
-  $('#b-feed').innerHTML = '';
-  $('#b-end').hidden = true;
-  $('#b-skip').hidden = false; $('#b-replay').hidden = true; $('#b-close').hidden = true;
-  const score = (ev) => {
-    const [km, kt, tm, tt, gm, gt] = me === 'A'
-      ? [ev.killsA, ev.killsB, ev.towersA, ev.towersB, ev.goldA, ev.goldB] : [ev.killsB, ev.killsA, ev.towersB, ev.towersA, ev.goldB, ev.goldA];
-    const bump = (sel, v) => { const n = $(sel); if (n.textContent !== String(v)) { n.textContent = v; n.classList.remove('bump'); void n.offsetWidth; n.classList.add('bump'); } };
-    bump('#b-k-me', km); bump('#b-k-them', kt);
-    $('#b-t-me').textContent = tm; $('#b-t-them').textContent = tt;
-    $('#b-g-me').textContent = gm.toFixed(1); $('#b-g-them').textContent = gt.toFixed(1);
-    $('#b-g-fill').style.width = `${gm + gt ? (gm / (gm + gt)) * 100 : 50}%`;
-    $('#b-clock').textContent = `${String(ev.minute).padStart(2, '0')}:00`;
-  };
-  score({ minute: 0, killsA: 0, killsB: 0, towersA: 0, towersB: 0, goldA: 0, goldB: 0 });
+  $('#b-share').hidden = true; $('#b-feed').innerHTML = ''; $('#b-end').hidden = true;
+  $('#b-announce').hidden = true; $('#b-callout').hidden = true;
+  $('#b-skip').hidden = false; $('#b-speed').hidden = false; $('#b-replay').hidden = true; $('#b-close').hidden = true;
+  $('#b-speed').textContent = `×${replay.speed}`;
+  buildMap(mine, theirs);
+  bfx.fit(); bfx.parts = [];
+  const zero = { minute: 0, killsA: 0, killsB: 0, towersA: 0, towersB: 0, goldA: 0, goldB: 0 };
+  scoreboard(zero);
   replay.skip = false;
-  await bpause(500);
+
+  await bpause(250);
+  for (const k of ['me', 'them']) for (let r = 0; r < 5; r++) move(k, r, P(k, MAP.rest[r]));
+  announce('Que le combat commence', `${pMe.displayName} contre ${pThem.displayName}`, 'neutral', 1500);
+  await bpause(1400);
+
+  let prev = zero;
   for (const ev of b.events) {
     if (el.hidden || replay.battle !== b) return;
-    const mineEv = ev.side === me;
-    score(ev);
-    const li = document.createElement('li');
-    li.className = `ev ${mineEv ? 'me' : 'them'} k-${ev.kind}`;
-    const icon = ev.icon ? `<img class="ev-ico" src="${esc(ev.icon)}" alt="">` : `<svg viewBox="0 0 24 24"><use href="${EV_ICON[ev.kind] || '#ico-arena'}"/></svg>`;
-    li.innerHTML = `${icon}<span class="t">${ev.minute}'</span><span class="txt">${esc(ev.text)}</span>`;
-    $('#b-feed').prepend(li);
-    if (!replay.skip) {
-      if (ev.kind === 'FIGHT' || ev.kind === 'ACE') { audio.tone(mineEv ? 520 : 180, 0.25, 'sawtooth', 0.08); buzz(mineEv ? [30, 20, 60] : 60); }
-      else if (ev.kind === 'TALENT') { audio.tone(mineEv ? 880 : 330, 0.18, 'sine', 0.1); audio.tone(mineEv ? 1320 : 440, 0.22, 'sine', 0.06, 0.08); }
-      else if (ev.kind !== 'GANK') audio.tone(mineEv ? 660 : 240, 0.12, 'triangle', 0.1);
-    }
-    await bpause(EV_DELAY[ev.kind] || 700);
+    await stepEvent(ev, prev);
+    prev = ev;
   }
   if (replay.battle !== b) return;
-  mine.units.forEach((u, i) => { $(`[data-kd="m${i}"]`).textContent = `${u.kills}/${u.deaths}`; });
-  theirs.units.forEach((u, i) => { $(`[data-kd="t${i}"]`).textContent = `${u.kills}/${u.deaths}`; });
-  const mvp = [...mine.units].sort((x, y) => (y.kills * 2 - y.deaths) - (x.kills * 2 - x.deaths))[0];
+  if (replay.skip) { $('#b-announce').hidden = true; $('#b-callout').hidden = true; }
+
+  // Écran de fin : résultat, gains et tableau des scores.
   const delta = pMe.ratingAfter - pMe.ratingBefore;
-  if (spectator) {
-    const winner = b.attackerWon ? b.attacker : b.defender;
-    $('#b-end').innerHTML = `<div class="end-title">Victoire de ${esc(winner.displayName)}</div>
-      <div class="end-chips"><span class="chip">MVP · ${esc([...(b.attackerWon ? b.a : b.b).units].sort((x, y) => (y.kills * 2 - y.deaths) - (x.kills * 2 - x.deaths))[0].champion)}</span>
-        <span class="chip">${b.minutes} min</span></div>
-      ${S.token ? '' : '<p class="muted">Ouvre des reliques, compose ton roster et défie tes amis.</p>'}`;
-    $('#b-end').hidden = false;
-    el.classList.add('won');
-    audio.chime(4);
-    $('#b-skip').hidden = true; $('#b-replay').hidden = false; $('#b-close').hidden = false;
-    $('#b-close').textContent = S.token ? 'Continuer' : 'Jouer aussi';
-    return;
-  }
-  $('#b-close').textContent = 'Continuer';
-  $('#b-end').innerHTML = `<div class="end-title">${won ? 'Victoire' : 'Défaite'}</div>
-    <div class="end-chips"><span class="chip ${delta >= 0 ? 'up' : 'down'}">${signed(delta)} pts · ${pMe.ratingAfter}</span>
-      ${mineA && b.essence ? `<span class="chip ess">+${b.essence} essence</span>` : ''}
-      <span class="chip">MVP · ${esc(mvp.champion)}</span></div>
-    ${mineA && won && !b.essence ? '<p class="muted">Essence du jour déjà empochée : la victoire compte pour la cote.</p>' : ''}
-    ${!won ? '<p class="muted">Regarde les vis-à-vis : un contre bien placé change tout.</p>' : ''}`;
+  const best = (units) => [...units].sort((x, y) => (y.kills * 2 - y.deaths) - (x.kills * 2 - x.deaths))[0];
+  const winners = b.attackerWon ? b.a : b.b;
+  const mvp = spectator ? best(winners.units) : best(mine.units);
+  const rows = (units, k) => units.map((u, i) => `<div class="pg-row ${k}${u === mvp ? ' mvp' : ''}">
+      <img src="${esc(champIcon(u))}" alt=""><span class="pg-name"><b>${esc(u.champion)}</b><em>${ROLES[i]}</em></span>
+      ${u.talent?.icon ? `<img class="pg-talent" src="${esc(u.talent.icon)}" alt="" title="${esc(u.talent.spell)}">` : ''}
+      <b class="pg-kd">${u.kills} / ${u.deaths}</b></div>`).join('');
+  const title = spectator ? `Victoire de ${(b.attackerWon ? b.attacker : b.defender).displayName}` : won ? 'Victoire' : 'Défaite';
+  $('#b-end').innerHTML = `<div class="pg-title ${spectator || won ? 'win' : 'loss'}">${esc(title)}</div>
+    <div class="end-chips">
+      ${spectator ? `<span class="chip">${b.minutes} min</span>` : `<span class="chip ${delta >= 0 ? 'up' : 'down'}">${signed(delta)} pts · ${pMe.ratingAfter}</span>`}
+      ${!spectator && mineA && b.essence ? `<span class="chip ess">+${b.essence} essence</span>` : ''}
+      <span class="chip gold">MVP · ${esc(mvp.champion)}</span></div>
+    <div class="pg-board"><div class="pg-team me"><span class="kicker">${esc(spectator ? pMe.displayName : 'Ton équipe')}</span>${rows(mine.units, 'me')}</div>
+      <div class="pg-team them"><span class="kicker">${esc(pThem.displayName)}</span>${rows(theirs.units, 'them')}</div></div>
+    ${!spectator && mineA && won && !b.essence ? '<p class="muted">Essence du jour déjà empochée : la victoire compte pour la cote.</p>' : ''}
+    ${!spectator && !won ? '<p class="muted">Regarde les vis-à-vis et les talents : un contre bien placé change tout.</p>' : ''}
+    ${spectator && !S.token ? '<p class="muted">Ouvre des reliques, compose ton roster et défie tes amis.</p>' : ''}`;
   $('#b-end').hidden = false;
-  el.classList.add(won ? 'won' : 'lost');
-  if (won) { audio.chime(5); buzz([60, 40, 120]); } else { audio.tone(150, 0.6, 'sawtooth', 0.08); buzz(90); }
-  $('#b-skip').hidden = true; $('#b-replay').hidden = false; $('#b-close').hidden = false; $('#b-share').hidden = false;
+  el.classList.add(spectator || won ? 'won' : 'lost');
+  if (spectator || won) { audio.chime(5); buzz([60, 40, 120]); } else { audio.tone(150, 0.6, 'sawtooth', 0.08); buzz(90); }
+  $('#b-skip').hidden = true; $('#b-speed').hidden = true; $('#b-replay').hidden = false; $('#b-close').hidden = false;
+  $('#b-close').textContent = spectator && !S.token ? 'Jouer aussi' : 'Continuer';
+  $('#b-share').hidden = spectator;
 }
 
 function closeBattle() {
@@ -1279,6 +1618,8 @@ function bindArena() {
     else if (e.key === 'Escape') closeTuto();
   });
   $('#b-skip').onclick = () => { replay.skip = true; replay.wake(); };
+  $('#b-speed').onclick = () => { replay.speed = replay.speed === 1 ? 2 : 1; $('#b-speed').textContent = `×${replay.speed}`; };
+  addEventListener('resize', () => { if (!$('#battle').hidden) bfx.fit(); });
   $('#b-replay').onclick = () => replay.battle && playBattle(replay.battle);
   $('#b-close').onclick = closeBattle;
   $('#b-share').onclick = shareBattle;

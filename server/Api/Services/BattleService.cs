@@ -292,7 +292,8 @@ public sealed class BattleService(
     {
         var tz = Zone;
         var midnight = TimeZoneInfo.ConvertTime(now, tz).Date;
-        DateTimeOffset At(DateTime d) => new(d, tz.GetUtcOffset(d));
+        // En UTC : Npgsql refuse un DateTimeOffset avec décalage dans une requête (timestamp with time zone).
+        DateTimeOffset At(DateTime d) => new DateTimeOffset(d, tz.GetUtcOffset(d)).ToUniversalTime();
         return (At(midnight), At(midnight.AddDays(1)));
     }
 
@@ -304,7 +305,7 @@ public sealed class BattleService(
         var tz = Zone;
         var local = TimeZoneInfo.ConvertTime(now, tz);
         var next = new DateTime(local.Year, local.Month, 1).AddMonths(1);
-        return new DateTimeOffset(next, tz.GetUtcOffset(next));
+        return new DateTimeOffset(next, tz.GetUtcOffset(next)).ToUniversalTime();
     }
 
     private static readonly SemaphoreSlim SeasonGate = new(1, 1);

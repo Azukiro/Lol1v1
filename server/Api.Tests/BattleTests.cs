@@ -188,6 +188,9 @@ public class BattleFlowTests
 
         var arena = await a.GetFromJsonAsync<ArenaDto>("/api/v1/capsules/arena", ApiJson.Options);
         Assert.True(arena!.RosterReady);
+        // Dates en UTC : PostgreSQL (Npgsql) refuse un décalage horaire dans les requêtes.
+        Assert.Equal(TimeSpan.Zero, arena.ResetAt.Offset);
+        Assert.Equal(TimeSpan.Zero, arena.Season.EndsAt.Offset);
         Assert.Contains("Composition équilibrée : +5 %", arena.Team!.Synergies);
         Assert.Contains(arena.Opponents, o => o.Player.UserId == bId && o.AvailableAt is null);
 

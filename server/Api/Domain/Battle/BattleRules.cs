@@ -9,16 +9,18 @@ public enum BattleSide { A, B }
 
 public enum BattleEventKind { GANK, FIRST_BLOOD, KILL, TOWER, OBJECTIVE, FIGHT, ACE, END, TALENT }
 
-/// <summary>Objet du roster engagé au combat.</summary>
+/// <summary>Objet du roster engagé au combat. Sans profil, celui-ci est déduit des classes.</summary>
 public sealed record BattleUnit(
-    CapsuleItemKind Kind, int ItemId, string Champion, int ChampionId, Rarity Rarity, ChampionClass[] Classes, int[] Lines, Talent? Talent = null);
+    CapsuleItemKind Kind, int ItemId, string Champion, int ChampionId, Rarity Rarity, ChampionClass[] Classes, int[] Lines, Talent? Talent = null,
+    ChampionProfile? Profile = null);
 
-/// <summary>Bilan d'une unité : puissance, bonus de poste et de contre (en %), talent, éliminations.</summary>
+/// <summary>Bilan d'une unité : puissance, bonus de poste et de contre de classe en teamfight (en %), talent, profil, éliminations.</summary>
 public sealed record UnitReport(
     int Role, CapsuleItemKind Kind, int ItemId, string Champion, Rarity Rarity, ChampionClass[] Classes,
-    int Power, int FitPercent, int CounterPercent, int Kills = 0, int Deaths = 0, Talent? Talent = null);
+    int Power, int FitPercent, int CounterPercent, int Kills = 0, int Deaths = 0, Talent? Talent = null, ChampionProfile? Profile = null);
 
-public sealed record TeamReport(List<UnitReport> Units, List<string> Synergies, int Power);
+/// <summary>Bilan d'une équipe ; FightPercent = bonus ou malus de composition en teamfight.</summary>
+public sealed record TeamReport(List<UnitReport> Units, List<string> Synergies, int Power, int FightPercent = 0);
 
 /// <summary>
 /// Événement de la partie, avec le score après l'événement (or en milliers). Pour l'animation : Icon = sort utilisé (talent),
@@ -34,30 +36,29 @@ public sealed record BattleOutcome(BattleSide Winner, int Minutes, TeamReport A,
 
 /// <summary>
 /// Partie simulée entre deux rosters (TOP, JUNGLE, MID, BOT, SUPPORT) : phase de lanes, objectifs, puis teamfights au meilleur des 3.
-/// La stratégie vient de la composition : classe adaptée au poste, contres de classe face au vis-à-vis, synergies d'équipe,
-/// et le talent de chaque champion (<see cref="Talents"/>). Déterministe pour un seed donné.
+/// La stratégie vient de la composition : champion à son poste (<see cref="Profiles"/>), courbe early / mid / late selon la phase,
+/// style solo ou teamfight, besoins et contres de classe en teamfight, synergies d'équipe, et le talent de chaque champion
+/// (<see cref="Talents"/>). Tous les champions peuvent jouer partout, hors poste avec un malus. Déterministe pour un seed donné.
 /// </summary>
 public static class BattleRules
 {
     public const int TeamSize = 5;
     public const int Top = 0, Jungle = 1, Mid = 2, Bot = 3, Support = 4;
-    public const double CounterBonus = 0.12;
+    public const double MainRoleBonus = 0.12, SecondaryRoleBonus = 0.08, OffRolePenalty = -0.10;
+    public const int CounterCap = 12;
 
     public static readonly string[] RoleNames = ["top", "jungle", "mid", "bot", "support"];
 
-    /// <summary>Classes à l'aise à chaque poste.</summary>
-    private static readonly ChampionClass[][] RoleFit =
-    [
-        [ChampionClass.FIGHTER, ChampionClass.TANK],
-        [ChampionClass.FIGHTER, ChampionClass.ASSASSIN, ChampionClass.TANK],
-        [ChampionClass.MAGE, ChampionClass.ASSASSIN],
-        [ChampionClass.MARKSMAN],
-        [ChampionClass.SUPPORT, ChampionClass.TANK],
-    ];
+    /// <summary>Multiplicateur de la courbe [courbe, phase] : phase 0 = lanes, 1 = objectifs et premier teamfight, 2 = teamfights suivants.</summary>
+    private static readonly double[,] CurveMult =
+    {
+        { 1.18, 1.02, 0.88 },
+        { 0.98, 1.08, 0.98 },
+        { 0.88, 0.98, 1.18 },
+    };
 
-    /// <summary>Cycle des contres : chaque classe bat les deux suivantes et perd contre les deux précédentes.</summary>
-    private static readonly ChampionClass[] CounterRing =
-        [ChampionClass.ASSASSIN, ChampionClass.MAGE, ChampionClass.MARKSMAN, ChampionClass.TANK, ChampionClass.FIGHTER, ChampionClass.SUPPORT];
+    /// <summary>Style en lane (duels) et en teamfight.</summary>
+    private const double SoloLane = 1.10, SoloFight = 0.97, TeamfightLane = 0.95, TeamfightFight = 1.04;
 
     public static ChampionClass? ParseClass(string? role) => role?.ToLowerInvariant() switch
     {
@@ -73,21 +74,90 @@ public static class BattleRules
     /// <summary>+2 % par palier de rareté (Commun 0 %, Exalté +12 %).</summary>
     public static double RarityBonus(Rarity rarity) => (int)rarity * 0.02;
 
-    /// <summary>Classe principale adaptée au poste +10 %, classe secondaire +4 %, hors poste −10 % (classes inconnues : neutre).</summary>
-    public static double RoleFitBonus(BattleUnit unit, int role)
+    public static ChampionProfile? ProfileOf(BattleUnit unit) => unit.Profile ?? Profiles.Fallback(unit.Classes);
+
+    /// <summary>Poste principal +12 %, poste secondaire +8 %, ailleurs −10 % (profil inconnu : neutre).</summary>
+    public static double RoleFitBonus(BattleUnit unit, int role) => ProfileOf(unit) switch
     {
-        if (unit.Classes.Length == 0) return 0;
-        if (RoleFit[role].Contains(unit.Classes[0])) return 0.10;
-        return unit.Classes.Any(RoleFit[role].Contains) ? 0.04 : -0.10;
+        null => 0,
+        var p when p.Main == role => MainRoleBonus,
+        var p when p.Secondary == role => SecondaryRoleBonus,
+        _ => OffRolePenalty,
+    };
+
+    /// <summary>
+    /// Multiplicateur de courbe et de style d'une unité. Phase 0 = lanes (style de duel), 1 = objectifs et premier teamfight,
+    /// 2 = teamfights suivants ; <paramref name="fight"/> applique le style de teamfight.
+    /// </summary>
+    public static double PhaseMult(BattleUnit unit, int phase, bool fight)
+    {
+        if (ProfileOf(unit) is not { } p) return 1;
+        var style = phase == 0 ? (p.Style == PlayStyle.SOLO ? SoloLane : TeamfightLane)
+            : fight ? (p.Style == PlayStyle.SOLO ? SoloFight : TeamfightFight) : 1;
+        return CurveMult[(int)p.Curve, phase] * style;
     }
 
-    /// <summary>+1 si la classe principale de <paramref name="a"/> contre celle de <paramref name="b"/>, −1 dans l'autre sens, 0 sinon.</summary>
-    public static int Counter(BattleUnit a, BattleUnit b)
+    private static ChampionClass? Primary(BattleUnit u) => u.Classes.Length > 0 ? u.Classes[0] : null;
+
+    /// <summary>
+    /// Contre de classe en teamfight (en %, plafonné), face à toute la composition adverse : l'assassin plonge sur les carrys mal protégés,
+    /// le tireur fait fondre la frontline, le mage ravage une équipe de mêlée groupée, le tank encaisse assassins et combattants,
+    /// le combattant écrase les cibles fragiles au contact, le support protège des assassins.
+    /// </summary>
+    public static int ClassCounter(BattleUnit unit, IReadOnlyList<BattleUnit> foes)
     {
-        if (a.Classes.Length == 0 || b.Classes.Length == 0) return 0;
-        var d = (Array.IndexOf(CounterRing, b.Classes[0]) - Array.IndexOf(CounterRing, a.Classes[0]) + CounterRing.Length) % CounterRing.Length;
-        return d is 1 or 2 ? 1 : d is 4 or 5 ? -1 : 0;
+        var p = foes.Select(Primary).ToList();
+        int Count(params ChampionClass[] cs) => p.Count(c => c is { } x && cs.Contains(x));
+        var peel = foes.Count(f => f.Classes.Contains(ChampionClass.SUPPORT) || Primary(f) == ChampionClass.TANK);
+        var percent = Primary(unit) switch
+        {
+            ChampionClass.ASSASSIN => 4 * Math.Max(0, Count(ChampionClass.MARKSMAN, ChampionClass.MAGE) - peel + 1),
+            ChampionClass.MARKSMAN => 4 * Count(ChampionClass.TANK, ChampionClass.FIGHTER),
+            ChampionClass.MAGE => Count(ChampionClass.TANK, ChampionClass.FIGHTER, ChampionClass.ASSASSIN) >= 3 ? 8 : 0,
+            ChampionClass.TANK => 3 * Count(ChampionClass.ASSASSIN, ChampionClass.FIGHTER),
+            ChampionClass.FIGHTER => 3 * Count(ChampionClass.MAGE, ChampionClass.ASSASSIN),
+            ChampionClass.SUPPORT => 4 * Count(ChampionClass.ASSASSIN) + 2 * Count(ChampionClass.FIGHTER),
+            _ => 0,
+        };
+        return Math.Min(CounterCap, percent);
     }
+
+    /// <summary>
+    /// Besoins de composition en teamfight (bonus total et libellés) : une frontline, des dégâts, de la protection ou de l'engage,
+    /// et le style dominant (au moins 3 champions teamfight). Au moins 2 champions solo mettent la pression en side lane.
+    /// </summary>
+    public static (double Bonus, List<string> Labels) Composition(IReadOnlyList<BattleUnit> team)
+    {
+        var bonus = 0.0;
+        var labels = new List<string>();
+        if (team.All(u => u.Classes.Length == 0 && u.Profile is null)) return (0, labels);
+        if (!team.Any(u => Primary(u) is ChampionClass.TANK or ChampionClass.FIGHTER || u.Classes.Contains(ChampionClass.TANK)))
+        {
+            bonus -= 0.10;
+            labels.Add("Pas de frontline : −10 % en teamfight");
+        }
+        if (!team.Any(u => Primary(u) is ChampionClass.MARKSMAN or ChampionClass.MAGE or ChampionClass.ASSASSIN))
+        {
+            bonus -= 0.10;
+            labels.Add("Pas de dégâts : −10 % en teamfight");
+        }
+        if (!team.Any(u => u.Classes.Contains(ChampionClass.SUPPORT) || Primary(u) == ChampionClass.TANK))
+        {
+            bonus -= 0.05;
+            labels.Add("Ni protection ni engage : −5 % en teamfight");
+        }
+        if (team.Count(u => ProfileOf(u)?.Style == PlayStyle.TEAMFIGHT) >= 3)
+        {
+            bonus += 0.05;
+            labels.Add("Comp teamfight : +5 % en teamfight");
+        }
+        if (SplitPushers(team).Count >= 2) labels.Add("Split-push : une tour de plus par teamfight");
+        return (bonus, labels);
+    }
+
+    /// <summary>Postes des champions solo ; à partir de 2, l'équipe met la pression en side lane.</summary>
+    public static List<int> SplitPushers(IReadOnlyList<BattleUnit> team) =>
+        Enumerable.Range(0, team.Count).Where(r => ProfileOf(team[r])?.Style == PlayStyle.SOLO).ToList();
 
     /// <summary>Synergies d'une équipe et bonus total (multiplicateur − 1).</summary>
     public static (double Bonus, List<string> Labels) Synergies(IReadOnlyList<BattleUnit> team, IReadOnlyDictionary<int, string> lineNames)
@@ -100,14 +170,6 @@ public static class BattleRules
             var b = 0.03 * (line.Count() - 1);
             bonus += b;
             labels.Add($"Gamme {lineNames.GetValueOrDefault(line.Key, "commune")} ×{line.Count()} : +{b * 100:0} %");
-        }
-        var primary = team.Where(u => u.Classes.Length > 0).Select(u => u.Classes[0]).ToList();
-        if (primary.Any(c => c is ChampionClass.TANK or ChampionClass.FIGHTER)
-            && primary.Any(c => c is ChampionClass.MARKSMAN or ChampionClass.MAGE)
-            && team.Any(u => u.Classes.Contains(ChampionClass.SUPPORT)))
-        {
-            bonus += 0.05;
-            labels.Add("Composition équilibrée : +5 %");
         }
         if (team.GroupBy(u => u.ChampionId).Any(g => g.Count() > 1))
         {
@@ -130,12 +192,13 @@ public static class BattleRules
     private static TeamReport Report(IReadOnlyList<BattleUnit> team, IReadOnlyList<BattleUnit>? foes, IReadOnlyDictionary<int, string> lineNames)
     {
         var (bonus, labels) = Synergies(team, lineNames);
+        var (fight, fightLabels) = Composition(team);
         var units = team.Select((u, i) => new UnitReport(i, u.Kind, u.ItemId, u.Champion, u.Rarity, u.Classes,
             (int)Math.Round(100 * (1 + RarityBonus(u.Rarity)) * (1 + RoleFitBonus(u, i)) * (1 + bonus)),
             (int)Math.Round(RoleFitBonus(u, i) * 100),
-            foes is null ? 0 : (int)Math.Round(Counter(u, foes[i]) * CounterBonus * 100),
-            Talent: u.Talent)).ToList();
-        return new TeamReport(units, labels, units.Sum(u => u.Power));
+            foes is null ? 0 : ClassCounter(u, foes),
+            Talent: u.Talent, Profile: ProfileOf(u))).ToList();
+        return new TeamReport(units, [.. labels, .. fightLabels], units.Sum(u => u.Power), (int)Math.Round(fight * 100));
     }
 
     /// <summary>Un talent de vol copie le talent de l'adversaire le plus puissant (hors vol), sous son propre nom de sort.</summary>
@@ -209,6 +272,8 @@ public static class BattleRules
         }
 
         private double CounterMult(int side, int role) => 1 + reports[side].Units[role].CounterPercent / 100.0;
+
+        private double At(int side, int role, int phase, bool fight = false) => PhaseMult(teams[side][role], phase, fight);
 
         public BattleOutcome Play()
         {
@@ -288,12 +353,12 @@ public static class BattleRules
             var label = lane switch { 0 => "top", 1 => "mid", _ => "bot" };
             var power = new double[2];
             for (var s = 0; s < 2; s++)
-                power[s] = roles.Sum(r => Power(s, r) * CounterMult(s, r)
+                power[s] = roles.Sum(r => Power(s, r) * At(s, r, 0)
                     * (Has(s, r, TalentEffect.LANE_DOMINANCE) ? 1.25 : 1) * (Has(s, r, TalentEffect.SCALING) ? 0.93 : 1));
 
             foreach (var (s, r, _) in roams)
             {
-                power[s] += Power(s, r) * 0.4;
+                power[s] += Power(s, r) * At(s, r, 0) * 0.4;
                 EmitTalent(s, r, $"{Name(s, r)} utilise {Spell(s, r)} et rejoint le {label}", place: label);
             }
 
@@ -301,9 +366,9 @@ public static class BattleRules
             var gankTalent = new[] { Has(0, Jungle, TalentEffect.GANK), Has(1, Jungle, TalentEffect.GANK) };
             if (rng.NextDouble() < (gankTalent[0] || gankTalent[1] ? 0.5 : 0.35))
             {
-                ganker = Wins(Power(0, Jungle) * (gankTalent[0] ? 1.6 : 1), Power(1, Jungle) * (gankTalent[1] ? 1.6 : 1), 4) ? 0 : 1;
+                ganker = Wins(Power(0, Jungle) * At(0, Jungle, 0) * (gankTalent[0] ? 1.6 : 1), Power(1, Jungle) * At(1, Jungle, 0) * (gankTalent[1] ? 1.6 : 1), 4) ? 0 : 1;
                 var g = ganker.Value;
-                power[g] += Power(g, Jungle) * (roles.Length == 1 ? 0.5 : 0.35) * (gankTalent[g] ? 1.35 : 1);
+                power[g] += Power(g, Jungle) * At(g, Jungle, 0) * (roles.Length == 1 ? 0.5 : 0.35) * (gankTalent[g] ? 1.35 : 1);
                 if (gankTalent[g]) EmitTalent(g, Jungle, $"{Name(g, Jungle)} surgit au {label} avec {Spell(g, Jungle)}", place: label);
                 else Emit(BattleEventKind.GANK, g, $"{Name(g, Jungle)} gank le {label}", actor: Jungle, place: label);
             }
@@ -327,7 +392,7 @@ public static class BattleRules
         {
             var p = new double[2];
             for (var s = 0; s < 2; s++)
-                p[s] = (Power(s, Jungle) + Power(s, Support) * 0.5) * Lead(s) * (1 + _buff[s]) * (With(s, TalentEffect.OBJECTIVE).Any() ? 1.2 : 1);
+                p[s] = (Power(s, Jungle) * At(s, Jungle, 1) + Power(s, Support) * At(s, Support, 1) * 0.5) * Lead(s) * (1 + _buff[s]) * (With(s, TalentEffect.OBJECTIVE).Any() ? 1.2 : 1);
             var winner = Wins(p[0], p[1], 4) ? 0 : 1;
             _buff[winner] += buff;
             _objectives[winner]++;
@@ -369,12 +434,13 @@ public static class BattleRules
                     * (index == 3 ? Math.Pow(1.05, With(s, TalentEffect.SPLITPUSH).Count()) : 1);
             }
 
-            // Les vis-à-vis comptent aussi en teamfight : chacun affronte surtout son contre-poste.
+            // Courbe : le premier teamfight est en mid game, les suivants en late game. Contres de classe et besoins de composition.
+            var phase = index == 1 ? 1 : 2;
             var p = new double[2];
             for (var s = 0; s < 2; s++)
                 p[s] = Enumerable.Range(0, TeamSize).Where(r => !down[s].Contains(r))
-                    .Sum(r => Power(s, r) * CounterMult(s, r) * (Has(s, r, TalentEffect.SCALING) ? 1 + 0.12 * index : 1))
-                    * Lead(s) * (1 + _buff[s]) * mult[s];
+                    .Sum(r => Power(s, r) * CounterMult(s, r) * At(s, r, phase, fight: true) * (Has(s, r, TalentEffect.SCALING) ? 1 + 0.12 * index : 1))
+                    * Lead(s) * (1 + _buff[s]) * mult[s] * (1 + reports[s].FightPercent / 100.0);
             var winner = Wins(p[0], p[1], 6) ? 0 : 1;
 
             // Une fois par partie, un talent de résurrection peut renverser un combat perdu.
@@ -409,6 +475,14 @@ public static class BattleRules
                     _towers[s]++;
                     EmitTalent(s, r, $"{Name(s, r)} fait tomber une tour en side lane avec {Spell(s, r)}", place: r == Bot || r == Support ? "bot" : "top");
                 }
+            for (var s = 0; s < 2; s++)
+            {
+                var solos = SplitPushers(teams[s]);
+                if (solos.Count < 2) continue;
+                var r = solos[rng.Next(solos.Count)];
+                _towers[s]++;
+                Emit(BattleEventKind.TOWER, s, $"Pression en side lane : {Name(s, r)} fait tomber une tour", actor: r, place: r == Bot || r == Support ? "bot" : "top");
+            }
             _lastFightWinner = winner;
             return winner;
         }

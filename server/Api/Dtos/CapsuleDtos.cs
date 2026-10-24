@@ -26,7 +26,7 @@ public sealed record PlayerCollectionDto(PlayerCardDto Player, List<OwnedItemDto
 /// <summary>Riot ID / pseudo saisi, ou identifiant d'un joueur déjà affiché (suggestion).</summary>
 public sealed record AddFriendRequest(string? Query, Guid? UserId = null);
 
-public sealed record CatalogChampionDto(int Id, string Name, string Alias, string[] Roles, Api.Domain.Battle.Talent Talent);
+public sealed record CatalogChampionDto(int Id, string Name, string Alias, string[] Roles, Api.Domain.Battle.Talent Talent, Api.Domain.Battle.ChampionProfile? Profile);
 public sealed record CatalogSkinDto(int Id, int ChampionId, int Num, string Name, Rarity Rarity, int[] Lines, bool Legacy, string? Load);
 public sealed record CatalogLineDto(int Id, string Name);
 public sealed record RarityOddsDto(Rarity Rarity, double Percent, int DuplicateEssence);

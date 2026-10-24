@@ -260,6 +260,8 @@ public static class Talents
 
     public static bool IsMapped(string alias) => ByAlias.ContainsKey(alias);
 
+    public static IEnumerable<string> Aliases => ByAlias.Keys;
+
     /// <summary>
     /// Talent d'un champion. <paramref name="spells"/> = passif, Q, W, E, R (noms localisés et icônes) ; absent, le nom reste générique.
     /// </summary>

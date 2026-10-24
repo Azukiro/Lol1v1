@@ -241,7 +241,7 @@ public sealed class BattleService(
             if (!catalog.ChampionById.TryGetValue(championId, out var champ)) return null;
             var classes = (champ.Roles ?? []).Select(BattleRules.ParseClass).OfType<ChampionClass>().ToArray();
             var talent = Talents.For(champ.Alias, classes, champ.Spells?.Select(sp => (sp.Name, sp.Icon)).ToList());
-            units.Add(new BattleUnit(slot.Kind, slot.ItemId, champ.Name, champ.Id, rarity, classes, lines, talent));
+            units.Add(new BattleUnit(slot.Kind, slot.ItemId, champ.Name, champ.Id, rarity, classes, lines, talent, Profiles.For(champ.Alias, classes)));
         }
         return units.Count == BattleRules.TeamSize ? units : null;
     }

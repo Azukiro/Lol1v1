@@ -627,6 +627,7 @@ function showChampion(id) {
   const own = its.filter((it) => lens().has(it.key)).length;
   openSheet(`<div class="detail-body" style="margin-top:0;padding-top:22px">
     <h2>${esc(c.name)}</h2><p class="muted">${own} / ${its.length} obtenus</p>
+    ${profileHTML(c.profile, true)}
     ${c.talent ? `<div class="talent-card"><span class="kicker">Talent d'arène</span>${talentHTML(c.talent, true)}</div>` : ''}
     <div class="grid">${its.map((it) => { const o = ownedOf(it.key); return cardHTML(it, { missing: !o, count: o?.count }); }).join('')}</div></div>`);
 }
@@ -775,9 +776,16 @@ const CLASS = {
   FIGHTER: { label: 'Combattant', color: '#ff8a3d' },
   SUPPORT: { label: 'Soutien', color: '#19e3ff' },
 };
-const RING = ['ASSASSIN', 'MAGE', 'MARKSMAN', 'TANK', 'FIGHTER', 'SUPPORT'];
-const ROLE_FIT = [['FIGHTER', 'TANK'], ['FIGHTER', 'ASSASSIN', 'TANK'], ['MAGE', 'ASSASSIN'], ['MARKSMAN'], ['SUPPORT', 'TANK']];
-const TUTO_KEY = 'capsules.tuto.arena.v2';
+const CURVE = {
+  EARLY: { label: 'Early', color: '#ff8a3d', text: 'Fort en lane, plus faible en fin de partie.' },
+  MID: { label: 'Mid', color: '#ffc94d', text: 'Au sommet autour des dragons et du premier teamfight.' },
+  LATE: { label: 'Late', color: '#a78bfa', text: 'Faible en lane, redoutable dans les derniers teamfights.' },
+};
+const STYLE = {
+  SOLO: { label: 'Solo', text: 'Gagne ses duels et pousse les side lanes.' },
+  TEAMFIGHT: { label: 'Teamfight', text: 'Brille dans les combats à cinq.' },
+};
+const TUTO_KEY = 'capsules.tuto.arena.v3';
 const TIER = {
   BRONZE: { label: 'Bronze', color: '#d08a5b' },
   SILVER: { label: 'Argent', color: '#c3cfe2' },
@@ -797,6 +805,18 @@ function talentHTML(t, full = false) {
     <span class="talent-txt"><b>${esc(t.spell)} <em>${SLOT_LABEL[t.slot] || t.slot}</em></b>${full ? `<span>${esc(t.description)}</span>` : ''}</span></span>`;
 }
 
+/** Profil d'arène : courbe et style ; en version détaillée, postes principal et secondaire avec leur bonus. */
+function profileHTML(p, full = false) {
+  if (!p) return '';
+  const tags = `<span class="ptags"><span class="ptag" style="--pc:${CURVE[p.curve].color}">${CURVE[p.curve].label}</span><span class="ptag">${STYLE[p.style].label}</span></span>`;
+  if (!full) return tags;
+  return `<div class="profile"><span class="kicker">Profil d'arène</span>
+    <div class="profile-roles"><span><b>${ROLES[p.main]}</b> poste principal · +12 %</span>
+      ${p.secondary != null ? `<span><b>${ROLES[p.secondary]}</b> poste secondaire · +8 %</span>` : ''}
+      <span class="muted">Partout ailleurs : −10 %</span></div>
+    ${tags}<p class="muted">${CURVE[p.curve].text} ${STYLE[p.style].text}</p></div>`;
+}
+
 function daysLeft(iso) {
   const d = Math.max(0, Date.parse(iso) - now()) / 86400e3;
   return d >= 1 ? `${Math.floor(d)} j` : `${Math.max(1, Math.ceil(d * 24))} h`;
@@ -805,7 +825,7 @@ function daysLeft(iso) {
 const clsIcon = (c, extra = '') => (CLASS[c]
   ? `<svg class="cls ${extra}" style="--cc:${CLASS[c].color}" viewBox="0 0 24 24" role="img" aria-label="${CLASS[c].label}"><use href="#cls-${c}"/></svg>` : '');
 const signed = (n) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0');
-const fitLabel = (f) => (f >= 10 ? 'Idéal' : f > 0 ? 'Bon' : f < 0 ? 'Hors poste' : 'Neutre');
+const fitLabel = (f) => (f >= 10 ? 'Poste principal' : f > 0 ? 'Poste secondaire' : f < 0 ? 'Hors poste' : 'Neutre');
 const unitItem = (u) => (S.cat ? item(u.kind, u.itemId) : null);
 const unitImg = (u) => { const it = unitItem(u); return it ? `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt="">` : ''; };
 
@@ -871,7 +891,8 @@ function unitCell(u) {
   return `<div class="unit r-${u.rarity}" data-unit="${u.role}" role="button" tabindex="0">
     <div class="unit-art">${unitImg(u)}<span class="role">${ROLES[u.role]}</span><span class="unit-cls">${u.classes.slice(0, 2).map((c) => clsIcon(c)).join('')}</span></div>
     <b>${esc(u.champion)}</b>
-    <span class="fit ${u.fitPercent > 0 ? 'up' : u.fitPercent < 0 ? 'down' : ''}" title="${fitLabel(u.fitPercent)}">${u.fitPercent ? `${signed(u.fitPercent)} % ${u.fitPercent > 0 ? 'poste' : 'hors poste'}` : 'Neutre'}</span>
+    <span class="fit ${u.fitPercent > 0 ? 'up' : u.fitPercent < 0 ? 'down' : ''}" title="${fitLabel(u.fitPercent)}">${u.fitPercent ? `${signed(u.fitPercent)} % ${u.fitPercent >= 10 ? 'poste' : u.fitPercent > 0 ? 'poste 2' : 'hors poste'}` : 'Neutre'}</span>
+    ${profileHTML(u.profile)}
     ${talentHTML(u.talent)}
   </div>`;
 }
@@ -959,16 +980,19 @@ function muSide(u, right = false) {
   return `<span class="mu-side${right ? ' right' : ''} r-${u.rarity}">
     <span class="mu-pic">${unitImg(u)}</span>
     <span class="mu-txt"><b>${esc(u.champion)}</b>
-      <span>${u.classes.slice(0, 1).map((c) => `${clsIcon(c, 'sm')}${CLASS[c].label}`).join('')}${u.fitPercent ? ` <em class="${u.fitPercent > 0 ? 'up' : 'down'}">${signed(u.fitPercent)} %</em>` : ''}</span>
+      <span>${u.classes.slice(0, 1).map((c) => `${clsIcon(c, 'sm')}${CLASS[c].label}`).join('')}${u.fitPercent ? ` <em class="${u.fitPercent > 0 ? 'up' : 'down'}" title="${fitLabel(u.fitPercent)}">${signed(u.fitPercent)} %</em>` : ''}</span>
+      ${profileHTML(u.profile)}
       ${talentHTML(u.talent)}
     </span></span>`;
 }
 
+// Contre de classe en teamfight, lu face à toute la composition adverse : chaque camp a le sien.
 function matchupRow(role, a, b) {
-  const c = a.counterPercent;
-  return `<div class="mu ${c > 0 ? 'win' : c < 0 ? 'lose' : ''}">
+  const d = a.counterPercent - b.counterPercent;
+  return `<div class="mu ${d > 0 ? 'win' : d < 0 ? 'lose' : ''}">
     ${muSide(a)}
-    <span class="mu-mid"><span class="role">${role}</span>${c ? `<em>${c > 0 ? 'Contre' : 'Contré'}<br>${signed(c)} %</em>` : '<em class="eq">=</em>'}</span>
+    <span class="mu-mid"><span class="role">${role}</span>${a.counterPercent || b.counterPercent
+      ? `<em title="Contre de classe en teamfight">Teamfight<br>+${a.counterPercent} · +${b.counterPercent} %</em>` : '<em class="eq">=</em>'}</span>
     ${muSide(b, true)}
   </div>`;
 }
@@ -1502,16 +1526,18 @@ function showSeasonEnd(r) {
 
 function showUnitTalent(role) {
   const u = S.arena?.team?.units[role]; if (!u?.talent) return;
-  openSheet(`<div class="unit-sheet"><span class="kicker">${ROLES[u.role]} · talent d'arène</span><h2>${esc(u.champion)}</h2>${talentHTML(u.talent, true)}</div>`);
+  openSheet(`<div class="unit-sheet"><span class="kicker">${ROLES[u.role]} · ${fitLabel(u.fitPercent).toLowerCase()}</span><h2>${esc(u.champion)}</h2>
+    ${profileHTML(u.profile, true)}${talentHTML(u.talent, true)}</div>`);
 }
 
 // ---------- Tuto (stories) ----------
 const TUTO = [
   { kicker: 'L\'arène', title: 'Ton roster part au combat', text: 'Tes 5 champions affrontent ceux d\'un autre joueur, poste contre poste. Son roster se défend même quand il dort.', art: () => tutoRoster() },
-  { kicker: 'Règle 1', title: 'Chacun à sa place', text: 'Une classe à l\'aise à son poste prend jusqu\'à +10 %. Hors de son poste : −10 %.', art: () => tutoRoles() },
-  { kicker: 'Règle 2', title: 'Le cycle des contres', text: 'Chaque classe domine les deux suivantes. Contre ton vis-à-vis et prends +12 %.', art: () => tutoRing() },
-  { kicker: 'Règle 3', title: 'Les bonus s\'empilent', text: 'Skins d\'une même gamme, composition équilibrée, rareté : tout ajoute de la puissance.', art: () => tutoSynergy() },
-  { kicker: 'Règle 4', title: 'Chaque champion a son talent', text: 'Le sort qui fait son identité change la partie : Destinée rejoint une autre lane, Retour temporel renverse un combat, Grappin attrape une cible.', art: () => tutoTalents() },
+  { kicker: 'Règle 1', title: 'Chacun à sa place', text: 'Chaque champion a un poste principal, parfois un secondaire. Tous les postes restent ouverts, mais hors poste il perd de la puissance.', art: () => tutoRoles() },
+  { kicker: 'Règle 2', title: 'Early, mid ou late', text: 'Un champion early écrase les lanes, un late gagne les derniers teamfights. Les solos gagnent leurs duels, les teamfights brillent à cinq.', art: () => tutoCurves() },
+  { kicker: 'Règle 3', title: 'Une vraie compo', text: 'Une frontline, des dégâts, de quoi protéger. Les tireurs font fondre les tanks, les assassins plongent sur les carrys mal protégés.', art: () => tutoClasses() },
+  { kicker: 'Règle 4', title: 'Les bonus s\'empilent', text: 'Skins d\'une même gamme, comp teamfight, rareté : tout ajoute de la puissance.', art: () => tutoSynergy() },
+  { kicker: 'Règle 5', title: 'Chaque champion a son talent', text: 'Le sort qui fait son identité change la partie : Destinée rejoint une autre lane, Retour temporel renverse un combat, Grappin attrape une cible.', art: () => tutoTalents() },
   { kicker: 'Le match', title: 'Lanes, dragons, teamfights', text: 'Gagner ses lanes rapporte de l\'or. L\'or et les dragons font pencher les teamfights. Le premier à 2 l\'emporte.', art: () => tutoTimeline() },
   { kicker: 'Récompenses', title: 'Grimpe et remplis ta forge', text: '2 victoires = 1 relique, jusqu\'à 4 victoires payées par jour. Un seul défi par joueur jusqu\'à sa riposte (ou 24 h).', art: () => tutoRewards() },
   { kicker: 'Saisons', title: 'Un mois, un classement', text: 'Grimpe de Bronze à Maître. En fin de mois, ton palier te rapporte des reliques, puis tout le monde repart pour une nouvelle saison.', art: () => tutoSeasons(), cta: 'Entrer dans l\'arène' },
@@ -1527,20 +1553,22 @@ function tutoRoster() {
 }
 
 function tutoRoles() {
-  return `<div class="ta-roles">${ROLES.map((r, i) => `<div class="ta-role" style="--i:${i}"><b>${r}</b><span>${ROLE_FIT[i].map((c) => `<span class="ta-cls">${clsIcon(c)}${CLASS[c].label}</span>`).join('')}</span></div>`).join('')}</div>`;
+  const rows = [['Poste principal', 'Leona support', '+12 %', 'up'], ['Poste secondaire', 'Malphite support', '+8 %', 'up'], ['Hors poste', 'Sion support', '−10 %', 'down']];
+  return `<div class="ta-roles">${rows.map(([r, ex, v, c], i) => `<div class="ta-role" style="--i:${i}"><b>${r}</b><span><span class="ta-cls">${ex}</span><span class="fit ${c}">${v}</span></span></div>`).join('')}</div>`;
 }
 
-function tutoRing() {
-  const pts = RING.map((c, i) => {
-    const a = (i / RING.length) * Math.PI * 2 - Math.PI / 2;
-    return `<span class="ta-node${i === 0 ? ' on' : ''}${i === 1 || i === 2 ? ' prey' : ''}" style="left:${50 + Math.cos(a) * 40}%;top:${50 + Math.sin(a) * 40}%">${clsIcon(c)}<em>${CLASS[c].label}</em></span>`;
-  }).join('');
-  return `<div class="ta-ring"><svg class="ta-orbit" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40"/></svg>${pts}</div>
-    <p class="ta-caption">Assassin bat Mage et Tireur</p>`;
+function tutoCurves() {
+  const rows = [['EARLY', 'Lanes'], ['MID', 'Dragons et 1er teamfight'], ['LATE', 'Derniers teamfights']];
+  return `<div class="ta-roles">${rows.map(([c, when], i) => `<div class="ta-role" style="--i:${i}"><b style="color:${CURVE[c].color}">${CURVE[c].label}</b><span><span class="ta-cls">${when}</span></span></div>`).join('')}</div>`;
+}
+
+function tutoClasses() {
+  const rows = [['TANK', 'Encaisse assassins et combattants'], ['MARKSMAN', 'Fait fondre la frontline'], ['ASSASSIN', 'Plonge sur les carrys'], ['SUPPORT', 'Protège des assassins']];
+  return `<div class="ta-roles">${rows.map(([c, t], i) => `<div class="ta-role" style="--i:${i}"><span class="ta-cls">${clsIcon(c)}${CLASS[c].label}</span><span><span class="ta-cls">${t}</span></span></div>`).join('')}</div>`;
 }
 
 function tutoSynergy() {
-  const rows = [['Gamme ×3', '+6 %', 'var(--violet)'], ['Compo équilibrée', '+5 %', 'var(--green)'], ['Exalté', '+12 %', 'var(--yellow)']];
+  const rows = [['Gamme ×3', '+6 %', 'var(--violet)'], ['Comp teamfight', '+5 %', 'var(--green)'], ['Exalté', '+12 %', 'var(--yellow)']];
   return `<div class="ta-syn">${rows.map(([l, v, c], i) => `<div class="ta-chip" style="--i:${i};--c:${c}"><span>${l}</span><b>${v}</b></div>`).join('')}
     <div class="ta-power"><span class="kicker">Puissance</span><i><i></i></i></div></div>`;
 }
@@ -1667,17 +1695,17 @@ function setupInstall() {
   $('#install-menu').onclick = () => { $('#menu').hidden = true; showInstall(); };
 }
 
-const NEWS_KEY = 'capsules.news.arena-v2';
+const NEWS_KEY = 'capsules.news.arena-v3';
 
 async function maybeShowNews() {
   if (store.get(NEWS_KEY) || !$('#tuto').hidden) return;
   store.set(NEWS_KEY, '1');
   openSheet(`<div class="news">
     <span class="kicker">Nouveau</span>
-    <h2>Arène : saison 1</h2>
+    <h2>Arène : nouveau système de combat</h2>
+    <div class="news-item"><b>Postes par champion</b><span>Chaque champion a son poste principal et parfois un secondaire. Un tank au support ne suffit plus.</span></div>
+    <div class="news-item"><b>Early, mid, late · solo ou teamfight</b><span>Les lanes, les dragons et les derniers combats ne récompensent pas les mêmes champions.</span></div>
     <div class="news-item"><b>Un talent par champion</b><span>Chaque champion combat avec le sort qui fait son identité : Destinée, Requiem, Retour temporel…</span></div>
-    <div class="news-item"><b>Saisons mensuelles</b><span>Grimpe de Bronze à Maître : ton palier en fin de mois te rapporte des reliques.</span></div>
-    <div class="news-item"><b>Replays à partager</b><span>Envoie le lien d'un combat : tes amis le regardent même sans compte.</span></div>
     <button class="btn primary block" data-news-go="arena">Entrer dans l'arène</button>
   </div>`);
   $$('[data-news-go]').forEach((b) => (b.onclick = () => { closeSheet(); setView(b.dataset.newsGo); }));

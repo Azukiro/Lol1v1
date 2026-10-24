@@ -18,7 +18,7 @@ public class BattleRulesTests(ITestOutputHelper output)
     private static int _nextId = 1;
 
     private static BattleUnit U(string name, Rarity rarity, params ChampionClass[] classes) =>
-        new(CapsuleItemKind.CHAMPION, _nextId, name, _nextId++, rarity, classes, []);
+        new(CapsuleItemKind.CHAMPION, _nextId, name, _nextId++, rarity, classes, [], Profile: Profiles.For(name.Replace(" ", ""), classes));
 
     private static List<BattleUnit> Team(Rarity rarity = Rarity.EPIC) =>
     [
@@ -62,7 +62,7 @@ public class BattleRulesTests(ITestOutputHelper output)
         var bad = new List<BattleUnit> { good[3], good[2], good[4], good[0], good[1] };
         var rate = WinRate(good, bad);
         output.WriteLine($"bons postes : {rate:P1}");
-        Assert.InRange(rate, 0.65, 0.95);
+        Assert.InRange(rate, 0.80, 0.98);
     }
 
     [Fact]
@@ -74,37 +74,110 @@ public class BattleRulesTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void Counters_follow_the_ring()
+    public void Every_champion_has_a_hand_written_profile()
     {
-        var assassin = U("Zed", Rarity.EPIC, ChampionClass.ASSASSIN);
-        var mage = U("Lux", Rarity.EPIC, ChampionClass.MAGE);
-        var tank = U("Malphite", Rarity.EPIC, ChampionClass.TANK);
-        var support = U("Soraka", Rarity.EPIC, ChampionClass.SUPPORT);
-        Assert.Equal(1, BattleRules.Counter(assassin, mage));
-        Assert.Equal(-1, BattleRules.Counter(mage, assassin));
-        Assert.Equal(0, BattleRules.Counter(assassin, tank));
-        Assert.Equal(1, BattleRules.Counter(support, assassin));
+        Assert.Empty(Talents.Aliases.Where(a => !Profiles.IsMapped(a)));
+        Assert.Equal(new ChampionProfile(BattleRules.Top, BattleRules.Support, PowerCurve.LATE, PlayStyle.TEAMFIGHT), Profiles.For("Malphite", []));
+        // Inconnu : déduit des classes.
+        Assert.Equal(BattleRules.Bot, Profiles.For("Nouveau", [ChampionClass.MARKSMAN])!.Main);
+        Assert.Null(Profiles.For("Nouveau", []));
     }
 
     [Fact]
-    public void Lane_counters_tilt_the_odds()
+    public void Role_comes_from_the_champion_not_its_class()
     {
-        // Même équipe, mais le mid assassin contre un mage, et l'inverse.
-        var mine = Team();
-        mine[2] = U("Zed", Rarity.EPIC, ChampionClass.ASSASSIN, ChampionClass.MAGE);
-        var theirs = Team();
-        var rate = WinRate(mine, theirs);
-        output.WriteLine($"contre au mid : {rate:P1}");
-        Assert.InRange(rate, 0.52, 0.75);
+        var leona = U("Leona", Rarity.EPIC, ChampionClass.TANK, ChampionClass.SUPPORT);
+        var malphite = U("Malphite", Rarity.EPIC, ChampionClass.TANK, ChampionClass.FIGHTER);
+        var sion = U("Sion", Rarity.EPIC, ChampionClass.TANK, ChampionClass.FIGHTER);
+        Assert.Equal(0.12, BattleRules.RoleFitBonus(leona, BattleRules.Support));
+        Assert.Equal(0.08, BattleRules.RoleFitBonus(malphite, BattleRules.Support));
+        Assert.Equal(-0.10, BattleRules.RoleFitBonus(sion, BattleRules.Support));
+        Assert.Equal(0.12, BattleRules.RoleFitBonus(sion, BattleRules.Top));
     }
 
     [Fact]
-    public void Synergies_reward_skin_lines_and_balance_and_punish_duplicates()
+    public void A_tank_without_support_role_loses_to_a_real_support()
+    {
+        var real = Team();
+        var tank = Team();
+        tank[4] = U("Sion", Rarity.EPIC, ChampionClass.TANK, ChampionClass.FIGHTER);
+        var rate = WinRate(tank, real);
+        output.WriteLine($"Sion support contre Thresh : {rate:P1}");
+        Assert.InRange(rate, 0.25, 0.47);
+
+        // Avec le support en poste secondaire, c'est un vrai choix, pas un abus.
+        var flex = Team();
+        flex[4] = U("Malphite", Rarity.EPIC, ChampionClass.TANK, ChampionClass.FIGHTER);
+        rate = WinRate(flex, real);
+        output.WriteLine($"Malphite support contre Thresh : {rate:P1}");
+        Assert.InRange(rate, 0.38, 0.56);
+    }
+
+    private static List<BattleUnit> Reshape(List<BattleUnit> team, Func<ChampionProfile, ChampionProfile> f) =>
+        team.Select(u => u with { Profile = f(u.Profile!) }).ToList();
+
+    [Fact]
+    public void Each_power_curve_can_win()
+    {
+        var mid = Reshape(Team(), p => p with { Curve = PowerCurve.MID });
+        var early = Reshape(Team(), p => p with { Curve = PowerCurve.EARLY });
+        var late = Reshape(Team(), p => p with { Curve = PowerCurve.LATE });
+        var rates = new[] { ("early/mid", WinRate(early, mid)), ("late/mid", WinRate(late, mid)), ("early/late", WinRate(early, late)) };
+        foreach (var (label, rate) in rates)
+        {
+            output.WriteLine($"{label} : {rate:P1}");
+            Assert.InRange(rate, 0.40, 0.60);
+        }
+    }
+
+    [Fact]
+    public void Solo_and_teamfight_styles_are_both_viable()
+    {
+        var solo = Reshape(Team(), p => p with { Style = PlayStyle.SOLO });
+        var fight = Reshape(Team(), p => p with { Style = PlayStyle.TEAMFIGHT });
+        var rate = WinRate(solo, fight);
+        output.WriteLine($"solo contre teamfight : {rate:P1}");
+        Assert.InRange(rate, 0.40, 0.60);
+    }
+
+    [Fact]
+    public void Class_counters_read_the_whole_enemy_composition()
+    {
+        var foes = Team();
+        Assert.Equal(8, BattleRules.ClassCounter(U("Jinx", Rarity.EPIC, ChampionClass.MARKSMAN), foes));
+        Assert.Equal(0, BattleRules.ClassCounter(U("Ahri", Rarity.EPIC, ChampionClass.MAGE), foes));
+        var squishy = new List<BattleUnit>
+        {
+            U("Ahri", Rarity.EPIC, ChampionClass.MAGE), U("Lux", Rarity.EPIC, ChampionClass.MAGE), U("Jinx", Rarity.EPIC, ChampionClass.MARKSMAN),
+            U("Caitlyn", Rarity.EPIC, ChampionClass.MARKSMAN), U("Xerath", Rarity.EPIC, ChampionClass.MAGE),
+        };
+        Assert.Equal(12, BattleRules.ClassCounter(U("Zed", Rarity.EPIC, ChampionClass.ASSASSIN), squishy));
+        Assert.Equal(8, BattleRules.ClassCounter(U("Zed", Rarity.EPIC, ChampionClass.ASSASSIN), foes));
+    }
+
+    [Fact]
+    public void A_composition_without_frontline_pays_for_it()
+    {
+        var (bonus, labels) = BattleRules.Composition(Team());
+        Assert.Equal(0, bonus, 3);
+        var glass = Team();
+        glass[0] = U("Cassiopeia", Rarity.EPIC, ChampionClass.MAGE);
+        glass[1] = U("Evelynn", Rarity.EPIC, ChampionClass.ASSASSIN);
+        glass[4] = U("Lux", Rarity.EPIC, ChampionClass.MAGE, ChampionClass.SUPPORT);
+        (bonus, labels) = BattleRules.Composition(glass);
+        Assert.Contains(labels, l => l.Contains("frontline"));
+        var rate = WinRate(glass, Team());
+        output.WriteLine($"sans frontline : {rate:P1}");
+        Assert.InRange(rate, 0.10, 0.45);
+    }
+
+    [Fact]
+    public void Synergies_reward_skin_lines_and_punish_duplicates()
     {
         var team = Team();
         var lined = team.Select((u, i) => i < 3 ? u with { Lines = [7] } : u).ToList();
         var (bonus, labels) = BattleRules.Synergies(lined, new Dictionary<int, string> { [7] = "Projet" });
-        Assert.Equal(0.06 + 0.05, bonus, 3);
+        Assert.Equal(0.06, bonus, 3);
         Assert.Contains(labels, l => l.Contains("Projet ×3"));
 
         var twice = team.Select((u, i) => i == 1 ? u with { ChampionId = team[0].ChampionId } : u).ToList();
@@ -191,7 +264,9 @@ public class BattleFlowTests
         // Dates en UTC : PostgreSQL (Npgsql) refuse un décalage horaire dans les requêtes.
         Assert.Equal(TimeSpan.Zero, arena.ResetAt.Offset);
         Assert.Equal(TimeSpan.Zero, arena.Season.EndsAt.Offset);
-        Assert.Contains("Composition équilibrée : +5 %", arena.Team!.Synergies);
+        Assert.Contains("Split-push : une tour de plus par teamfight", arena.Team!.Synergies);
+        Assert.Equal(12, arena.Team.Units[0].FitPercent);
+        Assert.Equal(PowerCurve.EARLY, arena.Team.Units[0].Profile!.Curve);
         Assert.Contains(arena.Opponents, o => o.Player.UserId == bId && o.AvailableAt is null);
 
         var battle = await Attack(a, bId);

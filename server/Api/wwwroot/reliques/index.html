@@ -59,6 +59,7 @@
         <button id="odds-btn">Taux de drop</button>
         <button id="tuto-menu">Comment marchent les combats</button>
         <button id="logout-btn">Se déconnecter</button>
+        <div class="menu-version" id="menu-version"></div>
       </div>
     </header>
 
@@ -135,6 +136,7 @@
       <section class="roster-block">
         <div class="section-head"><h2 id="roster-title">Mon roster</h2><span class="muted" id="roster-hint">Touche un poste</span></div>
         <div class="roster" id="roster"></div>
+        <div class="team-coach" id="team-coach"></div>
       </section>
 
       <section class="coll-summary">
@@ -151,6 +153,14 @@
         <div class="coll-filters">
           <input type="search" id="search" placeholder="Champion, skin, gamme…" autocomplete="off">
           <label class="switch"><input type="checkbox" id="show-missing"><span></span>Manquants</label>
+        </div>
+        <div class="role-chips" id="role-chips" role="group" aria-label="Filtrer par poste">
+          <button type="button" data-role-filter="" aria-pressed="true">Tous</button>
+          <button type="button" data-role-filter="0" aria-pressed="false">Top</button>
+          <button type="button" data-role-filter="1" aria-pressed="false">Jungle</button>
+          <button type="button" data-role-filter="2" aria-pressed="false">Mid</button>
+          <button type="button" data-role-filter="3" aria-pressed="false">Bot</button>
+          <button type="button" data-role-filter="4" aria-pressed="false">Support</button>
         </div>
       </section>
 
@@ -311,6 +321,10 @@
   </details>
 
   <div class="toasts" id="toasts" aria-live="polite"></div>
+  <div class="update-bar" id="update-bar" role="status" hidden>
+    <span>Nouvelle version disponible <b id="update-version"></b></span>
+    <button class="btn primary small" id="update-go" type="button">Mettre à jour</button>
+  </div>
 
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <defs>

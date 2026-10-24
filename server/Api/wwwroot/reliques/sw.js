@@ -1,12 +1,14 @@
 // Service worker des reliques : coquille hors ligne, cache des illustrations, notifications push.
-const SHELL = 'capsules-shell-v6';
+// __BUILD__ est remplacé au déploiement (Dockerfile) : chaque version a son propre cache de coquille.
+const SHELL = 'capsules-shell-v6-__BUILD__';
 const ART = 'capsules-art-v1';
 const SHELL_FILES = ['./', 'index.html', 'app.css', 'app.js', 'icon.svg', 'manifest.webmanifest', 'icons/icon-192.png'];
 const ART_HOSTS = ['ddragon.leagueoflegends.com', 'raw.communitydragon.org'];
 const ART_MAX = 400;
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
+  // cache: 'reload' : la nouvelle coquille vient du réseau, pas du cache HTTP du navigateur.
+  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(SHELL_FILES.map((f) => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {

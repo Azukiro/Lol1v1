@@ -193,6 +193,15 @@ app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", time = DateTimeOffset.UtcNow }));
+// Build déployé (version.txt écrit par le Dockerfile, « dev » en local) et commit fourni par Render.
+var buildFile = Path.Combine(AppContext.BaseDirectory, "version.txt");
+var build = File.Exists(buildFile) ? File.ReadAllText(buildFile).Trim() : "dev";
+var commit = Environment.GetEnvironmentVariable("RENDER_GIT_COMMIT") is { Length: >= 7 } sha ? sha[..7] : null;
+app.MapGet("/api/v1/version", (HttpContext ctx) =>
+{
+    ctx.Response.Headers.CacheControl = "no-store";
+    return Results.Ok(new { version = build, commit });
+});
 // Téléchargement du launcher depuis la page vitrine.
 app.MapGet("/download", (LauncherReleaseService releases) =>
     releases.GetLatest() is { } l ? Results.Redirect($"/updates/{Uri.EscapeDataString(l.FileName)}") : Results.NotFound(new { error = "Aucun installeur disponible." }));

@@ -9,6 +9,11 @@ COPY Api/Api.csproj Api/
 RUN dotnet restore Api/Api.csproj
 COPY Api/ Api/
 RUN dotnet publish Api/Api.csproj -c Release -o /app --no-restore
+# Numéro de build (date UTC) : lu par /api/v1/version et gravé dans l'app des reliques et son service worker,
+# pour que chaque déploiement change la version affichée et renouvelle le cache hors ligne.
+RUN BUILD=$(date -u +%Y.%m.%d-%H%M) \
+ && echo "$BUILD" > /app/version.txt \
+ && sed -i "s/__BUILD__/$BUILD/g" /app/wwwroot/reliques/app.js /app/wwwroot/reliques/sw.js
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app

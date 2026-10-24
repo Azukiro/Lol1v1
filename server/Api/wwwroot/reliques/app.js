@@ -5,7 +5,9 @@ const CD = 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/
 const RARITIES = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'MYTHIC', 'ULTIMATE', 'EXALTED'];
 const LABEL = { COMMON: 'Commun', RARE: 'Rare', EPIC: 'Épique', LEGENDARY: 'Légendaire', MYTHIC: 'Mythique', ULTIMATE: 'Ultime', EXALTED: 'Exalté' };
 const COLOR = { COMMON: '#8a94a6', RARE: '#19e3ff', EPIC: '#a78bfa', LEGENDARY: '#ff8a3d', MYTHIC: '#ff3366', ULTIMATE: '#ffc94d', EXALTED: '#ffffff' };
-const CATALOG_KEY = 'capsules.catalog.v5';
+const CATALOG_KEY = 'capsules.catalog.v6';
+// Build de cette coquille, gravé au déploiement par le Dockerfile ; « dev » en local.
+const APP_VERSION = '__BUILD__'.includes('_') ? 'dev' : '__BUILD__';
 const rank = (r) => RARITIES.indexOf(r);
 
 const $ = (s, root = document) => root.querySelector(s);
@@ -30,7 +32,7 @@ const S = {
   type: 'STANDARD',
   busy: false,
   sound: store.get('capsules.sound') !== 'off',
-  coll: { group: 'rarity', q: '', missing: false, rarity: null, open: new Set(), limits: {} },
+  coll: { group: 'rarity', q: '', missing: false, rarity: null, role: null, open: new Set(), limits: {} },
   pushKey: null,
   roster: [null, null, null, null, null],
   friend: null,
@@ -106,6 +108,28 @@ async function parse(res) {
   return res.status === 204 ? null : res.json();
 }
 
+// ---------- Version ----------
+// Le service worker sert la coquille depuis son cache : après un déploiement, l'app ouverte peut être en retard sur le serveur.
+async function checkVersion() {
+  let server = null;
+  try { server = await (await fetch(`${API}/version`, { cache: 'no-store' })).json(); } catch { /* serveur endormi : on réessaiera */ }
+  $('#menu-version').textContent = `Version ${APP_VERSION}${server?.commit ? ` · ${server.commit}` : ''}`;
+  const stale = server && server.version !== 'dev' && server.version !== APP_VERSION;
+  $('#update-bar').hidden = !stale;
+  if (stale) $('#update-version').textContent = server.version;
+}
+
+async function applyUpdate() {
+  $('#update-go').disabled = true;
+  $('#update-go').textContent = 'Mise à jour…';
+  const reg = await navigator.serviceWorker?.getRegistration().catch(() => null);
+  if (!reg) { location.reload(); return; }
+  // Le nouveau service worker télécharge la coquille puis prend la main ; on recharge dès qu'il est actif.
+  navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
+  await reg.update().catch(() => {});
+  setTimeout(() => location.reload(), 5000);
+}
+
 function toast(msg, error = false) {
   const el = document.createElement('div');
   el.className = `toast${error ? ' error' : ''}`;
@@ -139,7 +163,7 @@ async function loadCatalog() {
   const cached = JSON.parse(store.get(CATALOG_KEY) || 'null');
   if (cached && Date.now() - cached.at < 6 * 3600e3) { S.cat = indexCatalog(cached.data); return; }
   // Version dans l'URL : le catalogue est aussi en cache HTTP (6 h), un changement de format doit le contourner.
-  const data = await api('/capsules/catalog?v=5', { retry: true });
+  const data = await api('/capsules/catalog?v=6', { retry: true });
   store.set(CATALOG_KEY, JSON.stringify({ at: Date.now(), data }));
   S.cat = indexCatalog(data);
 }
@@ -515,7 +539,11 @@ function renderSummary() {
       <span class="num">${t[r].owned} / ${t[r].total}</span></button>`).join('');
 }
 
+// Filtre par poste : le champion y joue en poste principal ou secondaire.
+const playsRole = (c, role = S.coll.role) => role == null || c?.profile?.main === role || c?.profile?.secondary === role;
+
 function matches(it, q) {
+  if (!playsRole(it.champ)) return false;
   if (!q) return true;
   const lines = it.lines.map((l) => S.cat.line.get(l)?.name || '').join(' ');
   return `${it.name} ${it.sub} ${lines}`.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').includes(q);
@@ -554,7 +582,7 @@ function renderByRarity(q, missing) {
 function renderByLine(q, missing) {
   const rows = S.cat.lines.map((l) => {
     const ids = S.cat.byLine.get(l.id) || [];
-    const its = ids.map((id) => item('SKIN', id)).filter(Boolean);
+    const its = ids.map((id) => item('SKIN', id)).filter((it) => it && playsRole(it.champ));
     const owned = its.filter((it) => lens().has(it.key));
     return { l, its, owned };
   }).filter(({ l, its, owned }) => its.length && (missing || owned.length)
@@ -578,7 +606,7 @@ function renderByChampion(q, missing) {
     const skins = S.cat.byChamp.get(c.id) || [];
     const ownedSkins = skins.filter((id) => lens().has(`SKIN:${id}`)).length;
     return { c, skins, ownedSkins, has: lens().has(`CHAMPION:${c.id}`) };
-  }).filter(({ c, has, ownedSkins }) => (missing || has || ownedSkins) && (!q || c.name.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').includes(q)));
+  }).filter(({ c, has, ownedSkins }) => (missing || has || ownedSkins) && playsRole(c) && (!q || c.name.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').includes(q)));
   if (!champs.length) return emptyColl();
   return `<div class="champ-grid">${champs.map(({ c, skins, ownedSkins, has }) => `
     <button class="champ${has ? ' owned' : ''}" data-champ="${c.id}" type="button">
@@ -677,38 +705,184 @@ function renderRoster() {
   $('#roster').innerHTML = ROLES.map((role, i) => {
     const it = slots[i] && item(slots[i].kind, slots[i].itemId);
     const tag = editable ? 'button' : 'div';
-    return `<${tag} class="slot${it ? ` filled r-${it.rarity}` : ''}" ${editable ? `type="button" data-slot="${i}"` : ''} aria-label="${role}${it ? ` : ${esc(it.name)}, ${LABEL[it.rarity]}` : ''}">
-      ${it ? `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt=""><span class="shade"></span><b>${esc(it.name)}</b><span class="rar" title="${LABEL[it.rarity]}"></span>`
+    const fit = it ? fitOf(it.champ, i) : 0;
+    return `<${tag} class="slot${it ? ` filled r-${it.rarity}` : ''}" ${editable ? `type="button" data-slot="${i}"` : ''} aria-label="${role}${it ? ` : ${esc(it.name)}, ${LABEL[it.rarity]}, ${fitLabel(fit).toLowerCase()}` : ''}">
+      ${it ? `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt=""><span class="shade"></span><b>${esc(it.name)}</b><span class="rar" title="${LABEL[it.rarity]}"></span>
+        ${it.champ.profile ? `<span class="slot-fit ${fit > 0 ? 'up' : 'down'}" title="${fitLabel(fit)}">${signed(fit)} %</span>` : ''}`
         : `<span class="plus">${editable ? '+' : '—'}</span>`}
       <span class="role">${role}</span></${tag}>`;
   }).join('');
+  $('#team-coach').innerHTML = editable ? coachHTML(S.roster) : '';
 }
 
+// ---------- Aide à la composition (miroir des règles du serveur, BattleRules) ----------
+const FIT = { main: 12, secondary: 8, off: -10 };
+const fitOf = (c, role) => (!c?.profile ? 0 : c.profile.main === role ? FIT.main : c.profile.secondary === role ? FIT.secondary : FIT.off);
+const primaryClass = (c) => c?.roles?.[0];
+const rosterItems = (slots) => slots.map((s) => (s ? item(s.kind, s.itemId) : null));
+
+/** Puissance comme au combat : rareté, poste, gamme commune et champion en double. */
+function teamPower(its) {
+  const filled = its.filter(Boolean);
+  const lines = {};
+  filled.forEach((it) => new Set(it.lines).forEach((l) => { lines[l] = (lines[l] || 0) + 1; }));
+  const best = Math.max(0, ...Object.values(lines));
+  let bonus = best >= 2 ? 0.03 * (best - 1) : 0;
+  if (new Set(filled.map((it) => it.champ.id)).size < filled.length) bonus -= 0.10;
+  return its.reduce((sum, it, i) => sum + (it ? Math.round(100 * (1 + rank(it.rarity) * 0.02) * (1 + fitOf(it.champ, i) / 100) * (1 + bonus)) : 0), 0);
+}
+
+/** Besoins de composition en teamfight : frontline, dégâts, protection ou engage. */
+function teamNeeds(its) {
+  const cs = its.filter(Boolean).map((it) => it.champ);
+  return [
+    { label: 'Frontline', ok: cs.some((c) => ['tank', 'fighter'].includes(primaryClass(c)) || c.roles.includes('tank')), tip: 'Ajoute un tank ou un combattant : sans frontline, −10 % en teamfight.' },
+    { label: 'Dégâts', ok: cs.some((c) => ['marksman', 'mage', 'assassin'].includes(primaryClass(c))), tip: 'Ajoute un tireur, un mage ou un assassin : sans dégâts, −10 % en teamfight.' },
+    { label: 'Protection', ok: cs.some((c) => c.roles.includes('support') || primaryClass(c) === 'tank'), tip: 'Ajoute un soutien ou un tank : sans protection ni engage, −5 % en teamfight.' },
+  ];
+}
+
+function curveVerdict(its) {
+  const n = { EARLY: 0, MID: 0, LATE: 0 };
+  its.forEach((it) => { if (it?.champ.profile) n[it.champ.profile.curve]++; });
+  if (n.EARLY >= 3) return 'Équipe early : écrase les lanes et conclus avant les derniers teamfights.';
+  if (n.LATE >= 3) return 'Équipe late : tiens la phase de lanes, les derniers teamfights sont à toi.';
+  if (n.MID >= 3) return 'Équipe mid : pic de puissance autour des dragons et du premier teamfight.';
+  return 'Courbe équilibrée : présente à chaque phase de la partie.';
+}
+
+function coachHTML(slots) {
+  const its = rosterItems(slots);
+  const filled = its.filter(Boolean);
+  if (!filled.length) return '<p class="coach-empty">Place tes champions : l\'analyse de l\'équipe s\'affiche ici.</p>';
+  const needs = teamNeeds(its);
+  const count = (style) => filled.filter((it) => it.champ.profile?.style === style).length;
+  const tips = [
+    ...its.map((it, i) => it && fitOf(it.champ, i) < 0
+      && `${esc(it.champ.name)} est hors poste en ${ROLES[i]} (−10 %). Son poste : ${ROLES[it.champ.profile.main]}.`),
+    new Set(filled.map((it) => it.champ.id)).size < filled.length && 'Champion en double : −10 % pour toute l\'équipe.',
+    filled.length === 5 && needs.find((x) => !x.ok)?.tip,
+    filled.length < 5 && `Encore ${5 - filled.length} poste${filled.length < 4 ? 's' : ''} à remplir pour entrer dans l'arène.`,
+  ].filter(Boolean);
+  const bonus = [count('TEAMFIGHT') >= 3 && 'comp teamfight +5 %', count('SOLO') >= 2 && 'split-push'].filter(Boolean);
+  return `<div class="coach">
+    <div class="coach-head"><span class="kicker">Analyse de l'équipe</span><span class="power">Puissance <b>${teamPower(its)}</b></span></div>
+    <div class="coach-needs">${needs.map((x) => `<span class="need ${x.ok ? 'ok' : 'ko'}">${x.ok ? '✓' : '✗'} ${x.label}</span>`).join('')}</div>
+    <div class="coach-curve">${its.map((it, i) => { const p = it?.champ.profile; return `<span class="cv" style="--pc:${p ? CURVE[p.curve].color : 'var(--line-2)'}"><i></i><em>${ROLES[i]}</em><b>${p ? CURVE[p.curve].label : '—'}</b><small>${p ? STYLE[p.style].label : ''}</small></span>`; }).join('')}</div>
+    <p class="coach-verdict">${curveVerdict(its)}${bonus.length ? ` Bonus : ${bonus.join(', ')}.` : ''}</p>
+    ${tips.length ? `<ul class="coach-tips">${tips.map((t) => `<li>${t}</li>`).join('')}</ul>` : '<p class="coach-ok">Tout le monde est à son poste et la compo est complète.</p>'}
+    <button class="btn small" type="button" id="coach-optimize">Optimiser mon roster</button>
+  </div>`;
+}
+
+/** Valeur d'une équipe pour l'optimiseur : puissance × besoins de composition et comp teamfight en teamfight. */
+function teamScore(its) {
+  const needs = teamNeeds(its);
+  const fights = its.filter((it) => it?.champ.profile?.style === 'TEAMFIGHT').length;
+  const comp = 1 - (needs[0].ok ? 0 : 0.10) - (needs[1].ok ? 0 : 0.10) - (needs[2].ok ? 0 : 0.05) + (fights >= 3 ? 0.05 : 0);
+  return teamPower(its) * comp;
+}
+
+/**
+ * Meilleur roster avec sa collection. D'abord les affectations (poste, objet) par score décroissant (rareté × bonus de poste),
+ * un champion par poste ; puis échanges poste par poste tant qu'ils améliorent l'équipe (composition comprise).
+ */
+function suggestTeam() {
+  const owned = [...S.owned.keys()].map(fromKey).filter(Boolean);
+  const pairs = [];
+  owned.forEach((it) => ROLES.forEach((_, r) => pairs.push({ it, r, score: (1 + rank(it.rarity) * 0.02) * (1 + fitOf(it.champ, r) / 100) })));
+  pairs.sort((a, b) => b.score - a.score);
+  const out = Array(5).fill(null);
+  const champs = new Set();
+  for (const { it, r } of pairs) {
+    if (out[r] || champs.has(it.champ.id)) continue;
+    out[r] = it; champs.add(it.champ.id);
+  }
+  for (let improved = true, rounds = 0; improved && rounds < 5; rounds++) {
+    improved = false;
+    for (let r = 0; r < 5; r++) {
+      let best = teamScore(out);
+      for (const it of owned) {
+        if (out.some((o, i) => i !== r && o?.champ.id === it.champ.id)) continue;
+        const trial = out.map((o, i) => (i === r ? it : o));
+        const score = teamScore(trial);
+        if (score > best + 0.5) { best = score; out[r] = it; improved = true; }
+      }
+    }
+  }
+  return out;
+}
+
+function showOptimize() {
+  const now = rosterItems(S.roster);
+  const best = suggestTeam();
+  const same = best.every((it, i) => (it?.key ?? null) === (now[i]?.key ?? null));
+  const row = (it, i) => `<div class="opt-row${(it?.key ?? null) !== (now[i]?.key ?? null) ? ' changed' : ''}">
+    <span class="role">${ROLES[i]}</span><span class="opt-pic">${it ? `<img src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt="">` : ''}</span>
+    <span class="opt-txt"><b>${it ? esc(it.name) : '—'}</b>${it ? `<span>${it.kind === 'SKIN' ? `${esc(it.sub)} · ` : ''}${LABEL[it.rarity]}</span>` : ''}</span>
+    ${it ? `<span class="fit ${fitOf(it.champ, i) > 0 ? 'up' : 'down'}">${signed(fitOf(it.champ, i))} %</span>` : ''}</div>`;
+  openSheet(`<div class="optimize">
+    <span class="kicker">Suggestion</span><h2>Roster optimisé</h2>
+    <p class="muted">Chaque champion à son meilleur poste, une compo complète, les objets les plus rares en priorité. Les postes modifiés sont surlignés.</p>
+    <div class="opt-power"><span>Puissance</span><b>${teamPower(now)}</b><span>→</span><b class="up">${teamPower(best)}</b></div>
+    <div class="coach-needs">${teamNeeds(best).map((x) => `<span class="need ${x.ok ? 'ok' : 'ko'}">${x.ok ? '✓' : '✗'} ${x.label}</span>`).join('')}</div>
+    <div class="opt-list">${best.map(row).join('')}</div>
+    ${same ? '<p class="coach-ok">Ton roster est déjà le meilleur possible avec ta collection.</p>'
+      : '<button class="btn primary block" type="button" id="opt-apply">Appliquer ce roster</button>'}
+    <p class="hint">La courbe compte aussi : une équipe early doit gagner vite, une équipe late doit tenir les lanes.</p>
+  </div>`);
+  $('#opt-apply')?.addEventListener('click', () => saveRoster(best.map((it) => it && { kind: it.kind, itemId: it.id })));
+}
+
+// Sélecteur d'un poste : objets classés par bonus de poste (principal, secondaire, hors poste), puis par rareté.
 function showSlotPicker(index) {
   const current = keyOf(S.roster[index]);
   const used = new Set(S.roster.map(keyOf).filter((k) => k && k !== current));
+  const taken = new Set(S.roster.map((s, i) => i !== index && s && item(s.kind, s.itemId)?.champ.id).filter(Boolean));
   const items = [...S.owned.keys()].map(fromKey).filter((it) => it && !used.has(it.key))
-    .sort((a, b) => rank(b.rarity) - rank(a.rarity) || a.name.localeCompare(b.name, 'fr'));
+    .sort((a, b) => fitOf(b.champ, index) - fitOf(a.champ, index) || rank(b.rarity) - rank(a.rarity) || a.name.localeCompare(b.name, 'fr'));
+  const groups = [
+    { fit: FIT.main, title: 'Poste principal', note: '+12 %' },
+    { fit: FIT.secondary, title: 'Poste secondaire', note: '+8 %' },
+    { fit: FIT.off, title: 'Hors poste', note: '−10 %' },
+  ].map((g) => ({ ...g, its: items.filter((it) => (it.champ.profile ? fitOf(it.champ, index) : FIT.off) === g.fit) })).filter((g) => g.its.length);
+  const best = items.find((it) => !taken.has(it.champ.id));
   openSheet(`<div class="picker">
     <h2>Poste ${ROLES[index]}</h2>
+    <p class="muted">Les champions faits pour ce poste d'abord. Tous les postes restent ouverts, avec un malus hors poste.</p>
     ${items.length ? `<input type="search" id="pick-search" placeholder="Rechercher dans ta collection" autocomplete="off">` : ''}
     ${current ? `<button class="btn ghost small" data-pick-clear="${index}">Retirer du poste</button>` : ''}
-    <div class="grid" id="pick-grid">${items.length ? items.map((it) => pickCard(it, index, it.key === current)).join('') : '<p class="empty-note">Ouvre des reliques pour remplir ton roster.</p>'}</div>
+    ${items.length ? groups.map((g) => `<section class="pick-group">
+        <div class="group-head"><h3>${g.title}</h3><span class="fit ${g.fit > 0 ? 'up' : 'down'}">${g.note}</span><span class="num">${g.its.length}</span></div>
+        <div class="grid">${g.its.map((it) => pickCard(it, index, { selected: it.key === current, best: it === best, dup: taken.has(it.champ.id) })).join('')}</div>
+      </section>`).join('') : '<p class="empty-note">Ouvre des reliques pour remplir ton roster.</p>'}
   </div>`);
   $('#pick-search')?.addEventListener('input', (e) => {
     const q = e.target.value.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').trim();
-    $$('#pick-grid .card').forEach((c) => { c.hidden = q && !matches(fromKey(c.dataset.pick), q); });
+    $$('.picker .card').forEach((c) => {
+      const it = fromKey(c.dataset.pick);
+      c.hidden = !!q && !`${it.name} ${it.sub}`.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').includes(q);
+    });
+    $$('.pick-group').forEach((g) => { g.hidden = !$$('.card', g).some((c) => !c.hidden); });
   });
 }
 
-function pickCard(it, index, selected) {
-  return cardHTML(it, { count: 0 }).replace('class="card ', `class="card pick${selected ? ' selected' : ''} `)
-    .replace(`data-key="${it.key}"`, `data-key="${it.key}" data-pick="${it.key}" data-slot-index="${index}"`);
+function pickCard(it, index, { selected = false, best = false, dup = false } = {}) {
+  const p = it.champ.profile;
+  const tags = `<span class="pick-tags">${best ? '<span class="pick-best">Conseillé</span>' : ''}${dup ? '<span class="pick-dup">Déjà pris</span>' : ''}
+    ${p ? `<span class="ptag" style="--pc:${CURVE[p.curve].color}">${CURVE[p.curve].label}</span><span class="ptag">${STYLE[p.style].label}</span>` : ''}</span>`;
+  return cardHTML(it, { count: 0 }).replace('class="card ', `class="card pick${selected ? ' selected' : ''}${dup ? ' dup' : ''} `)
+    .replace(`data-key="${it.key}"`, `data-key="${it.key}" data-pick="${it.key}" data-slot-index="${index}"`)
+    .replace(/<\/button>\s*$/, `${tags}</button>`);
 }
 
 async function setSlot(index, key) {
   const slots = S.roster.map((s) => (s ? { kind: s.kind, itemId: s.itemId } : null));
   slots[index] = key ? (([kind, id]) => ({ kind, itemId: +id }))(key.split(':')) : null;
+  await saveRoster(slots);
+}
+
+async function saveRoster(slots) {
   try {
     S.roster = await api('/capsules/roster', { method: 'PUT', body: { slots } });
     closeSheet(); renderRoster(); buzz(20);
@@ -1926,6 +2100,7 @@ function bind() {
     if (clear) { setSlot(+clear.dataset.pickClear, null); return; }
     const slot = e.target.closest('[data-slot]');
     if (slot) { showSlotPicker(+slot.dataset.slot); return; }
+    if (e.target.closest('#coach-optimize')) { showOptimize(); return; }
     const foe = e.target.closest('[data-foe]');
     if (foe) { openFoe(foe.dataset.foe); return; }
     const fight = e.target.closest('[data-battle]');
@@ -1967,6 +2142,12 @@ function bind() {
   let t;
   $('#search').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { S.coll.q = e.target.value; renderCollection(); }, 150); });
   $('#show-missing').addEventListener('change', (e) => { S.coll.missing = e.target.checked; renderCollection(); });
+  $('#role-chips').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-role-filter]'); if (!b) return;
+    S.coll.role = b.dataset.roleFilter === '' ? null : +b.dataset.roleFilter;
+    $$('#role-chips button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    renderCollection();
+  });
   $('#rarity-bars').addEventListener('click', (e) => {
     const b = e.target.closest('[data-rarity]'); if (!b) return;
     S.coll.rarity = S.coll.rarity === b.dataset.rarity ? null : b.dataset.rarity; S.coll.group = 'rarity'; syncSegmented(); renderCollection();
@@ -1985,8 +2166,11 @@ function bind() {
     else debugCall('grant', { count: kind === 'cap' ? +n : 0, essence: kind === 'ess' ? +n : 0, premium: kind === 'prem' ? +n : 0 });
   });
 
+  $('#update-go').onclick = applyUpdate;
   addEventListener('visibilitychange', () => {
-    if (document.hidden || !S.token) return;
+    if (document.hidden) return;
+    checkVersion();
+    if (!S.token) return;
     if (S.retryStart) { S.retryStart = false; start(); return; }
     api('/capsules/state', { retry: true }).then((w) => { S.online = true; setWallet(w); saveSnapshot(); }).catch(() => {});
   });
@@ -1996,6 +2180,7 @@ function syncSegmented() { $$('.coll-controls .segmented button').forEach((b) =>
 
 // ---------- Démarrage ----------
 fetch('/health', { cache: 'no-store' }).catch(() => {});
+checkVersion();
 fx.init();
 bind();
 setupInstall();

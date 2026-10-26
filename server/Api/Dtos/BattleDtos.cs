@@ -24,7 +24,7 @@ public sealed record ShareDto(string Code);
 /// <summary>Aperçu avant l'attaque : vis-à-vis, contres et synergies des deux rosters.</summary>
 public sealed record BattlePreviewDto(PlayerCardDto Opponent, int Rating, TeamReport Mine, TeamReport Theirs, DateTimeOffset? AvailableAt);
 
-public sealed record BattlePlayerDto(Guid UserId, string DisplayName, int? ProfileIconId, int RatingBefore, int RatingAfter);
+public sealed record BattlePlayerDto(Guid UserId, string DisplayName, int? ProfileIconId, int RatingBefore, int RatingAfter, int? AvatarChampionId = null);
 
 /// <summary>Combat complet (rejouable) ; A = attaquant, B = défenseur.</summary>
 public sealed record BattleDto(
@@ -34,5 +34,5 @@ public sealed record BattleDto(
 public sealed record BattleSummaryDto(
     Guid Id, DateTimeOffset CreatedAt, bool Attacked, Guid OpponentId, string OpponentName, int? OpponentIcon, bool Won, int RatingDelta, int Essence);
 
-public sealed record LadderEntryDto(int Rank, Guid UserId, string DisplayName, int? ProfileIconId, int Rating, int Wins, int Losses);
+public sealed record LadderEntryDto(int Rank, Guid UserId, string DisplayName, int? ProfileIconId, int Rating, int Wins, int Losses, int? AvatarChampionId = null);
 public sealed record LadderDto(List<LadderEntryDto> Top, LadderEntryDto? Me);

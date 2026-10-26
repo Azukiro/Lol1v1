@@ -890,8 +890,50 @@ async function saveRoster(slots) {
 }
 
 function avatarHTML(p) {
-  const letter = esc((p.displayName[0] || '?').toUpperCase());
-  return `<span class="avatar">${letter}${p.profileIconId ? `<img src="https://ddragon.leagueoflegends.com/cdn/img/profileicon/${+p.profileIconId}.png" alt="">` : ''}</span>`;
+  return `<span class="avatar">${avatarInner(p)}</span>`;
+}
+
+// ---------- Icône de profil : un champion au choix ----------
+const avatarSrc = (p) => (p.avatarChampionId ? `${CD}v1/champion-icons/${+p.avatarChampionId}.png`
+  : p.profileIconId ? `https://ddragon.leagueoflegends.com/cdn/img/profileicon/${+p.profileIconId}.png` : null);
+const fold = (s) => s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').trim();
+
+/** Choix de l'icône ; forcé (sans fermeture possible) tant que le joueur n'en a pas. Résolu une fois l'icône enregistrée ou la feuille fermée. */
+function showAvatarPicker(force = false) {
+  const champs = [...S.cat.champions].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  const current = S.user?.avatarChampionId;
+  $('#sheet').classList.toggle('locked', force);
+  openSheet(`<div class="picker avatar-picker">
+    <h2>${force ? 'Choisis ton icône' : 'Changer d\'icône'}</h2>
+    <p class="muted">Le champion choisi s'affiche à côté de ton nom : classement, arène, amis.</p>
+    <input type="search" id="avatar-search" placeholder="Rechercher un champion" autocomplete="off">
+    <div class="avatar-grid">${champs.map((c) => `<button type="button" class="avatar-opt${c.id === current ? ' selected' : ''}" data-avatar="${c.id}" title="${esc(c.name)}" aria-label="${esc(c.name)}">
+      <img loading="lazy" src="${CD}v1/champion-icons/${c.id}.png" alt=""><span>${esc(c.name)}</span></button>`).join('')}</div>
+  </div>`);
+  $('#avatar-search').addEventListener('input', (e) => {
+    const q = fold(e.target.value);
+    $$('.avatar-opt').forEach((b) => { b.hidden = !!q && !fold(b.title).includes(q); });
+  });
+  let saving = false;
+  return new Promise((resolve) => {
+    $$('.avatar-opt').forEach((b) => (b.onclick = async () => {
+      if (saving) return;
+      saving = true;
+      try {
+        setUser(await api('/capsules/avatar', { method: 'PUT', body: { championId: +b.dataset.avatar } }));
+        $('#sheet').classList.remove('locked'); closeSheet(); buzz(20);
+        if (S.view === 'arena') loadArena({ quiet: true });
+        resolve();
+      } catch (e) { toast(e.message, true); } finally { saving = false; }
+    }));
+    const wait = setInterval(() => { if ($('#sheet').hidden) { clearInterval(wait); resolve(); } }, 300);
+  });
+}
+
+function setUser(user) {
+  S.user = user;
+  store.set('capsules.user', JSON.stringify(user));
+  $('#menu-user').innerHTML = `<span class="avatar">${avatarInner(user)}</span><span><b>${esc(user.displayName)}</b>${esc(user.email)}</span>`;
 }
 
 function friendHTML(p) {
@@ -1017,7 +1059,8 @@ function ago(iso) {
 }
 
 function avatarInner(p) {
-  return `${esc((p.displayName[0] || '?').toUpperCase())}${p.profileIconId ? `<img src="https://ddragon.leagueoflegends.com/cdn/img/profileicon/${+p.profileIconId}.png" alt="">` : ''}`;
+  const src = avatarSrc(p);
+  return `${esc((p.displayName[0] || '?').toUpperCase())}${src ? `<img src="${esc(src)}" alt="">` : ''}`;
 }
 
 const synergyHTML = (list) => `<div class="synergies">${list.length
@@ -2031,7 +2074,7 @@ function renderAll() {
 
 async function start() {
   $('#auth').hidden = true; $('#app').hidden = false;
-  $('#menu-user').innerHTML = `<b>${esc(S.user?.displayName)}</b>${esc(S.user?.email)}`;
+  if (S.user) setUser(S.user);
   // Dernier état connu (et catalogue en cache) affichés tout de suite ; ouvertures bloquées jusqu'à la réponse du serveur.
   S.online = false;
   const snap = JSON.parse(store.get(snapKey()) || 'null');
@@ -2043,8 +2086,10 @@ async function start() {
     renderAll();
   }
   try {
-    const [state, coll] = await Promise.all([api('/capsules/state', { retry: true }), api('/capsules/collection', { retry: true }), loadCatalog()]);
+    const [state, coll, me] = await Promise.all([api('/capsules/state', { retry: true }), api('/capsules/collection', { retry: true }),
+      api('/me', { retry: true }), loadCatalog()]);
     S.online = true;
+    setUser(me);
     applyCollection(coll);
     setWallet(state);
     renderAll();
@@ -2056,6 +2101,8 @@ async function start() {
     S.retryStart = true;
   }
   setupNotify();
+  // Pas encore d'icône : choix imposé avant tout autre popup.
+  if (S.online && S.cat && !S.user?.avatarChampionId) await showAvatarPicker(true);
   await maybeShowNews();
   maybePromptInstall();
 }
@@ -2135,8 +2182,9 @@ function bind() {
     const p = await addFriend({ userId: S.friend.userId });
     if (p) { S.friend.added = true; $('#owner-follow').hidden = true; }
   };
-  $('#sheet').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeSheet(); });
-  addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#tuto').hidden) closeSheet(); });
+  $('#sheet').addEventListener('click', (e) => { if (e.target.closest('[data-close]') && !$('#sheet').classList.contains('locked')) closeSheet(); });
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#tuto').hidden && !$('#sheet').classList.contains('locked')) closeSheet(); });
+  $('#avatar-menu').onclick = () => { $('#menu').hidden = true; if (S.cat) showAvatarPicker(); };
 
   $$('.coll-controls .segmented button').forEach((b) => (b.onclick = () => { S.coll.group = b.dataset.group; if (b.dataset.group !== 'rarity') S.coll.rarity = null; syncSegmented(); renderCollection(); }));
   let t;

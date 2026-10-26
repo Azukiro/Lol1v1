@@ -951,6 +951,10 @@ namespace Api.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<int?>("AvatarChampionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("avatar_champion_id");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");

@@ -188,7 +188,7 @@ public sealed class BattleService(
         var users = await db.Users.Include(u => u.RiotAccount).Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id);
         LadderEntryDto Entry(BattleProfile p, int rank) =>
             new(rank, p.UserId, users.GetValueOrDefault(p.UserId)?.DisplayName ?? "?", users.GetValueOrDefault(p.UserId)?.RiotAccount?.ProfileIconId,
-                p.Rating, p.Wins, p.Losses);
+                p.Rating, p.Wins, p.Losses, users.GetValueOrDefault(p.UserId)?.AvatarChampionId);
 
         var entries = new List<LadderEntryDto>();
         for (var i = 0; i < top.Count; i++)
@@ -205,7 +205,8 @@ public sealed class BattleService(
     {
         var users = await db.Users.Include(u => u.RiotAccount).Where(u => u.Id == b.AttackerId || u.Id == b.DefenderId).ToDictionaryAsync(u => u.Id);
         BattlePlayerDto Player(Guid id, int before, int after) =>
-            new(id, users.GetValueOrDefault(id)?.DisplayName ?? "Joueur supprimé", users.GetValueOrDefault(id)?.RiotAccount?.ProfileIconId, before, after);
+            new(id, users.GetValueOrDefault(id)?.DisplayName ?? "Joueur supprimé", users.GetValueOrDefault(id)?.RiotAccount?.ProfileIconId, before, after,
+                users.GetValueOrDefault(id)?.AvatarChampionId);
         return new BattleDto(b.Id, b.CreatedAt,
             Player(b.AttackerId, b.AttackerRatingBefore, b.AttackerRatingAfter), Player(b.DefenderId, b.DefenderRatingBefore, b.DefenderRatingAfter),
             b.AttackerWon, b.Essence, o.Minutes, o.A, o.B, o.Events);

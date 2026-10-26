@@ -71,6 +71,20 @@ public sealed class CapsulesController(
         return NoContent();
     }
 
+    /// <summary>Icône de profil : n'importe quel champion du catalogue.</summary>
+    [HttpPut("avatar")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
+    public async Task<UserDto> Avatar(AvatarRequest req)
+    {
+        var catalog = await catalogs.GetAsync(HttpContext.RequestAborted);
+        if (!catalog.ChampionById.ContainsKey(req.ChampionId)) throw new AppException("Champion inconnu.");
+        var user = await db.Users.Include(u => u.RiotAccount).FirstOrDefaultAsync(u => u.Id == User.UserId())
+            ?? throw new AppException("Compte introuvable.", 401);
+        user.AvatarChampionId = req.ChampionId;
+        await db.SaveChangesAsync();
+        return Mapping.ToDto(user);
+    }
+
     /// <summary>Collection et roster d'un autre joueur.</summary>
     [HttpGet("players/{playerId:guid}")]
     public Task<PlayerCollectionDto> Player(Guid playerId) => social.GetPlayerAsync(User.UserId(), playerId);

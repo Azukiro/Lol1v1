@@ -124,7 +124,7 @@ public sealed class RelicSocialService(AppDbContext db)
         {
             wallets.TryGetValue(u.Id, out var w);
             return new PlayerCardDto(u.Id, u.DisplayName, u.RiotAccount?.RiotId, u.RiotAccount?.ProfileIconId,
-                owned.GetValueOrDefault(u.Id), w?.TotalOpened ?? 0, ParseRoster(w?.Roster), added.Contains(u.Id));
+                owned.GetValueOrDefault(u.Id), w?.TotalOpened ?? 0, ParseRoster(w?.Roster), added.Contains(u.Id), u.AvatarChampionId);
         });
     }
 }

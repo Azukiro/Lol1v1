@@ -7,7 +7,7 @@ namespace Api.Dtos;
 public sealed record RegisterRequest(string Email, string Password, string DisplayName);
 public sealed record LoginRequest(string Email, string Password);
 public sealed record AuthResponse(string Token, UserDto User);
-public sealed record UserDto(Guid Id, string Email, string DisplayName, RiotAccountDto? RiotAccount);
+public sealed record UserDto(Guid Id, string Email, string DisplayName, RiotAccountDto? RiotAccount, int? AvatarChampionId = null);
 public sealed record RiotAccountDto(string Puuid, string GameName, string TagLine, string Region, string RiotId, int? ProfileIconId);
 public sealed record LinkRiotRequest(string Puuid, string GameName, string TagLine, string Region, int? ProfileIconId = null);
 public sealed record PlayerSearchResult(Guid UserId, string DisplayName, string RiotId, int? ProfileIconId = null);

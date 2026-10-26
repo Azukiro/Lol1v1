@@ -21,10 +21,11 @@ public sealed record CollectionResponse(List<OwnedItemDto> Items, List<CapsuleHi
 public sealed record RosterSlotDto(CapsuleItemKind Kind, int ItemId);
 public sealed record RosterRequest(List<RosterSlotDto?> Slots);
 public sealed record PlayerCardDto(
-    Guid UserId, string DisplayName, string? RiotId, int? ProfileIconId, int Owned, int TotalOpened, List<RosterSlotDto?> Roster, bool Added);
+    Guid UserId, string DisplayName, string? RiotId, int? ProfileIconId, int Owned, int TotalOpened, List<RosterSlotDto?> Roster, bool Added, int? AvatarChampionId = null);
 public sealed record PlayerCollectionDto(PlayerCardDto Player, List<OwnedItemDto> Items);
 /// <summary>Riot ID / pseudo saisi, ou identifiant d'un joueur déjà affiché (suggestion).</summary>
 public sealed record AddFriendRequest(string? Query, Guid? UserId = null);
+public sealed record AvatarRequest(int ChampionId);
 
 public sealed record CatalogChampionDto(int Id, string Name, string Alias, string[] Roles, Api.Domain.Battle.Talent Talent, Api.Domain.Battle.ChampionProfile? Profile);
 public sealed record CatalogSkinDto(int Id, int ChampionId, int Num, string Name, Rarity Rarity, int[] Lines, bool Legacy, string? Load);

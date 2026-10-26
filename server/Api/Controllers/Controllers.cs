@@ -417,7 +417,7 @@ public static class Mapping
 
     public static string NormalizeRiotId(string gameName, string tagLine) => $"{gameName.Trim()}#{tagLine.Trim()}".ToLowerInvariant();
 
-    public static UserDto ToDto(User u) => new(u.Id, u.Email, u.DisplayName, u.RiotAccount is null ? null : ToDto(u.RiotAccount));
+    public static UserDto ToDto(User u) => new(u.Id, u.Email, u.DisplayName, u.RiotAccount is null ? null : ToDto(u.RiotAccount), u.AvatarChampionId);
 
     public static RiotAccountDto ToDto(RiotAccount r) => new(r.Puuid, r.GameName, r.TagLine, r.Region, r.RiotId, r.ProfileIconId);
 

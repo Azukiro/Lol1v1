@@ -11,6 +11,12 @@ public sealed class BattleOptions
 {
     public int StartRating { get; set; } = 1000;
     public int KFactor { get; set; } = 32;
+    /// <summary>
+    /// Diviseur de l'Elo : l'écart de cote qui donne 10 contre 1. Le classique 400 suppose des résultats très prévisibles ;
+    /// les combats de reliques restent proches du pile ou face, 1200 aligne le score attendu sur les victoires réelles
+    /// (200 points d'avance ≈ 60 %), pour qu'attaquer un joueur moins bien classé ne coûte pas de cote en moyenne.
+    /// </summary>
+    public double EloScale { get; set; } = 1200;
     /// <summary>Victoires récompensées en essence par jour (heure de Paris).</summary>
     public int RewardedWinsPerDay { get; set; } = 4;
     /// <summary>Essence d'une victoire ; 0 = la moitié du prix d'une relique (2 victoires = 1 relique).</summary>
@@ -116,8 +122,7 @@ public sealed class BattleService(
         var outcome = BattleRules.Simulate(mine, theirs, seed, LineNames(catalog));
         var won = outcome.Winner == BattleSide.A;
 
-        var expected = 1 / (1 + Math.Pow(10, (defender.Rating - attacker.Rating) / 400.0));
-        var delta = (int)Math.Round(_o.KFactor * ((won ? 1 : 0) - expected));
+        var delta = RatingDelta(attacker.Rating, defender.Rating, won, _o.KFactor, _o.EloScale);
         var battle = new RelicBattle
         {
             AttackerId = userId, DefenderId = opponentId, Seed = seed, AttackerWon = won, CreatedAt = now,
@@ -245,6 +250,13 @@ public sealed class BattleService(
             units.Add(new BattleUnit(slot.Kind, slot.ItemId, champ.Name, champ.Id, rarity, classes, lines, talent, Profiles.For(champ.Alias, classes)));
         }
         return units.Count == BattleRules.TeamSize ? units : null;
+    }
+
+    /// <summary>Variation de cote de l'attaquant (le défenseur prend l'opposé) : Elo de facteur K et de diviseur <paramref name="scale"/>.</summary>
+    public static int RatingDelta(int attacker, int defender, bool won, int kFactor, double scale)
+    {
+        var expected = 1 / (1 + Math.Pow(10, (defender - attacker) / scale));
+        return (int)Math.Round(kFactor * ((won ? 1 : 0) - expected));
     }
 
     private static Dictionary<int, string> LineNames(CapsuleCatalog catalog) => catalog.Lines.ToDictionary(l => l.Id, l => l.Name);

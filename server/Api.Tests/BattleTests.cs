@@ -185,6 +185,39 @@ public class BattleRulesTests(ITestOutputHelper output)
     }
 }
 
+public class RatingTests
+{
+    private static readonly BattleOptions Defaults = new();
+
+    private static int Delta(int attacker, int defender, bool won) =>
+        BattleService.RatingDelta(attacker, defender, won, Defaults.KFactor, Defaults.EloScale);
+
+    [Fact]
+    public void Equal_ratings_win_or_lose_half_the_k_factor()
+    {
+        Assert.Equal(16, Delta(1000, 1000, true));
+        Assert.Equal(-16, Delta(1000, 1000, false));
+    }
+
+    [Fact]
+    public void Favourite_attacking_200_points_below_risks_little_more_than_it_wins()
+    {
+        // Diviseur 400 : +8 / −24, attaquer coûtait de la cote à 60 % de victoires réelles.
+        Assert.Equal(13, Delta(1135, 935, true));
+        Assert.Equal(-19, Delta(1135, 935, false));
+        Assert.Equal(8, BattleService.RatingDelta(1135, 935, true, 32, 400));
+        Assert.Equal(-24, BattleService.RatingDelta(1135, 935, false, 32, 400));
+    }
+
+    [Fact]
+    public void Attacking_is_neutral_at_the_real_win_rate()
+    {
+        // 200 points d'avance ≈ 60 % de victoires en combat : l'espérance de cote reste proche de zéro.
+        var expectation = 0.6 * Delta(1135, 935, true) + 0.4 * Delta(1135, 935, false);
+        Assert.InRange(expectation, -1, 1);
+    }
+}
+
 public class BattleFlowTests
 {
     private static async Task<(HttpClient Http, Guid Id)> Player(ApiFactory factory, string name)

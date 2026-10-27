@@ -505,22 +505,6 @@ button.slot:active { transform: scale(.97); }
 .coach-tips li::before { content: ''; position: absolute; left: 2px; top: .5em; width: 7px; height: 7px; border-radius: 50%; background: var(--yellow); }
 .coach-ok, .coach-empty { margin: 0; font-size: 13px; color: var(--green); }
 .coach-empty { color: var(--muted); }
-.coach .btn { justify-self: start; }
-.optimize { display: grid; gap: 12px; padding: 24px 18px 10px; }
-.optimize .muted { margin: 0; font-size: 13px; }
-.opt-power { display: flex; align-items: baseline; gap: 10px; font-size: 13px; color: var(--muted); }
-.opt-power b { font-size: 22px; color: var(--text); font-variant-numeric: tabular-nums; }
-.opt-power b.up { color: var(--green); }
-.opt-list { display: grid; gap: 6px; }
-.opt-row { display: grid; grid-template-columns: 62px 40px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 6px 10px 6px 12px; border-radius: 12px; background: var(--panel-2); border: 1px solid transparent; }
-.opt-row.changed { border-color: rgba(25, 227, 255, .5); background: rgba(25, 227, 255, .06); }
-.opt-row .role { font-family: var(--display); font-weight: 700; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
-.opt-pic { width: 40px; height: 52px; border-radius: 8px; overflow: hidden; background: var(--bg-2); }
-.opt-pic img { width: 100%; height: 100%; object-fit: cover; }
-.opt-txt { display: grid; min-width: 0; }
-.opt-txt b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.opt-txt span { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.opt-row .fit { font-size: 12px; }
 
 /* Nouveauté */
 .news { display: grid; gap: 12px; padding: 26px 18px 8px; }

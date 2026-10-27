@@ -771,67 +771,7 @@ function coachHTML(slots) {
     <div class="coach-curve">${its.map((it, i) => { const p = it?.champ.profile; return `<span class="cv" style="--pc:${p ? CURVE[p.curve].color : 'var(--line-2)'}"><i></i><em>${ROLES[i]}</em><b>${p ? CURVE[p.curve].label : '—'}</b><small>${p ? STYLE[p.style].label : ''}</small></span>`; }).join('')}</div>
     <p class="coach-verdict">${curveVerdict(its)}${bonus.length ? ` Bonus : ${bonus.join(', ')}.` : ''}</p>
     ${tips.length ? `<ul class="coach-tips">${tips.map((t) => `<li>${t}</li>`).join('')}</ul>` : '<p class="coach-ok">Tout le monde est à son poste et la compo est complète.</p>'}
-    <button class="btn small" type="button" id="coach-optimize">Optimiser mon roster</button>
   </div>`;
-}
-
-/** Valeur d'une équipe pour l'optimiseur : puissance × besoins de composition et comp teamfight en teamfight. */
-function teamScore(its) {
-  const needs = teamNeeds(its);
-  const fights = its.filter((it) => it?.champ.profile?.style === 'TEAMFIGHT').length;
-  const comp = 1 - (needs[0].ok ? 0 : 0.10) - (needs[1].ok ? 0 : 0.10) - (needs[2].ok ? 0 : 0.05) + (fights >= 3 ? 0.05 : 0);
-  return teamPower(its) * comp;
-}
-
-/**
- * Meilleur roster avec sa collection. D'abord les affectations (poste, objet) par score décroissant (rareté × bonus de poste),
- * un champion par poste ; puis échanges poste par poste tant qu'ils améliorent l'équipe (composition comprise).
- */
-function suggestTeam() {
-  const owned = [...S.owned.keys()].map(fromKey).filter(Boolean);
-  const pairs = [];
-  owned.forEach((it) => ROLES.forEach((_, r) => pairs.push({ it, r, score: (1 + rank(it.rarity) * 0.02) * (1 + fitOf(it.champ, r) / 100) })));
-  pairs.sort((a, b) => b.score - a.score);
-  const out = Array(5).fill(null);
-  const champs = new Set();
-  for (const { it, r } of pairs) {
-    if (out[r] || champs.has(it.champ.id)) continue;
-    out[r] = it; champs.add(it.champ.id);
-  }
-  for (let improved = true, rounds = 0; improved && rounds < 5; rounds++) {
-    improved = false;
-    for (let r = 0; r < 5; r++) {
-      let best = teamScore(out);
-      for (const it of owned) {
-        if (out.some((o, i) => i !== r && o?.champ.id === it.champ.id)) continue;
-        const trial = out.map((o, i) => (i === r ? it : o));
-        const score = teamScore(trial);
-        if (score > best + 0.5) { best = score; out[r] = it; improved = true; }
-      }
-    }
-  }
-  return out;
-}
-
-function showOptimize() {
-  const now = rosterItems(S.roster);
-  const best = suggestTeam();
-  const same = best.every((it, i) => (it?.key ?? null) === (now[i]?.key ?? null));
-  const row = (it, i) => `<div class="opt-row${(it?.key ?? null) !== (now[i]?.key ?? null) ? ' changed' : ''}">
-    <span class="role">${ROLES[i]}</span><span class="opt-pic">${it ? `<img src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt="">` : ''}</span>
-    <span class="opt-txt"><b>${it ? esc(it.name) : '—'}</b>${it ? `<span>${it.kind === 'SKIN' ? `${esc(it.sub)} · ` : ''}${LABEL[it.rarity]}</span>` : ''}</span>
-    ${it ? `<span class="fit ${fitOf(it.champ, i) > 0 ? 'up' : 'down'}">${signed(fitOf(it.champ, i))} %</span>` : ''}</div>`;
-  openSheet(`<div class="optimize">
-    <span class="kicker">Suggestion</span><h2>Roster optimisé</h2>
-    <p class="muted">Chaque champion à son meilleur poste, une compo complète, les objets les plus rares en priorité. Les postes modifiés sont surlignés.</p>
-    <div class="opt-power"><span>Puissance</span><b>${teamPower(now)}</b><span>→</span><b class="up">${teamPower(best)}</b></div>
-    <div class="coach-needs">${teamNeeds(best).map((x) => `<span class="need ${x.ok ? 'ok' : 'ko'}">${x.ok ? '✓' : '✗'} ${x.label}</span>`).join('')}</div>
-    <div class="opt-list">${best.map(row).join('')}</div>
-    ${same ? '<p class="coach-ok">Ton roster est déjà le meilleur possible avec ta collection.</p>'
-      : '<button class="btn primary block" type="button" id="opt-apply">Appliquer ce roster</button>'}
-    <p class="hint">La courbe compte aussi : une équipe early doit gagner vite, une équipe late doit tenir les lanes.</p>
-  </div>`);
-  $('#opt-apply')?.addEventListener('click', () => saveRoster(best.map((it) => it && { kind: it.kind, itemId: it.id })));
 }
 
 // Sélecteur d'un poste : objets classés par bonus de poste (principal, secondaire, hors poste), puis par rareté.
@@ -2147,7 +2087,6 @@ function bind() {
     if (clear) { setSlot(+clear.dataset.pickClear, null); return; }
     const slot = e.target.closest('[data-slot]');
     if (slot) { showSlotPicker(+slot.dataset.slot); return; }
-    if (e.target.closest('#coach-optimize')) { showOptimize(); return; }
     const foe = e.target.closest('[data-foe]');
     if (foe) { openFoe(foe.dataset.foe); return; }
     const fight = e.target.closest('[data-battle]');

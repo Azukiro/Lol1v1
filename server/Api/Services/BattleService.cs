@@ -17,6 +17,11 @@ public sealed class BattleOptions
     /// (200 points d'avance ≈ 60 %), pour qu'attaquer un joueur moins bien classé ne coûte pas de cote en moyenne.
     /// </summary>
     public double EloScale { get; set; } = 1200;
+    /// <summary>
+    /// Part du gain de l'attaquant que perd un défenseur battu (il n'était pas là pour jouer) ; une défense réussie rapporte la mise entière.
+    /// Les cotes gonflent un peu : le retour à mi-chemin de 1000 en fin de saison compense.
+    /// </summary>
+    public double DefenderLossShare { get; set; } = 0.5;
     /// <summary>Victoires récompensées en essence par jour (heure de Paris).</summary>
     public int RewardedWinsPerDay { get; set; } = 4;
     /// <summary>Essence d'une victoire ; 0 = la moitié du prix d'une relique (2 victoires = 1 relique).</summary>
@@ -130,7 +135,7 @@ public sealed class BattleService(
             Result = JsonSerializer.Serialize(outcome, Json),
         };
         attacker.Rating = Math.Max(0, attacker.Rating + delta);
-        defender.Rating = Math.Max(0, defender.Rating - delta);
+        defender.Rating = Math.Max(0, defender.Rating + DefenderDelta(delta, _o.DefenderLossShare));
         if (won) { attacker.Wins++; defender.Losses++; } else { attacker.Losses++; defender.Wins++; }
         attacker.UpdatedAt = defender.UpdatedAt = now;
         attacker.PeakRating = Math.Max(attacker.PeakRating, attacker.Rating);
@@ -252,12 +257,16 @@ public sealed class BattleService(
         return units.Count == BattleRules.TeamSize ? units : null;
     }
 
-    /// <summary>Variation de cote de l'attaquant (le défenseur prend l'opposé) : Elo de facteur K et de diviseur <paramref name="scale"/>.</summary>
+    /// <summary>Variation de cote de l'attaquant : Elo de facteur K et de diviseur <paramref name="scale"/>.</summary>
     public static int RatingDelta(int attacker, int defender, bool won, int kFactor, double scale)
     {
         var expected = 1 / (1 + Math.Pow(10, (defender - attacker) / scale));
         return (int)Math.Round(kFactor * ((won ? 1 : 0) - expected));
     }
+
+    /// <summary>Variation du défenseur : l'opposé de l'attaquant, réduit à <paramref name="lossShare"/> quand il perd.</summary>
+    public static int DefenderDelta(int attackerDelta, double lossShare) =>
+        attackerDelta > 0 ? -(int)Math.Round(attackerDelta * lossShare, MidpointRounding.AwayFromZero) : -attackerDelta;
 
     private static Dictionary<int, string> LineNames(CapsuleCatalog catalog) => catalog.Lines.ToDictionary(l => l.Id, l => l.Name);
 

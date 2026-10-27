@@ -216,6 +216,14 @@ public class RatingTests
         var expectation = 0.6 * Delta(1135, 935, true) + 0.4 * Delta(1135, 935, false);
         Assert.InRange(expectation, -1, 1);
     }
+
+    [Fact]
+    public void Beaten_defender_loses_half_but_a_held_defense_gains_in_full()
+    {
+        Assert.Equal(-8, BattleService.DefenderDelta(Delta(1000, 1000, true), Defaults.DefenderLossShare));
+        Assert.Equal(-7, BattleService.DefenderDelta(13, Defaults.DefenderLossShare));
+        Assert.Equal(16, BattleService.DefenderDelta(Delta(1000, 1000, false), Defaults.DefenderLossShare));
+    }
 }
 
 public class BattleFlowTests
@@ -304,8 +312,8 @@ public class BattleFlowTests
 
         var battle = await Attack(a, bId);
         Assert.Equal(1000, battle.Attacker.RatingBefore);
-        Assert.Equal(battle.Attacker.RatingAfter - 1000, 1000 - battle.Defender.RatingAfter);
         Assert.Equal(battle.AttackerWon ? 16 : -16, battle.Attacker.RatingAfter - 1000);
+        Assert.Equal(battle.AttackerWon ? -8 : 16, battle.Defender.RatingAfter - 1000);
         Assert.Equal(battle.AttackerWon ? 75 : 0, battle.Essence);
 
         // Deuxième attaque sur la même cible : refusée tant que B n'a pas riposté.

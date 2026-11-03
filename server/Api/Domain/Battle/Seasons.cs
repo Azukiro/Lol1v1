@@ -17,6 +17,13 @@ public static class Seasons
 
     public static string IdOf(DateTimeOffset localNow) => $"{localNow.Year:D4}-{localNow.Month:D2}";
 
+    /// <summary>Saison terminée dans la période locale ]from, to] (changement de mois), ou null.</summary>
+    public static string? EndedDuring(DateTime from, DateTime to)
+    {
+        var first = new DateTime(to.Year, to.Month, 1);
+        return first > from && first <= to ? IdOf(new DateTimeOffset(first.AddDays(-1))) : null;
+    }
+
     public static int Number(string seasonId)
     {
         var (y, m) = (int.Parse(seasonId[..4]), int.Parse(seasonId[5..]));

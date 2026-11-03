@@ -324,6 +324,29 @@ public class BattleFlowTests
     }
 
     [Fact]
+    public async Task A_season_ending_mid_week_keeps_its_final_tier_as_frame()
+    {
+        await using var factory = new ApiFactory();
+        SeedCatalog(factory);
+        var (a, aId) = await Player(factory, "monthA");
+        var (b, bId) = await Player(factory, "monthB");
+        await GiveRoster(factory, aId, a);
+        await GiveRoster(factory, bId, b);
+        await Attack(a, bId);
+
+        // Dimanche 1er novembre : bascule de saison, cotes remises à niveau, plus personne de classé.
+        factory.Clock.Advance(new DateTimeOffset(2026, 11, 1, 12, 0, 0, TimeSpan.Zero) - factory.Clock.GetUtcNow());
+        Assert.Null((await a.GetFromJsonAsync<ArenaDto>("/api/v1/capsules/arena", ApiJson.Options))!.Frame);
+
+        // Lundi : le cadre reprend le palier final d'octobre.
+        factory.Clock.Advance(TimeSpan.FromDays(1));
+        var arena = (await a.GetFromJsonAsync<ArenaDto>("/api/v1/capsules/arena", ApiJson.Options))!;
+        using var scope = factory.Services.CreateScope();
+        var final = await scope.ServiceProvider.GetRequiredService<AppDbContext>().SeasonResults.SingleAsync(r => r.UserId == aId && r.SeasonId == "2026-10");
+        Assert.Equal(final.Tier, arena.Frame);
+    }
+
+    [Fact]
     public async Task Full_rosters_are_required_to_fight()
     {
         await using var factory = new ApiFactory();
@@ -457,6 +480,16 @@ public class MetaTests
         Assert.Equal(0.92 * 0.96 - 1, Meta.Bonus(1, ChampionClass.FIGHTER, changes), 6);
         Assert.Equal(-0.04, Meta.Bonus(2, ChampionClass.FIGHTER, changes), 6);
         Assert.Equal(0, Meta.Bonus(2, ChampionClass.MAGE, changes));
+    }
+
+    [Fact]
+    public void Season_end_is_found_inside_the_closed_week()
+    {
+        Assert.Equal("2026-10", Seasons.EndedDuring(new DateTime(2026, 10, 26), new DateTime(2026, 11, 2)));
+        Assert.Null(Seasons.EndedDuring(new DateTime(2026, 11, 2), new DateTime(2026, 11, 9)));
+        Assert.Equal("2026-12", Seasons.EndedDuring(new DateTime(2026, 12, 28), new DateTime(2027, 1, 4)));
+        // Mois changé pile le lundi du patch : la semaine close inclut ce minuit.
+        Assert.Equal("2027-02", Seasons.EndedDuring(new DateTime(2027, 2, 22), new DateTime(2027, 3, 1)));
     }
 
     [Fact]

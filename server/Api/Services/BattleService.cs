@@ -441,8 +441,16 @@ public sealed class BattleService(
         };
         db.MetaPatches.Add(patch);
         // Cadres de la semaine : palier de chaque joueur classé au moment du patch, c'est-à-dire en fin de semaine passée.
+        // Si une saison s'est terminée pendant cette semaine, la remise à niveau a fait baisser les cotes : le palier final
+        // de la saison compte aussi, le meilleur des deux l'emporte.
+        var ended = Seasons.EndedDuring(start.AddDays(-7), start);
+        var finals = ended is null ? []
+            : await db.SeasonResults.Where(r => r.SeasonId == ended).ToDictionaryAsync(r => r.UserId, r => r.Tier);
         foreach (var p in await db.BattleProfiles.ToListAsync())
-            p.WeekTier = p.Wins + p.Losses > 0 ? Seasons.TierOf(p.Rating) : null;
+        {
+            Tier? now = p.Wins + p.Losses > 0 ? Seasons.TierOf(p.Rating) : null;
+            p.WeekTier = finals.TryGetValue(p.UserId, out var final) && (now is null || final > now) ? final : now;
+        }
         await db.SaveChangesAsync();
         db.Entry(patch).State = EntityState.Detached;
         return patch;

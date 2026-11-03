@@ -777,7 +777,8 @@ function coachHTML(slots) {
   const bonus = [count('TEAMFIGHT') >= 3 && 'comp teamfight +5 %', count('SOLO') >= 2 && 'split-push'].filter(Boolean);
   return `<div class="coach">
     <div class="coach-head"><span class="kicker">Analyse de l'équipe</span><span class="power">Puissance <b>${teamPower(its)}</b></span></div>
-    ${S.meta?.changes.length ? `<button class="btn ghost small" type="button" id="coach-meta">Patch ${S.meta.number} : buffs et nerfs</button>` : ''}
+    <div class="coach-links">${S.meta?.changes.length ? `<button class="btn ghost small" type="button" id="coach-meta">Patch ${S.meta.number} : buffs et nerfs</button>` : ''}
+      <button class="btn ghost small" type="button" id="coach-guide">Guide des règles</button></div>
     <div class="coach-needs">${needs.map((x) => `<span class="need ${x.ok ? 'ok' : 'ko'}">${x.ok ? '✓' : '✗'} ${x.label}</span>`).join('')}</div>
     <div class="coach-curve">${its.map((it, i) => { const p = it?.champ.profile; return `<span class="cv" style="--pc:${p ? CURVE[p.curve].color : 'var(--line-2)'}"><i></i><em>${ROLES[i]}</em><b>${p ? CURVE[p.curve].label : '—'}</b><small>${p ? STYLE[p.style].label : ''}</small></span>`; }).join('')}</div>
     <p class="coach-verdict">${curveVerdict(its)}${bonus.length ? ` Bonus : ${bonus.join(', ')}.` : ''}</p>
@@ -898,7 +899,7 @@ function friendHTML(p) {
   const total = S.cat ? RARITIES.reduce((s, r) => s + S.cat.byRarity[r].length, 0) : 0;
   const pct = total ? Math.round((p.owned / total) * 1000) / 10 : 0;
   return `<div class="friend">
-    <button class="friend-main" data-player="${p.userId}" type="button">
+    <button class="friend-main" data-profile="${p.userId}" type="button">
       ${avatarHTML(p)}
       <span class="who"><b>${esc(p.displayName)}</b><span>${p.riotId ? esc(p.riotId) + ' · ' : ''}${p.owned} objets · ${pct}%</span></span>
       <span class="mini-roster">${p.roster.map((s) => { const it = s && item(s.kind, s.itemId); return it ? `<img loading="lazy" class="r-${it.rarity}" src="${esc(it.art)}" alt="">` : '<i></i>'; }).join('')}</span>
@@ -938,6 +939,95 @@ async function openPlayer(userId) {
       owned: new Map(res.items.map((i) => [`${i.kind}:${i.itemId}`, i])) };
     S.coll.rarity = null;
     setView('collection', { friend: true });
+  } catch (e) { toast(e.message, true); }
+}
+
+// ---------- Profil public : palmarès et statistiques d'arène, visible par tous ----------
+const pctOf = (w, l) => (w + l ? Math.round((w / (w + l)) * 100) : 0);
+
+/** Titres honorifiques gagnés, du plus prestigieux au plus modeste ; toujours au moins un. */
+function profileTitles(s, collPct) {
+  const games = s.wins + s.losses;
+  const top = s.rank ? Math.ceil((s.rank / s.ranked) * 100) : null;
+  return [
+    s.titles && [`Champion de saison${s.titles > 1 ? ` ×${s.titles}` : ''}`, 'gold'],
+    s.rank === 1 && ['Numéro 1 du classement', 'gold'],
+    s.podiums > s.titles && ['Habitué des podiums', 'gold'],
+    top && top <= 10 && s.ranked >= 5 && [`Top ${top} % des joueurs`, 'gold'],
+    games >= 3 && !s.losses && ['Invaincu', 'gold'],
+    s.bestStreak >= 5 && [`Série infernale (${s.bestStreak})`, 'hot'],
+    s.streak >= 3 && ['En feu', 'hot'],
+    s.bestUpset?.gap >= 100 && ['Tueur de géants', 'hot'],
+    s.flawless && [`Partie parfaite${s.flawless > 1 ? ` ×${s.flawless}` : ''}`, 'hot'],
+    s.aces >= 5 && ['Roi de l\'ACE', 'hot'],
+    s.defenseWins >= 5 && pctOf(s.defenseWins, s.defenseLosses) >= 60 && ['Forteresse imprenable', ''],
+    s.attackWins >= 10 && ['Conquérant', ''],
+    games >= 5 && s.firstBloods / games >= 0.6 && ['Premier sang', ''],
+    s.kills >= 100 && ['Machine à kills', ''],
+    collPct >= 30 && ['Grand collectionneur', ''],
+    games >= 50 && ['Vétéran de l\'arène', ''],
+  ].filter(Boolean).concat(games ? [] : [['Talent en devenir', '']]);
+}
+
+async function showProfile(userId) {
+  try {
+    const [s, coll] = await Promise.all([api(`/capsules/players/${userId}/stats`), api(`/capsules/players/${userId}`).catch(() => null)]);
+    if (!S.cat) await loadCatalog();
+    const p = s.player;
+    const me = userId === S.user?.id;
+    const games = s.wins + s.losses;
+    const total = RARITIES.reduce((n, r) => n + S.cat.byRarity[r].length, 0);
+    const collPct = total ? Math.round((p.owned / total) * 1000) / 10 : 0;
+    const gem = (coll?.items || []).filter((i) => i.kind === 'SKIN').map((i) => item(i.kind, i.itemId)).filter(Boolean)
+      .sort((a, b) => rank(b.rarity) - rank(a.rarity))[0];
+    const top = s.rank ? Math.ceil((s.rank / s.ranked) * 100) : null;
+    const fact = (v, label) => `<div><b>${v}</b><span>${label}</span></div>`;
+    const sec = (title, body) => `<section class="pf-sec"><span class="kicker">${title}</span>${body}</section>`;
+    const champ = (c, label, line) => {
+      const it = c && item(c.kind, c.itemId);
+      return c ? `<div class="pf-champ">${it ? `<img loading="lazy" class="r-${it.rarity}" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt="">` : ''}
+        <span><span class="kicker">${label}</span><b>${esc(c.champion)}</b><small>${line(c)}</small></span></div>` : '';
+    };
+    const rival = (r, label, line, cls = '') => (r ? `<button class="pf-rival ${cls}" type="button" data-profile="${r.userId}">
+      <span class="kicker">${label}</span><b>${esc(r.displayName)}</b><small>${line(r)}</small></button>` : '');
+    const streak = s.streak > 0 ? `${s.streak} V` : s.streak < 0 ? `${-s.streak} D` : '—';
+
+    openSheet(`<div class="pf" style="--tc:${TIER[s.tier].color}">
+      <div class="pf-hero">
+        <span class="pf-avatar">${avatarHTML(p)}</span>
+        <h2>${esc(p.displayName)}</h2>
+        <div class="pf-tags">${tierBadge(s.tier)}${s.rank ? `<span class="pf-rank">#${s.rank} sur ${s.ranked}</span>` : ''}${top && s.rank > 1 && top <= 50 ? `<span class="pf-top">Top ${top} %</span>` : ''}</div>
+        <div class="pf-rating"><b>${s.rating}</b><span>pts · record ${s.bestRating}</span></div>
+      </div>
+      <div class="pf-titles">${profileTitles(s, collPct).map(([t, c]) => `<span class="pf-title ${c}">${t}</span>`).join('')}</div>
+      ${games ? `
+      ${sec('Bilan', `<div class="pf-big"><b>${pctOf(s.wins, s.losses)} %</b><span>de victoires sur ${games} combat${games > 1 ? 's' : ''}</span></div>
+        <div class="pf-form" aria-label="Forme récente">${s.form.map((w) => `<i class="${w ? 'w' : 'l'}">${w ? 'V' : 'D'}</i>`).join('')}</div>
+        <div class="facts">${fact(`${s.wins} V · ${s.losses} D`, 'Toutes saisons')}${fact(`${pctOf(s.attackWins, s.attackLosses)} %`, `En attaque (${s.attackWins} V)`)}${fact(`${pctOf(s.defenseWins, s.defenseLosses)} %`, `En défense (${s.defenseWins} V)`)}</div>`)}
+      ${sec('Exploits', `<div class="facts">${fact(s.bestStreak, 'Meilleure série')}${fact(streak, 'Série en cours')}${fact(s.bestGain ? `+${s.bestGain}` : '—', 'Plus gros gain')}
+        ${fact(s.fastestWin ? `${s.fastestWin} min` : '—', 'Victoire éclair')}${fact(s.flawless, 'Parties parfaites')}${fact(s.essence, 'Essence gagnée')}</div>
+        ${s.bestUpset ? `<p class="pf-brag">Plus bel exploit : victoire contre <b>${esc(s.bestUpset.displayName)}</b>, pourtant <b>${s.bestUpset.gap} pts</b> au-dessus.</p>` : ''}`)}
+      ${sec('Carnage', `<div class="facts">${fact(s.kills, 'Éliminations')}${fact(s.deaths ? (s.kills / s.deaths).toFixed(1).replace('.', ',') : s.kills ? 'Parfait' : '—', 'Ratio K/D')}
+        ${fact((s.kills / games).toFixed(1).replace('.', ','), 'Kills par partie')}${fact(s.aces, 'ACE')}${fact(`${Math.round((s.firstBloods / games) * 100)} %`, 'Premier sang')}${fact(s.deaths, 'Morts')}</div>`)}
+      ${sec('Champions', `<div class="pf-pair">${champ(s.signature, 'Champion fétiche', (c) => `${c.games} partie${c.games > 1 ? 's' : ''} · ${pctOf(c.wins, c.games - c.wins)} % de victoires`)}
+        ${champ(s.killer, 'Le plus meurtrier', (c) => `${c.kills} éliminations`)}</div>`)}
+      ${s.victim || s.nemesis ? sec('Rivalités', `<div class="pf-pair">${rival(s.victim, 'Victime préférée', (r) => `battu ${r.count} fois`, 'up')}
+        ${rival(s.nemesis, 'Bête noire', (r) => `${r.count} défaite${r.count > 1 ? 's' : ''} contre`, 'down')}</div>`) : ''}
+      ` : `<p class="empty-note">${me ? 'Lance ton premier combat dans l\'arène pour remplir ton palmarès.' : `${esc(p.displayName)} n'a pas encore combattu.`}</p>`}
+      ${sec('Saisons', `<div class="facts">${fact(s.bestTier ? TIER[s.bestTier].label : '—', 'Meilleur palier')}${fact(s.seasonsPlayed, 'Saisons jouées')}${fact(s.podiums, 'Podiums')}
+        ${fact(`${s.seasonWins} V · ${s.seasonLosses} D`, 'Cette saison')}${fact(s.seasonPeak, 'Pic de la saison')}${fact(s.firstBattleAt ? new Date(s.firstBattleAt).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' }) : '—', 'Dans l\'arène depuis')}</div>`)}
+      ${sec('Collection', `<div class="facts">${fact(p.owned, 'Objets')}${fact(`${String(collPct).replace('.', ',')} %`, 'Du catalogue')}${fact(p.totalOpened, 'Reliques ouvertes')}</div>
+        ${gem ? `<div class="pf-champ">${`<img loading="lazy" class="r-${gem.rarity}" src="${esc(gem.art)}" ${gem.fb ? `data-fb="${esc(gem.fb)}"` : ''} alt="">`}
+          <span><span class="kicker">Plus belle pièce</span><b>${esc(gem.name)}</b><small class="pf-rar r-${gem.rarity}">${LABEL[gem.rarity]}</small></span></div>` : ''}`)}
+      <div class="pf-actions">
+        <button class="btn primary block" type="button" data-pf-coll>${me ? 'Ma collection' : 'Voir sa collection'}</button>
+        ${me ? '' : `<button class="btn ghost block" type="button" data-pf-fight>Défier</button>`}
+        ${me || p.added ? '' : `<button class="btn ghost block" type="button" data-pf-add>Ajouter en ami</button>`}
+      </div>
+    </div>`);
+    $('[data-pf-coll]').onclick = () => { closeSheet(); if (me) setView('collection'); else openPlayer(userId); };
+    $('[data-pf-fight]')?.addEventListener('click', () => openFoe(userId));
+    $('[data-pf-add]')?.addEventListener('click', async (e) => { if (await addFriend({ userId })) e.target.remove(); });
   } catch (e) { toast(e.message, true); }
 }
 
@@ -1114,10 +1204,10 @@ function renderFoes() {
 
 function ladderRow(e) {
   const mine = e.userId === S.user?.id;
-  return `<div class="lrow${mine ? ' me' : ''}${e.rank <= 3 ? ` podium p${e.rank}` : ''}">
+  return `<button type="button" class="lrow${mine ? ' me' : ''}${e.rank <= 3 ? ` podium p${e.rank}` : ''}" data-profile="${e.userId}">
     <span class="rank">${e.rank}</span>${avatarHTML(e)}
     <span class="who"><b>${esc(e.displayName)}${mine ? ' (toi)' : ''}</b><span>${e.wins} V · ${e.losses} D</span></span>
-    ${tierBadge(tierOf(e.rating))}<b class="pts">${e.rating}</b></div>`;
+    ${tierBadge(tierOf(e.rating))}<b class="pts">${e.rating}</b></button>`;
 }
 
 async function renderLadder() {
@@ -1180,6 +1270,7 @@ async function openFoe(id) {
     openSheet(`<div class="preview">
       <span class="kicker">Aperçu du combat</span>
       <h2>Toi contre ${esc(p.opponent.displayName)}</h2>
+      <button class="btn ghost small" type="button" data-profile="${id}">Voir son profil</button>
       <div class="vs-head">
         <div><span class="kicker">Ta puissance</span><b>${p.mine.power}</b></div>
         <span class="vs-badge ${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? 'Favori' : 'Outsider'}</span>
@@ -1871,20 +1962,24 @@ function setupInstall() {
   $('#install-menu').onclick = () => { $('#menu').hidden = true; showInstall(); };
 }
 
-const NEWS_KEY = 'capsules.news.arena-v3';
+const NEWS_KEY = 'capsules.news.profiles-v1';
 
 async function maybeShowNews() {
   if (store.get(NEWS_KEY) || !$('#tuto').hidden) return;
   store.set(NEWS_KEY, '1');
   openSheet(`<div class="news">
     <span class="kicker">Nouveau</span>
-    <h2>Arène : nouveau système de combat</h2>
-    <div class="news-item"><b>Postes par champion</b><span>Chaque champion a son poste principal et parfois un secondaire. Un tank au support ne suffit plus.</span></div>
-    <div class="news-item"><b>Early, mid, late · solo ou teamfight</b><span>Les lanes, les dragons et les derniers combats ne récompensent pas les mêmes champions.</span></div>
-    <div class="news-item"><b>Un talent par champion</b><span>Chaque champion combat avec le sort qui fait son identité : Destinée, Requiem, Retour temporel…</span></div>
-    <button class="btn primary block" data-news-go="arena">Entrer dans l'arène</button>
+    <h2>Profils de joueurs et guide des règles</h2>
+    <div class="news-item"><b>Ton palmarès, visible par tous</b><span>Taux de victoire, meilleure série, kills, ACE, plus bel exploit, champion fétiche, victime préférée et bête noire. Gagne des titres en jouant.</span></div>
+    <div class="news-item"><b>Espionne les autres</b><span>Touche un joueur dans le classement, tes amis ou l'aperçu d'un combat pour ouvrir son profil.</span></div>
+    <div class="news-item"><b>Guide des règles</b><span>Tous les chiffres du moteur de combat : postes, raretés, gammes, méta, contres et talents. Avec une check-list pour maximiser ton équipe.</span></div>
+    <button class="btn primary block" type="button" data-news="profile">Voir mon profil</button>
+    <button class="btn ghost block" type="button" data-news="guide">Lire le guide</button>
   </div>`);
-  $$('[data-news-go]').forEach((b) => (b.onclick = () => { closeSheet(); setView(b.dataset.newsGo); }));
+  $$('[data-news]').forEach((b) => (b.onclick = () => {
+    if (b.dataset.news === 'guide') showGuide();
+    else if (S.user) showProfile(S.user.id);
+  }));
   // Le popup d'installation attend la fermeture de celui-ci.
   while (!$('#sheet').hidden) await sleep(300);
 }
@@ -1926,6 +2021,79 @@ function showMeta() {
     <button class="btn primary block" type="button" data-meta-go>${mine.length ? 'Revoir mon roster' : 'Compris'}</button>
   </div>`);
   $('[data-meta-go]').onclick = () => { closeSheet(); if (mine.length) setView('collection'); };
+}
+
+// ---------- Guide des règles (miroir chiffré de BattleRules, Talents, Meta et BattleService) ----------
+const GUIDE_TALENTS = [
+  ['Domination', '×1,25 en lane, +2 % par teamfight.'],
+  ['Gank', 'Gank plus fréquent (50 % au lieu de 35 %), duel de jungle ×1,6 et gank ×1,35.'],
+  ['Global', 'Rejoint une autre lane pendant la phase de lanes, avec 40 % de sa puissance.'],
+  ['Objectif', 'Dragons et gardien ancien disputés ×1,2.'],
+  ['Engage', '+10 % au premier teamfight.'],
+  ['Teamfight', '+5 % à chaque teamfight.'],
+  ['Attrape', '25 % de chances avant chaque teamfight d\'éliminer un adversaire, qui rate le combat.'],
+  ['Protection', '+3 % en teamfight, une élimination de moins subie par combat.'],
+  ['Résurrection', 'Une fois par partie, 18 % de chances de retourner un teamfight perdu.'],
+  ['Scaling', '−7 % en lane, puis +12 %, +24 %, +36 % aux teamfights 1, 2 et 3.'],
+  ['Exécution', '+4 % en teamfight et une élimination bonus.'],
+  ['Split-push', '+1 tour à chaque teamfight, +5 % au troisième.'],
+  ['Poke', '+1 tour si l\'équipe gagne une lane.'],
+  ['Soin', '+4 % en teamfight, le retard en or compte moitié moins.'],
+  ['Hypercarry', '+3 % en teamfight, +10 % si l\'équipe a gagné le précédent ; une élimination bonus.'],
+  ['Vol', 'Copie le talent de l\'adversaire le plus puissant.'],
+];
+
+function showGuide() {
+  const pct = (v) => `<b class="g-num ${v > 0 ? 'up' : v < 0 ? 'down' : ''}">${signed(v)} %</b>`;
+  const rows = (list) => `<div class="g-rows">${list.map(([l, v]) => `<div class="g-row"><span>${l}</span>${typeof v === 'number' ? pct(v) : `<b class="g-num">${v}</b>`}</div>`).join('')}</div>`;
+  const sec = (title, body, open = false) => `<details class="g-sec"${open ? ' open' : ''}><summary>${title}</summary><div class="g-body">${body}</div></details>`;
+  openSheet(`<div class="guide">
+    <span class="kicker">Arène</span>
+    <h2>Guide des règles</h2>
+    <p class="muted">Tous les chiffres du moteur de combat, pour monter la meilleure équipe.</p>
+    ${sec('1. La puissance d\'un champion', `<p>Chaque champion part de <b>100</b>, multiplié par ses bonus :</p>
+      <p class="g-formula">100 × rareté × poste × gamme × méta</p>
+      <p>La puissance de l'équipe est la somme des 5. Elle pèse dans chaque duel, objectif et teamfight.</p>`, true)}
+    ${sec('2. Le poste', `${rows([['Poste principal', FIT.main], ['Poste secondaire', FIT.secondary], ['Hors poste', FIT.off]])}
+      <p>Tous les postes sont ouverts. Le badge en % sur chaque case de ton roster montre le bonus.</p>`)}
+    ${sec('3. La rareté', `${rows(RARITIES.map((r) => [LABEL[r], rank(r) * 2]))}
+      <p><b>Un champion de base compte comme Exalté</b> (+12 %). Un skin prend la rareté du skin, mais peut apporter un bonus de gamme.</p>`)}
+    ${sec('4. Gammes et doublons', `${rows([['Gamme commune ×2', 3], ['Gamme commune ×3', 6], ['Gamme commune ×4', 9], ['Gamme commune ×5', 12], ['Champion en double', -10]])}
+      <p>Seule ta gamme la plus représentée compte : +3 % par skin au-delà du premier, pour toute l'équipe.</p>`)}
+    ${sec('5. La méta de la semaine', `<p>Chaque lundi (heure de Paris), un patch est figé à partir des rosters du moment :</p>
+      ${rows([['Les 4 champions les plus joués', -8], ['4 champions peu joués', 8], ['Classe principale la plus jouée', -4], ['Classe principale la moins jouée', 4]])}
+      <p>Le bonus d'un champion et celui de sa classe se cumulent (ex. un tireur nerfé : −8 % puis −4 %).</p>
+      ${S.meta?.changes.length ? '<button class="btn ghost small" type="button" data-guide-meta>Voir le patch de la semaine</button>' : ''}`)}
+    ${sec('6. Courbe et style', `<p>Multiplicateur de la courbe selon la phase :</p>
+      <div class="g-table"><span></span><b>Lanes</b><b>1er TF</b><b>TF 2-3</b>
+        ${Object.entries({ EARLY: [1.18, 1.02, 0.88], MID: [0.98, 1.08, 0.98], LATE: [0.88, 0.98, 1.18] }).map(([c, v]) => `<b style="color:${CURVE[c].color}">${CURVE[c].label}</b>${v.map((x) => `<span>×${x.toFixed(2).replace('.', ',')}</span>`).join('')}`).join('')}</div>
+      <p>Le style s'ajoute : <b>Solo</b> ×1,10 en lane et ×0,97 en teamfight ; <b>Teamfight</b> ×0,95 en lane et ×1,04 en teamfight.</p>
+      <p>Les teamfights décident la partie : les champions late et teamfight y sont les plus forts.</p>`)}
+    ${sec('7. La compo', `${rows([['Pas de frontline (tank ou combattant)', -10], ['Pas de dégâts (tireur, mage ou assassin)', -10], ['Ni support ni tank', -5], ['3 champions teamfight ou plus', 5], ['2 champions solo ou plus', '+1 tour / TF']])}
+      <p>Ces bonus et malus s'appliquent en teamfight. La classe principale est la première listée sur le champion.</p>`)}
+    ${sec('8. Les contres de classe', `<p>En teamfight, chaque champion gagne un bonus selon la compo adverse (classe principale, plafond +12 %) :</p>
+      ${rows([['Tireur', '+4 % par tank ou combattant'], ['Assassin', '+4 % par carry adverse non protégé'], ['Tank', '+3 % par assassin ou combattant'], ['Combattant', '+3 % par mage ou assassin'], ['Support', '+4 % par assassin, +2 % par combattant'], ['Mage', '+8 % face à 3 mêlées ou plus']])}`)}
+    ${sec('9. Les talents', `<p>Chaque champion a un talent, nommé d'après un de ses sorts :</p>${rows(GUIDE_TALENTS)}`)}
+    ${sec('10. Le déroulé d\'un match', `<ul class="g-list">
+      <li><b>Lanes</b> : top, mid et bot (tireur + support) en duel, poste contre poste. Le jungler adverse peut ganker (35 % de chances).</li>
+      <li><b>Dragons</b> : disputés par le jungler et le support. Chaque dragon donne +4 % à l'équipe, le gardien ancien +8 % avant le 3e teamfight.</li>
+      <li><b>Or</b> : kills, tours et objectifs donnent de l'or. L'avance en or vaut au plus ±15 % de puissance.</li>
+      <li><b>Teamfights</b> : au meilleur des 3. Le premier se joue en milieu de partie, les suivants en fin de partie.</li>
+      <li>Une part de hasard reste : à puissance égale, c'est du 50/50.</li></ul>`)}
+    ${sec('11. Cote, récompenses et saisons', `<ul class="g-list">
+      <li><b>Cote</b> : Elo de facteur 32. À cote égale, ±16. Un défenseur battu ne perd que la moitié du gain de l'attaquant.</li>
+      <li><b>Essence</b> : 2 victoires en attaque = 1 relique, jusqu'à 4 victoires payées par jour.</li>
+      <li><b>Revanche</b> : un seul défi par joueur jusqu'à sa riposte, ou 24 h.</li>
+      <li><b>Saisons</b> : une par mois. Argent 950, Or 1050, Platine 1150, Diamant 1250, Maître 1350. Récompense de palier dès 5 combats, puis la cote revient à mi-chemin de 1000.</li></ul>`)}
+    ${sec('Check-list pour maximiser ton équipe', `<ul class="g-list check">
+      <li>Chaque champion à son poste principal (+12 %).</li>
+      <li>Une frontline, des dégâts, un support ou un tank.</li>
+      <li>Au moins 3 champions teamfight, et plutôt mid ou late.</li>
+      <li>3 skins ou plus de la même gamme, sinon des champions de base (Exalté).</li>
+      <li>Évite les nerfs de la semaine, profite des buffs.</li>
+      <li>Des talents de teamfight : Engage, Teamfight, Hypercarry, Attrape, Résurrection.</li></ul>`, true)}
+  </div>`);
+  $('[data-guide-meta]')?.addEventListener('click', showMeta);
 }
 
 async function maybePromptInstall() {
@@ -2137,6 +2305,8 @@ function bind() {
   $('#sound-toggle').onclick = () => { S.sound = !S.sound; store.set('capsules.sound', S.sound ? 'on' : 'off'); $('#sound-toggle').textContent = `Son : ${S.sound ? 'activé' : 'coupé'}`; };
   $('#sound-toggle').textContent = `Son : ${S.sound ? 'activé' : 'coupé'}`;
   $('#odds-btn').onclick = () => { $('#menu').hidden = true; if (S.cat) showOdds(); };
+  $('#profile-menu').onclick = () => { $('#menu').hidden = true; if (S.user) showProfile(S.user.id); };
+  $('#guide-menu').onclick = () => { $('#menu').hidden = true; showGuide(); };
   $('#logout-btn').onclick = logout;
 
   // Cartes cliquables partout (collection, derniers tirages, fiches).
@@ -2148,12 +2318,15 @@ function bind() {
     const slot = e.target.closest('[data-slot]');
     if (slot) { showSlotPicker(+slot.dataset.slot); return; }
     if (e.target.closest('#coach-meta')) { showMeta(); return; }
+    if (e.target.closest('#coach-guide')) { showGuide(); return; }
     const foe = e.target.closest('[data-foe]');
     if (foe) { openFoe(foe.dataset.foe); return; }
     const fight = e.target.closest('[data-battle]');
     if (fight) { openBattle(fight.dataset.battle); return; }
     const go = e.target.closest('[data-goto]');
     if (go) { closeSheet(); setView(go.dataset.goto); return; }
+    const prof = e.target.closest('[data-profile]');
+    if (prof) { showProfile(prof.dataset.profile); return; }
     const player = e.target.closest('[data-player]');
     if (player) { openPlayer(player.dataset.player); return; }
     const unfriend = e.target.closest('[data-unfriend]');

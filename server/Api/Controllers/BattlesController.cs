@@ -43,6 +43,9 @@ public sealed class BattlesController(BattleService battles) : ControllerBase
     [HttpGet("meta")]
     public Task<MetaDto> Meta() => battles.GetMetaAsync();
 
+    [HttpGet("players/{playerId:guid}/stats")]
+    public Task<PlayerStatsDto> PlayerStats(Guid playerId) => battles.PlayerStatsAsync(User.UserId(), playerId);
+
     [HttpGet("ladder")]
     public Task<LadderDto> Ladder() => battles.LadderAsync(User.UserId());
 }

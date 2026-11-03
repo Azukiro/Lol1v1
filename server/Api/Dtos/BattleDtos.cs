@@ -1,4 +1,5 @@
 using Api.Domain.Battle;
+using Api.Domain.Capsules;
 
 namespace Api.Dtos;
 
@@ -43,3 +44,21 @@ public sealed record BattleSummaryDto(
 public sealed record LadderEntryDto(
     int Rank, Guid UserId, string DisplayName, int? ProfileIconId, int Rating, int Wins, int Losses, int? AvatarChampionId = null, Tier? Frame = null);
 public sealed record LadderDto(List<LadderEntryDto> Top, LadderEntryDto? Me);
+
+/// <summary>Adversaire marquant d'un joueur (victime préférée, bête noire, plus bel exploit).</summary>
+public sealed record RivalDto(Guid UserId, string DisplayName, int Count, int? Gap = null);
+
+/// <summary>Champion du roster d'un joueur sur l'ensemble de ses combats.</summary>
+public sealed record ChampionStatDto(CapsuleItemKind Kind, int ItemId, string Champion, int Games, int Wins, int Kills);
+
+/// <summary>
+/// Profil public d'arène : visible par tous, calculé sur tous les combats du joueur (toutes saisons).
+/// Form = derniers résultats, du plus récent au plus ancien (true = victoire).
+/// </summary>
+public sealed record PlayerStatsDto(
+    PlayerCardDto Player, int Rating, Tier Tier, int? Rank, int Ranked, int SeasonWins, int SeasonLosses, int SeasonPeak, int BestRating,
+    int Wins, int Losses, int AttackWins, int AttackLosses, int DefenseWins, int DefenseLosses,
+    int BestStreak, int Streak, List<bool> Form,
+    int Kills, int Deaths, int Aces, int FirstBloods, int Flawless, int? FastestWin, int BestGain, int Essence,
+    RivalDto? BestUpset, RivalDto? Victim, RivalDto? Nemesis, ChampionStatDto? Signature, ChampionStatDto? Killer,
+    Tier? BestTier, int SeasonsPlayed, int Podiums, int Titles, DateTimeOffset? FirstBattleAt);

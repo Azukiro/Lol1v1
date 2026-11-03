@@ -209,6 +209,99 @@ public sealed class BattleService(
         return new LadderDto(entries, me);
     }
 
+    /// <summary>Profil public d'arène d'un joueur, lisible par tout joueur connecté.</summary>
+    public async Task<PlayerStatsDto> PlayerStatsAsync(Guid viewerId, Guid playerId)
+    {
+        await EnsureSeasonAsync();
+        var isFriend = await db.RelicFriends.AnyAsync(f => f.UserId == viewerId && f.FriendId == playerId);
+        var cards = await social.CardsAsync([playerId], isFriend ? [playerId] : []);
+        if (!cards.TryGetValue(playerId, out var card)) throw new AppException("Joueur introuvable.", 404);
+
+        var profile = await db.BattleProfiles.FirstOrDefaultAsync(p => p.UserId == playerId);
+        var rating = profile?.Rating ?? _o.StartRating;
+        var ranked = profile is { } rp && rp.Wins + rp.Losses > 0;
+        var rankedCount = await db.BattleProfiles.CountAsync(p => p.Wins + p.Losses > 0);
+        var seasons = await db.SeasonResults.Where(r => r.UserId == playerId).ToListAsync();
+        var battles = await db.RelicBattles.Where(b => b.AttackerId == playerId || b.DefenderId == playerId)
+            .OrderBy(b => b.CreatedAt).ToListAsync();
+
+        int wins = 0, attackWins = 0, attackLosses = 0, defenseWins = 0, defenseLosses = 0, streak = 0, bestStreak = 0;
+        int kills = 0, deaths = 0, aces = 0, firstBloods = 0, flawless = 0, bestGain = 0, essence = 0;
+        int? fastest = null;
+        var best = Math.Max(rating, seasons.Select(s => s.PeakRating).DefaultIfEmpty(0).Max());
+        (Guid Id, int Gap)? upset = null;
+        var beaten = new Dictionary<Guid, int>();
+        var lostTo = new Dictionary<Guid, int>();
+        var champs = new Dictionary<string, (Dictionary<(CapsuleItemKind, int), int> Items, int Games, int Wins, int Kills)>();
+        foreach (var b in battles)
+        {
+            var attacked = b.AttackerId == playerId;
+            var won = attacked == b.AttackerWon;
+            var (before, after) = attacked ? (b.AttackerRatingBefore, b.AttackerRatingAfter) : (b.DefenderRatingBefore, b.DefenderRatingAfter);
+            var other = attacked ? b.DefenderId : b.AttackerId;
+            var otherBefore = attacked ? b.DefenderRatingBefore : b.AttackerRatingBefore;
+            best = Math.Max(best, after);
+            if (won)
+            {
+                wins++;
+                streak = streak > 0 ? streak + 1 : 1;
+                bestStreak = Math.Max(bestStreak, streak);
+                beaten[other] = beaten.GetValueOrDefault(other) + 1;
+                if (otherBefore > before && (upset is null || otherBefore - before > upset.Value.Gap)) upset = (other, otherBefore - before);
+                bestGain = Math.Max(bestGain, after - before);
+                if (attacked) { attackWins++; essence += b.Essence; } else defenseWins++;
+            }
+            else
+            {
+                streak = streak < 0 ? streak - 1 : -1;
+                lostTo[other] = lostTo.GetValueOrDefault(other) + 1;
+                if (attacked) attackLosses++; else defenseLosses++;
+            }
+
+            BattleOutcome? o;
+            try { o = JsonSerializer.Deserialize<BattleOutcome>(b.Result, Json); }
+            catch (JsonException) { o = null; }
+            if (o?.A is null || o.B is null) continue;
+            var side = attacked ? BattleSide.A : BattleSide.B;
+            var team = attacked ? o.A : o.B;
+            var teamDeaths = team.Units.Sum(u => u.Deaths);
+            kills += team.Units.Sum(u => u.Kills);
+            deaths += teamDeaths;
+            aces += o.Events.Count(e => e.Kind == BattleEventKind.ACE && e.Side == side);
+            if (o.Events.Any(e => e.Kind == BattleEventKind.FIRST_BLOOD && e.Side == side)) firstBloods++;
+            if (won && teamDeaths == 0) flawless++;
+            if (won && (fastest is null || o.Minutes < fastest)) fastest = o.Minutes;
+            foreach (var u in team.Units)
+            {
+                var c = champs.GetValueOrDefault(u.Champion, ([], 0, 0, 0));
+                c.Items[(u.Kind, u.ItemId)] = c.Items.GetValueOrDefault((u.Kind, u.ItemId)) + 1;
+                champs[u.Champion] = (c.Items, c.Games + 1, c.Wins + (won ? 1 : 0), c.Kills + u.Kills);
+            }
+        }
+
+        var rivals = beaten.Keys.Concat(lostTo.Keys).Append(upset?.Id ?? Guid.Empty).Distinct().ToList();
+        var names = await db.Users.Where(u => rivals.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.DisplayName);
+        RivalDto? Rival(Dictionary<Guid, int> counts) => counts.Count == 0 ? null
+            : counts.OrderByDescending(kv => kv.Value).Select(kv => new RivalDto(kv.Key, names.GetValueOrDefault(kv.Key, "Joueur supprimé"), kv.Value)).First();
+        ChampionStatDto? Champ(Func<(Dictionary<(CapsuleItemKind, int), int> Items, int Games, int Wins, int Kills), int> key) =>
+            champs.Count == 0 ? null : champs.OrderByDescending(kv => key(kv.Value)).ThenByDescending(kv => kv.Value.Wins).Select(kv =>
+            {
+                var (kind, itemId) = kv.Value.Items.MaxBy(i => i.Value).Key;
+                return new ChampionStatDto(kind, itemId, kv.Key, kv.Value.Games, kv.Value.Wins, kv.Value.Kills);
+            }).First();
+
+        var form = battles.AsEnumerable().Reverse().Take(10).Select(b => (b.AttackerId == playerId) == b.AttackerWon).ToList();
+        return new PlayerStatsDto(card, rating, Seasons.TierOf(rating), ranked ? await RankAsync(profile!) : null, rankedCount,
+            profile?.Wins ?? 0, profile?.Losses ?? 0, profile?.PeakRating ?? rating, best,
+            wins, battles.Count - wins, attackWins, attackLosses, defenseWins, defenseLosses,
+            bestStreak, streak, form,
+            kills, deaths, aces, firstBloods, flawless, fastest, bestGain, essence,
+            upset is { } up ? new RivalDto(up.Id, names.GetValueOrDefault(up.Id, "Joueur supprimé"), 1, up.Gap) : null,
+            Rival(beaten), Rival(lostTo), Champ(c => c.Games), Champ(c => c.Kills),
+            seasons.Count == 0 ? null : seasons.Max(s => s.Tier), seasons.Count, seasons.Count(s => s.Rank <= 3), seasons.Count(s => s.Rank == 1),
+            battles.Count == 0 ? null : battles[0].CreatedAt);
+    }
+
     private async Task<int> RankAsync(BattleProfile p) =>
         await db.BattleProfiles.CountAsync(o => o.Wins + o.Losses > 0 && o.Rating > p.Rating) + 1;
 

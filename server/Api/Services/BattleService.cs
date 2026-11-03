@@ -55,13 +55,14 @@ public sealed class BattleService(
         var now = clock.GetUtcNow();
         var profile = await db.BattleProfiles.FirstOrDefaultAsync(p => p.UserId == userId);
         var rating = profile?.Rating ?? _o.StartRating;
-        var team = Units(catalog, await social.GetRosterAsync(userId));
+        var meta = await CurrentMetaAsync(catalog);
+        var team = Units(catalog, await social.GetRosterAsync(userId), meta.Changes);
 
         // Adversaires : amis, puis joueurs à roster complet les plus proches en cote.
         var friends = await db.RelicFriends.Where(f => f.UserId == userId).Select(f => f.FriendId).ToListAsync();
         var rosters = await db.CapsuleWallets.Where(w => w.Roster != null && w.UserId != userId)
             .OrderByDescending(w => w.TotalOpened).Take(500).Select(w => new { w.UserId, w.Roster }).ToListAsync();
-        var ready = rosters.Where(r => Units(catalog, RelicSocialService.ParseRoster(r.Roster)) is not null).Select(r => r.UserId).ToList();
+        var ready = rosters.Where(r => Units(catalog, RelicSocialService.ParseRoster(r.Roster), []) is not null).Select(r => r.UserId).ToList();
         var ratings = await db.BattleProfiles.Where(p => ready.Contains(p.UserId)).ToDictionaryAsync(p => p.UserId, p => p.Rating);
         int RatingOf(Guid id) => ratings.GetValueOrDefault(id, _o.StartRating);
         var friendSet = friends.ToHashSet();
@@ -95,7 +96,7 @@ public sealed class BattleService(
     public async Task<BattlePreviewDto> PreviewAsync(Guid userId, Guid opponentId)
     {
         var catalog = await catalogs.GetAsync();
-        var (mine, theirs) = await TeamsAsync(catalog, userId, opponentId);
+        var (mine, theirs) = await TeamsAsync(catalog, userId, opponentId, (await CurrentMetaAsync(catalog)).Changes);
         var (a, b) = BattleRules.Analyze(mine, theirs, LineNames(catalog));
         var friend = await db.RelicFriends.AnyAsync(f => f.UserId == userId && f.FriendId == opponentId);
         var card = (await social.CardsAsync([opponentId], friend ? [opponentId] : [])).GetValueOrDefault(opponentId)
@@ -115,7 +116,7 @@ public sealed class BattleService(
         using var l1 = await locks.AcquireAsync(first);
         using var l2 = await locks.AcquireAsync(second);
 
-        var (mine, theirs) = await TeamsAsync(catalog, userId, opponentId);
+        var (mine, theirs) = await TeamsAsync(catalog, userId, opponentId, (await CurrentMetaAsync(catalog)).Changes);
         var now = clock.GetUtcNow();
         var (availableAt, _) = Availability(userId, (await RecentPairsAsync(userId, [opponentId], now)).GetValueOrDefault(opponentId));
         if (availableAt is { } at)
@@ -222,19 +223,20 @@ public sealed class BattleService(
             b.AttackerWon, b.Essence, o.Minutes, o.A, o.B, o.Events);
     }
 
-    private async Task<(List<BattleUnit> Mine, List<BattleUnit> Theirs)> TeamsAsync(CapsuleCatalog catalog, Guid userId, Guid opponentId)
+    private async Task<(List<BattleUnit> Mine, List<BattleUnit> Theirs)> TeamsAsync(
+        CapsuleCatalog catalog, Guid userId, Guid opponentId, IReadOnlyList<MetaChange> meta)
     {
         if (opponentId == userId) throw new AppException("Tu ne peux pas t'attaquer toi-même.");
         if (!await db.Users.AnyAsync(u => u.Id == opponentId)) throw new AppException("Joueur introuvable.", 404);
-        var mine = Units(catalog, await social.GetRosterAsync(userId))
+        var mine = Units(catalog, await social.GetRosterAsync(userId), meta)
             ?? throw new AppException("Complète ton roster (5 postes) pour combattre.", 409);
-        var theirs = Units(catalog, await social.GetRosterAsync(opponentId))
+        var theirs = Units(catalog, await social.GetRosterAsync(opponentId), meta)
             ?? throw new AppException("Ce joueur n'a pas encore de roster complet.", 409);
         return (mine, theirs);
     }
 
-    /// <summary>Roster → unités de combat ; null si un poste est vide ou un objet absent du catalogue.</summary>
-    private static List<BattleUnit>? Units(CapsuleCatalog catalog, List<RosterSlotDto?> roster)
+    /// <summary>Roster → unités de combat, bonus de méta compris ; null si un poste est vide ou un objet absent du catalogue.</summary>
+    private static List<BattleUnit>? Units(CapsuleCatalog catalog, List<RosterSlotDto?> roster, IReadOnlyList<MetaChange> meta)
     {
         var units = new List<BattleUnit>();
         foreach (var slot in roster)
@@ -252,7 +254,8 @@ public sealed class BattleService(
             if (!catalog.ChampionById.TryGetValue(championId, out var champ)) return null;
             var classes = (champ.Roles ?? []).Select(BattleRules.ParseClass).OfType<ChampionClass>().ToArray();
             var talent = Talents.For(champ.Alias, classes, champ.Spells?.Select(sp => (sp.Name, sp.Icon)).ToList());
-            units.Add(new BattleUnit(slot.Kind, slot.ItemId, champ.Name, champ.Id, rarity, classes, lines, talent, Profiles.For(champ.Alias, classes)));
+            units.Add(new BattleUnit(slot.Kind, slot.ItemId, champ.Name, champ.Id, rarity, classes, lines, talent, Profiles.For(champ.Alias, classes),
+                Meta.Bonus(champ.Id, classes.Length > 0 ? classes[0] : null, meta)));
         }
         return units.Count == BattleRules.TeamSize ? units : null;
     }
@@ -383,6 +386,69 @@ public sealed class BattleService(
         }
         finally { SeasonGate.Release(); }
     }
+
+    private static readonly SemaphoreSlim MetaGate = new(1, 1);
+
+    /// <summary>Patch de méta de la semaine (notes de patch).</summary>
+    public async Task<MetaDto> GetMetaAsync() => ToDto(await CurrentMetaAsync(await catalogs.GetAsync()));
+
+    /// <summary>
+    /// Patch de la semaine en cours, créé au premier passage de la semaine à partir des rosters complets du moment
+    /// (<see cref="Meta.Generate"/>), puis figé.
+    /// </summary>
+    private async Task<(MetaPatch Patch, List<MetaChange> Changes)> CurrentMetaAsync(CapsuleCatalog catalog)
+    {
+        var tz = Zone;
+        var local = TimeZoneInfo.ConvertTime(clock.GetUtcNow(), tz).DateTime;
+        var id = Meta.IdOf(local);
+        var patch = await db.MetaPatches.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id);
+        if (patch is null && !catalog.IsEmpty)
+        {
+            await MetaGate.WaitAsync();
+            try
+            {
+                patch = await db.MetaPatches.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id) ?? await CreateMetaAsync(catalog, id, local, tz);
+            }
+            catch (DbUpdateException)
+            {
+                // Créé en parallèle par une autre instance.
+                db.ChangeTracker.Clear();
+                patch = await db.MetaPatches.AsNoTracking().FirstAsync(p => p.Id == id);
+            }
+            finally { MetaGate.Release(); }
+        }
+        return patch is null ? (new MetaPatch { Id = id }, []) : (patch, JsonSerializer.Deserialize<List<MetaChange>>(patch.Changes, Json) ?? []);
+    }
+
+    private async Task<MetaPatch> CreateMetaAsync(CapsuleCatalog catalog, string id, DateTime local, TimeZoneInfo tz)
+    {
+        var rosters = await db.CapsuleWallets.Where(w => w.Roster != null).Select(w => w.Roster).ToListAsync();
+        var usage = rosters.Select(r => Units(catalog, RelicSocialService.ParseRoster(r), []))
+            .OfType<List<BattleUnit>>()
+            .SelectMany(team => team.Select(u => u.ChampionId).Distinct())
+            .GroupBy(c => c).ToDictionary(g => g.Key, g => g.Count());
+        var candidates = catalog.Champions
+            .Select(c => new MetaCandidate(c.Id, c.Name, (c.Roles ?? []).Select(BattleRules.ParseClass).OfType<ChampionClass>().Cast<ChampionClass?>().FirstOrDefault(),
+                usage.GetValueOrDefault(c.Id)))
+            .OrderBy(c => c.ChampionId).ToList();
+        var start = Meta.WeekStart(local);
+        DateTimeOffset At(DateTime d) => new DateTimeOffset(d, tz.GetUtcOffset(d)).ToUniversalTime();
+        var patch = new MetaPatch
+        {
+            Id = id, Number = await db.MetaPatches.CountAsync() + 1, StartsAt = At(start), EndsAt = At(start.AddDays(7)),
+            Changes = JsonSerializer.Serialize(Meta.Generate(candidates, StableSeed(id)), Json), CreatedAt = clock.GetUtcNow(),
+        };
+        db.MetaPatches.Add(patch);
+        await db.SaveChangesAsync();
+        db.Entry(patch).State = EntityState.Detached;
+        return patch;
+    }
+
+    /// <summary>Seed stable d'un identifiant (string.GetHashCode change à chaque démarrage).</summary>
+    private static int StableSeed(string s) => s.Aggregate(17, (h, c) => unchecked(h * 31 + c));
+
+    private static MetaDto ToDto((MetaPatch Patch, List<MetaChange> Changes) m) =>
+        new(m.Patch.Id, m.Patch.Number, m.Patch.StartsAt, m.Patch.EndsAt, m.Changes);
 
     /// <summary>Marque le bilan de fin de saison comme vu.</summary>
     public async Task MarkSeasonSeenAsync(Guid userId, string seasonId)

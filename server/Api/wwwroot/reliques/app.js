@@ -708,7 +708,7 @@ function renderRoster() {
     const fit = it ? fitOf(it.champ, i) : 0;
     return `<${tag} class="slot${it ? ` filled r-${it.rarity}` : ''}" ${editable ? `type="button" data-slot="${i}"` : ''} aria-label="${role}${it ? ` : ${esc(it.name)}, ${LABEL[it.rarity]}, ${fitLabel(fit).toLowerCase()}` : ''}">
       ${it ? `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt=""><span class="shade"></span><b>${esc(it.name)}</b><span class="rar" title="${LABEL[it.rarity]}"></span>
-        ${it.champ.profile ? `<span class="slot-fit ${fit > 0 ? 'up' : 'down'}" title="${fitLabel(fit)}">${signed(fit)} %</span>` : ''}`
+        ${it.champ.profile ? `<span class="slot-fit ${fit > 0 ? 'up' : 'down'}" title="${fitLabel(fit)}">${signed(fit)} %</span>` : ''}${metaTag(it.champ, 'slot-meta')}`
         : `<span class="plus">${editable ? '+' : '—'}</span>`}
       <span class="role">${role}</span></${tag}>`;
   }).join('');
@@ -719,6 +719,15 @@ function renderRoster() {
 const FIT = { main: 12, secondary: 8, off: -10 };
 const fitOf = (c, role) => (!c?.profile ? 0 : c.profile.main === role ? FIT.main : c.profile.secondary === role ? FIT.secondary : FIT.off);
 const primaryClass = (c) => c?.roles?.[0];
+
+/** Bonus de méta d'un champion en % (patch de la semaine, miroir de Meta.Bonus) : son changement et celui de sa classe principale. */
+function metaOf(c) {
+  const changes = S.meta?.changes || [];
+  const champ = changes.find((m) => m.target === 'CHAMPION' && m.championId === c?.id)?.percent || 0;
+  const cls = changes.find((m) => m.target === 'CLASS' && m.class === primaryClass(c)?.toUpperCase())?.percent || 0;
+  return Math.round(((1 + champ / 100) * (1 + cls / 100) - 1) * 100);
+}
+const metaTag = (c, cls = 'meta-tag') => { const m = metaOf(c); return m ? `<span class="${cls} ${m > 0 ? 'up' : 'down'}" title="Patch de la semaine">${m > 0 ? '▲' : '▼'} ${signed(m)} %</span>` : ''; };
 const rosterItems = (slots) => slots.map((s) => (s ? item(s.kind, s.itemId) : null));
 
 /** Puissance comme au combat : rareté, poste, gamme commune et champion en double. */
@@ -729,7 +738,7 @@ function teamPower(its) {
   const best = Math.max(0, ...Object.values(lines));
   let bonus = best >= 2 ? 0.03 * (best - 1) : 0;
   if (new Set(filled.map((it) => it.champ.id)).size < filled.length) bonus -= 0.10;
-  return its.reduce((sum, it, i) => sum + (it ? Math.round(100 * (1 + rank(it.rarity) * 0.02) * (1 + fitOf(it.champ, i) / 100) * (1 + bonus)) : 0), 0);
+  return its.reduce((sum, it, i) => sum + (it ? Math.round(100 * (1 + rank(it.rarity) * 0.02) * (1 + fitOf(it.champ, i) / 100) * (1 + bonus) * (1 + metaOf(it.champ) / 100)) : 0), 0);
 }
 
 /** Besoins de composition en teamfight : frontline, dégâts, protection ou engage. */
@@ -761,12 +770,14 @@ function coachHTML(slots) {
     ...its.map((it, i) => it && fitOf(it.champ, i) < 0
       && `${esc(it.champ.name)} est hors poste en ${ROLES[i]} (−10 %). Son poste : ${ROLES[it.champ.profile.main]}.`),
     new Set(filled.map((it) => it.champ.id)).size < filled.length && 'Champion en double : −10 % pour toute l\'équipe.',
+    ...filled.map((it) => metaOf(it.champ) < 0 && `${esc(it.champ.name)} est nerfé cette semaine (${signed(metaOf(it.champ))} %).`),
     filled.length === 5 && needs.find((x) => !x.ok)?.tip,
     filled.length < 5 && `Encore ${5 - filled.length} poste${filled.length < 4 ? 's' : ''} à remplir pour entrer dans l'arène.`,
   ].filter(Boolean);
   const bonus = [count('TEAMFIGHT') >= 3 && 'comp teamfight +5 %', count('SOLO') >= 2 && 'split-push'].filter(Boolean);
   return `<div class="coach">
     <div class="coach-head"><span class="kicker">Analyse de l'équipe</span><span class="power">Puissance <b>${teamPower(its)}</b></span></div>
+    ${S.meta?.changes.length ? `<button class="btn ghost small" type="button" id="coach-meta">Patch ${S.meta.number} : buffs et nerfs</button>` : ''}
     <div class="coach-needs">${needs.map((x) => `<span class="need ${x.ok ? 'ok' : 'ko'}">${x.ok ? '✓' : '✗'} ${x.label}</span>`).join('')}</div>
     <div class="coach-curve">${its.map((it, i) => { const p = it?.champ.profile; return `<span class="cv" style="--pc:${p ? CURVE[p.curve].color : 'var(--line-2)'}"><i></i><em>${ROLES[i]}</em><b>${p ? CURVE[p.curve].label : '—'}</b><small>${p ? STYLE[p.style].label : ''}</small></span>`; }).join('')}</div>
     <p class="coach-verdict">${curveVerdict(its)}${bonus.length ? ` Bonus : ${bonus.join(', ')}.` : ''}</p>
@@ -809,7 +820,7 @@ function showSlotPicker(index) {
 
 function pickCard(it, index, { selected = false, best = false, dup = false } = {}) {
   const p = it.champ.profile;
-  const tags = `<span class="pick-tags">${best ? '<span class="pick-best">Conseillé</span>' : ''}${dup ? '<span class="pick-dup">Déjà pris</span>' : ''}
+  const tags = `<span class="pick-tags">${best ? '<span class="pick-best">Conseillé</span>' : ''}${dup ? '<span class="pick-dup">Déjà pris</span>' : ''}${metaTag(it.champ)}
     ${p ? `<span class="ptag" style="--pc:${CURVE[p.curve].color}">${CURVE[p.curve].label}</span><span class="ptag">${STYLE[p.style].label}</span>` : ''}</span>`;
   return cardHTML(it, { count: 0 }).replace('class="card ', `class="card pick${selected ? ' selected' : ''}${dup ? ' dup' : ''} `)
     .replace(`data-key="${it.key}"`, `data-key="${it.key}" data-pick="${it.key}" data-slot-index="${index}"`)
@@ -1870,6 +1881,45 @@ async function maybeShowNews() {
   while (!$('#sheet').hidden) await sleep(300);
 }
 
+// ---------- Méta de la semaine ----------
+const META_KEY = 'reliques.meta.seen';
+
+async function loadMeta() {
+  try { S.meta = await api('/capsules/meta'); renderRoster(); } catch { /* le patch attendra le prochain lancement */ }
+}
+
+/** Notes du patch à la première visite après sa sortie. */
+async function maybeShowMeta() {
+  if (!S.meta?.changes.length || store.get(META_KEY) === S.meta.id || !$('#tuto').hidden) return;
+  store.set(META_KEY, S.meta.id);
+  showMeta();
+  while (!$('#sheet').hidden) await sleep(300);
+}
+
+function showMeta() {
+  const m = S.meta;
+  const day = (d) => new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+  const row = (c) => {
+    const champ = c.target === 'CHAMPION' && S.cat?.champ.get(c.championId);
+    return `<div class="meta-row ${c.percent > 0 ? 'up' : 'down'}">
+      <span class="meta-pic">${champ ? `<img loading="lazy" src="${DD}/loading/${esc(champ.alias)}_0.jpg" alt="">` : `<b>${esc(c.name.slice(0, 2))}</b>`}</span>
+      <span class="meta-txt"><b>${esc(c.name)}</b><span>${c.target === 'CLASS' ? 'Classe · ' : ''}${esc(c.reason)}</span></span>
+      <span class="meta-pct">${c.percent > 0 ? '▲' : '▼'} ${signed(c.percent)} %</span></div>`;
+  };
+  const buffs = m.changes.filter((c) => c.percent > 0), nerfs = m.changes.filter((c) => c.percent < 0);
+  const mine = rosterItems(S.roster).filter(Boolean).filter((it) => metaOf(it.champ) < 0);
+  openSheet(`<div class="meta-notes">
+    <span class="kicker">Patch ${m.number} · du ${day(m.startsAt)} au ${day(new Date(m.endsAt) - 1)}</span>
+    <h2>Notes de patch</h2>
+    <p class="muted">Chaque lundi, les champions les plus joués sont nerfés et des champions oubliés reviennent en force. Adapte ton roster !</p>
+    ${mine.length ? `<p class="meta-warn">Ton roster est touché : ${mine.map((it) => esc(it.champ.name)).join(', ')}.</p>` : ''}
+    ${buffs.length ? `<section><h3 class="up">Buffs</h3>${buffs.map(row).join('')}</section>` : ''}
+    ${nerfs.length ? `<section><h3 class="down">Nerfs</h3>${nerfs.map(row).join('')}</section>` : ''}
+    <button class="btn primary block" type="button" data-meta-go>${mine.length ? 'Revoir mon roster' : 'Compris'}</button>
+  </div>`);
+  $('[data-meta-go]').onclick = () => { closeSheet(); if (mine.length) setView('collection'); };
+}
+
 async function maybePromptInstall() {
   if (standalone || !isMobile || store.get('capsules.installPrompted')) return;
   // Laisse au navigateur le temps d'annoncer l'installation possible (Android).
@@ -2035,6 +2085,7 @@ async function start() {
     renderAll();
     saveSnapshot();
     if (S.view !== 'arena') loadArena({ quiet: true });
+    await loadMeta();
   } catch (e) {
     toast(e.message, true);
     // Nouvelle tentative au prochain retour sur l'app.
@@ -2044,6 +2095,7 @@ async function start() {
   // Pas encore d'icône : choix imposé avant tout autre popup.
   if (S.online && S.cat && !S.user?.avatarChampionId) await showAvatarPicker(true);
   await maybeShowNews();
+  await maybeShowMeta();
   maybePromptInstall();
 }
 
@@ -2087,6 +2139,7 @@ function bind() {
     if (clear) { setSlot(+clear.dataset.pickClear, null); return; }
     const slot = e.target.closest('[data-slot]');
     if (slot) { showSlotPicker(+slot.dataset.slot); return; }
+    if (e.target.closest('#coach-meta')) { showMeta(); return; }
     const foe = e.target.closest('[data-foe]');
     if (foe) { openFoe(foe.dataset.foe); return; }
     const fight = e.target.closest('[data-battle]');

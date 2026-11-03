@@ -297,6 +297,19 @@ public class SeasonResult
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+/// <summary>Patch de méta d'une semaine (buffs et nerfs), figé à sa création.</summary>
+public class MetaPatch
+{
+    /// <summary>Semaine ISO, « 2026-W44 ».</summary>
+    public string Id { get; set; } = "";
+    public int Number { get; set; }
+    public DateTimeOffset StartsAt { get; set; }
+    public DateTimeOffset EndsAt { get; set; }
+    /// <summary>Changements (jsonb, liste de <see cref="Api.Domain.Battle.MetaChange"/>).</summary>
+    public string Changes { get; set; } = "[]";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 /// <summary>Combat asynchrone : roster de l'attaquant contre le roster du défenseur, figé au moment de l'attaque.</summary>
 public class RelicBattle
 {

@@ -24,6 +24,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<BattleProfile> BattleProfiles => Set<BattleProfile>();
     public DbSet<RelicBattle> RelicBattles => Set<RelicBattle>();
     public DbSet<SeasonResult> SeasonResults => Set<SeasonResult>();
+    public DbSet<MetaPatch> MetaPatches => Set<MetaPatch>();
 
     /// <summary>Incrémente le jeton de concurrence des portefeuilles modifiés (stock, essence, roster…).</summary>
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
@@ -206,6 +207,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasKey(x => new { x.UserId, x.SeasonId });
             e.Property(x => x.SeasonId).HasMaxLength(7);
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<MetaPatch>(e =>
+        {
+            e.ToTable("meta_patch");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasMaxLength(8);
+            e.Property(x => x.Changes).HasColumnType("jsonb");
         });
 
         b.Entity<PushSubscriptionEntity>(e =>

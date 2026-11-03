@@ -40,6 +40,9 @@ public sealed class BattlesController(BattleService battles) : ControllerBase
         return NoContent();
     }
 
+    [HttpGet("meta")]
+    public Task<MetaDto> Meta() => battles.GetMetaAsync();
+
     [HttpGet("ladder")]
     public Task<LadderDto> Ladder() => battles.LadderAsync(User.UserId());
 }

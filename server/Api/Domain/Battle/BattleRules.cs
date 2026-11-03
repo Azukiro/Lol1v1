@@ -9,15 +9,16 @@ public enum BattleSide { A, B }
 
 public enum BattleEventKind { GANK, FIRST_BLOOD, KILL, TOWER, OBJECTIVE, FIGHT, ACE, END, TALENT }
 
-/// <summary>Objet du roster engagé au combat. Sans profil, celui-ci est déduit des classes.</summary>
+/// <summary>Objet du roster engagé au combat. Sans profil, celui-ci est déduit des classes. Meta = bonus du patch de la semaine (<see cref="Battle.Meta"/>).</summary>
 public sealed record BattleUnit(
     CapsuleItemKind Kind, int ItemId, string Champion, int ChampionId, Rarity Rarity, ChampionClass[] Classes, int[] Lines, Talent? Talent = null,
-    ChampionProfile? Profile = null);
+    ChampionProfile? Profile = null, double Meta = 0);
 
-/// <summary>Bilan d'une unité : puissance, bonus de poste et de contre de classe en teamfight (en %), talent, profil, éliminations.</summary>
+/// <summary>Bilan d'une unité : puissance, bonus de poste, de contre de classe en teamfight et de méta (en %), talent, profil, éliminations.</summary>
 public sealed record UnitReport(
     int Role, CapsuleItemKind Kind, int ItemId, string Champion, Rarity Rarity, ChampionClass[] Classes,
-    int Power, int FitPercent, int CounterPercent, int Kills = 0, int Deaths = 0, Talent? Talent = null, ChampionProfile? Profile = null);
+    int Power, int FitPercent, int CounterPercent, int Kills = 0, int Deaths = 0, Talent? Talent = null, ChampionProfile? Profile = null,
+    int MetaPercent = 0);
 
 /// <summary>Bilan d'une équipe ; FightPercent = bonus ou malus de composition en teamfight.</summary>
 public sealed record TeamReport(List<UnitReport> Units, List<string> Synergies, int Power, int FightPercent = 0);
@@ -194,10 +195,10 @@ public static class BattleRules
         var (bonus, labels) = Synergies(team, lineNames);
         var (fight, fightLabels) = Composition(team);
         var units = team.Select((u, i) => new UnitReport(i, u.Kind, u.ItemId, u.Champion, u.Rarity, u.Classes,
-            (int)Math.Round(100 * (1 + RarityBonus(u.Rarity)) * (1 + RoleFitBonus(u, i)) * (1 + bonus)),
+            (int)Math.Round(100 * (1 + RarityBonus(u.Rarity)) * (1 + RoleFitBonus(u, i)) * (1 + bonus) * (1 + u.Meta)),
             (int)Math.Round(RoleFitBonus(u, i) * 100),
             foes is null ? 0 : ClassCounter(u, foes),
-            Talent: u.Talent, Profile: ProfileOf(u))).ToList();
+            Talent: u.Talent, Profile: ProfileOf(u), MetaPercent: (int)Math.Round(u.Meta * 100))).ToList();
         return new TeamReport(units, [.. labels, .. fightLabels], units.Sum(u => u.Power), (int)Math.Round(fight * 100));
     }
 

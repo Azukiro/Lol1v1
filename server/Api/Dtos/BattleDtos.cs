@@ -15,6 +15,9 @@ public sealed record ArenaDto(
 /// <summary>Saison en cours : palier de la cote, plancher du palier et seuil du suivant (null au sommet).</summary>
 public sealed record SeasonDto(string Id, int Number, DateTimeOffset EndsAt, Tier Tier, int TierFloor, int? NextTierAt, int PeakRating);
 
+/// <summary>Patch de méta de la semaine : buffs et nerfs de champions et de classes, en vigueur de StartsAt à EndsAt.</summary>
+public sealed record MetaDto(string Id, int Number, DateTimeOffset StartsAt, DateTimeOffset EndsAt, List<MetaChange> Changes);
+
 /// <summary>Bilan d'une saison terminée, avec les reliques versées.</summary>
 public sealed record SeasonResultDto(
     string Id, int Number, int Rating, int PeakRating, int Wins, int Losses, int Rank, Tier Tier, int RewardStandard, int RewardPremium);

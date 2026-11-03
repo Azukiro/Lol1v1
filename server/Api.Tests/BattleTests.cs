@@ -275,6 +275,33 @@ public class BattleFlowTests
             .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<BattleDto>(ApiJson.Options))!;
 
     [Fact]
+    public async Task Weekly_meta_nerfs_rostered_champions_and_is_frozen_for_the_week()
+    {
+        await using var factory = new ApiFactory();
+        SeedCatalog(factory);
+        var (a, aId) = await Player(factory, "metaA");
+        await GiveRoster(factory, aId, a);
+
+        var meta = (await a.GetFromJsonAsync<MetaDto>("/api/v1/capsules/meta", ApiJson.Options))!;
+        Assert.Equal("2026-W41", meta.Id);
+        Assert.Equal(1, meta.Number);
+        Assert.Equal(Meta.ChampionCount, meta.Changes.Count(c => c.Target == MetaTarget.CHAMPION && c.Percent < 0));
+        Assert.Contains(meta.Changes, c => c.Target == MetaTarget.CLASS && c.Percent < 0);
+
+        var arena = (await a.GetFromJsonAsync<ArenaDto>("/api/v1/capsules/arena", ApiJson.Options))!;
+        Assert.Contains(arena.Team!.Units, u => u.MetaPercent < 0);
+        var nerf = meta.Changes.First(c => c.Target == MetaTarget.CHAMPION && c.Percent < 0);
+        var unit = arena.Team.Units.Single(u => u.Champion == nerf.Name);
+        Assert.Equal((int)Math.Round(Meta.Bonus(nerf.ChampionId!.Value, unit.Classes[0], meta.Changes) * 100), unit.MetaPercent);
+
+        // Figé pour la semaine, nouveau patch le lundi suivant.
+        Assert.Equal(meta.Changes, (await a.GetFromJsonAsync<MetaDto>("/api/v1/capsules/meta", ApiJson.Options))!.Changes);
+        factory.Clock.Advance(TimeSpan.FromDays(7));
+        var next = (await a.GetFromJsonAsync<MetaDto>("/api/v1/capsules/meta", ApiJson.Options))!;
+        Assert.Equal(("2026-W42", 2), (next.Id, next.Number));
+    }
+
+    [Fact]
     public async Task Full_rosters_are_required_to_fight()
     {
         await using var factory = new ApiFactory();
@@ -371,5 +398,51 @@ public class BattleFlowTests
         Assert.Equal(paid.Count, arena!.RewardedToday);
         var state = await a.GetFromJsonAsync<CapsuleStateDto>("/api/v1/capsules/state", ApiJson.Options);
         Assert.Equal(paid.Count * 75, state!.Essence);
+    }
+}
+
+public class MetaTests
+{
+    private static MetaCandidate C(int id, ChampionClass cls, int usage) => new(id, $"Champ{id}", cls, usage);
+
+    [Fact]
+    public void Most_played_champions_are_nerfed_and_forgotten_ones_buffed()
+    {
+        List<MetaCandidate> champions =
+        [
+            C(1, ChampionClass.FIGHTER, 9), C(2, ChampionClass.MAGE, 7), C(3, ChampionClass.FIGHTER, 5), C(4, ChampionClass.MARKSMAN, 4),
+            C(5, ChampionClass.TANK, 1), C(6, ChampionClass.ASSASSIN, 0), C(7, ChampionClass.SUPPORT, 0), C(8, ChampionClass.MAGE, 0),
+            C(9, ChampionClass.TANK, 0), C(10, ChampionClass.MARKSMAN, 2),
+        ];
+        var changes = Meta.Generate(champions, 42);
+
+        var nerfed = changes.Where(c => c.Target == MetaTarget.CHAMPION && c.Percent < 0).Select(c => c.ChampionId).ToHashSet();
+        var buffed = changes.Where(c => c.Target == MetaTarget.CHAMPION && c.Percent > 0).Select(c => c.ChampionId).ToHashSet();
+        Assert.Equal([1, 2, 3, 4], nerfed.Order());
+        Assert.Equal([6, 7, 8, 9], buffed.Order());
+        Assert.Contains(changes, c => c is { Target: MetaTarget.CLASS, Class: ChampionClass.FIGHTER, Percent: -Meta.ClassPercent });
+        Assert.Contains(changes, c => c is { Target: MetaTarget.CLASS, Class: ChampionClass.ASSASSIN or ChampionClass.SUPPORT, Percent: Meta.ClassPercent });
+        Assert.Equal(changes, Meta.Generate(champions, 42));
+    }
+
+    [Fact]
+    public void Champion_and_class_changes_stack()
+    {
+        List<MetaChange> changes =
+        [
+            new(MetaTarget.CHAMPION, 1, null, "A", -8, ""), new(MetaTarget.CLASS, null, ChampionClass.FIGHTER, "Combattants", -4, ""),
+        ];
+        Assert.Equal(0.92 * 0.96 - 1, Meta.Bonus(1, ChampionClass.FIGHTER, changes), 6);
+        Assert.Equal(-0.04, Meta.Bonus(2, ChampionClass.FIGHTER, changes), 6);
+        Assert.Equal(0, Meta.Bonus(2, ChampionClass.MAGE, changes));
+    }
+
+    [Fact]
+    public void Patches_turn_over_on_monday()
+    {
+        Assert.Equal("2026-W44", Meta.IdOf(new DateTime(2026, 11, 1, 23, 59, 0)));
+        Assert.Equal("2026-W45", Meta.IdOf(new DateTime(2026, 11, 2, 0, 0, 0)));
+        Assert.Equal(new DateTime(2026, 10, 26), Meta.WeekStart(new DateTime(2026, 11, 1, 23, 59, 0)));
+        Assert.Equal("2026-W53", Meta.IdOf(new DateTime(2027, 1, 1)));
     }
 }

@@ -302,6 +302,28 @@ public class BattleFlowTests
     }
 
     [Fact]
+    public async Task Frames_show_the_tier_reached_at_the_end_of_last_week()
+    {
+        await using var factory = new ApiFactory();
+        SeedCatalog(factory);
+        var (a, aId) = await Player(factory, "frameA");
+        var (b, bId) = await Player(factory, "frameB");
+        await GiveRoster(factory, aId, a);
+        await GiveRoster(factory, bId, b);
+        await Attack(a, bId);
+        Assert.Null((await a.GetFromJsonAsync<ArenaDto>("/api/v1/capsules/arena", ApiJson.Options))!.Frame);
+
+        // Lundi suivant : le patch relève le palier des joueurs classés.
+        factory.Clock.Advance(TimeSpan.FromDays(7));
+        var arena = (await a.GetFromJsonAsync<ArenaDto>("/api/v1/capsules/arena", ApiJson.Options))!;
+        Assert.Equal(Seasons.TierOf(arena.Rating), arena.Frame);
+        var ladder = (await a.GetFromJsonAsync<LadderDto>("/api/v1/capsules/ladder", ApiJson.Options))!;
+        Assert.All(ladder.Top, e => Assert.Equal(Seasons.TierOf(e.Rating), e.Frame));
+        var foe = arena.Opponents.Single(o => o.Player.UserId == bId);
+        Assert.Equal(Seasons.TierOf(foe.Rating), foe.Player.Frame);
+    }
+
+    [Fact]
     public async Task Full_rosters_are_required_to_fight()
     {
         await using var factory = new ApiFactory();

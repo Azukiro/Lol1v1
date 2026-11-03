@@ -90,7 +90,7 @@ public sealed class BattleService(
             team is not null, team is null ? null : BattleRules.Analyze(team, LineNames(catalog)), opponents,
             new SeasonDto(seasonId, Seasons.Number(seasonId), SeasonEnd(now), Seasons.TierOf(rating), Seasons.Floor(rating), Seasons.NextThreshold(rating),
                 profile?.PeakRating ?? rating),
-            last is null ? null : ToDto(last));
+            last is null ? null : ToDto(last), profile?.WeekTier);
     }
 
     public async Task<BattlePreviewDto> PreviewAsync(Guid userId, Guid opponentId)
@@ -199,7 +199,7 @@ public sealed class BattleService(
         var users = await db.Users.Include(u => u.RiotAccount).Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id);
         LadderEntryDto Entry(BattleProfile p, int rank) =>
             new(rank, p.UserId, users.GetValueOrDefault(p.UserId)?.DisplayName ?? "?", users.GetValueOrDefault(p.UserId)?.RiotAccount?.ProfileIconId,
-                p.Rating, p.Wins, p.Losses, users.GetValueOrDefault(p.UserId)?.AvatarChampionId);
+                p.Rating, p.Wins, p.Losses, users.GetValueOrDefault(p.UserId)?.AvatarChampionId, p.WeekTier);
 
         var entries = new List<LadderEntryDto>();
         for (var i = 0; i < top.Count; i++)
@@ -215,9 +215,10 @@ public sealed class BattleService(
     private async Task<BattleDto> ToDtoAsync(RelicBattle b, BattleOutcome o)
     {
         var users = await db.Users.Include(u => u.RiotAccount).Where(u => u.Id == b.AttackerId || u.Id == b.DefenderId).ToDictionaryAsync(u => u.Id);
+        var frames = await db.BattleProfiles.Where(p => p.UserId == b.AttackerId || p.UserId == b.DefenderId).ToDictionaryAsync(p => p.UserId, p => p.WeekTier);
         BattlePlayerDto Player(Guid id, int before, int after) =>
             new(id, users.GetValueOrDefault(id)?.DisplayName ?? "Joueur supprimé", users.GetValueOrDefault(id)?.RiotAccount?.ProfileIconId, before, after,
-                users.GetValueOrDefault(id)?.AvatarChampionId);
+                users.GetValueOrDefault(id)?.AvatarChampionId, frames.GetValueOrDefault(id));
         return new BattleDto(b.Id, b.CreatedAt,
             Player(b.AttackerId, b.AttackerRatingBefore, b.AttackerRatingAfter), Player(b.DefenderId, b.DefenderRatingBefore, b.DefenderRatingAfter),
             b.AttackerWon, b.Essence, o.Minutes, o.A, o.B, o.Events);
@@ -394,7 +395,7 @@ public sealed class BattleService(
 
     /// <summary>
     /// Patch de la semaine en cours, créé au premier passage de la semaine à partir des rosters complets du moment
-    /// (<see cref="Meta.Generate"/>), puis figé.
+    /// (<see cref="Meta.Generate"/>), puis figé. Relève aussi le palier de chaque joueur pour son cadre de la semaine.
     /// </summary>
     private async Task<(MetaPatch Patch, List<MetaChange> Changes)> CurrentMetaAsync(CapsuleCatalog catalog)
     {
@@ -439,6 +440,9 @@ public sealed class BattleService(
             Changes = JsonSerializer.Serialize(Meta.Generate(candidates, StableSeed(id)), Json), CreatedAt = clock.GetUtcNow(),
         };
         db.MetaPatches.Add(patch);
+        // Cadres de la semaine : palier de chaque joueur classé au moment du patch, c'est-à-dire en fin de semaine passée.
+        foreach (var p in await db.BattleProfiles.ToListAsync())
+            p.WeekTier = p.Wins + p.Losses > 0 ? Seasons.TierOf(p.Rating) : null;
         await db.SaveChangesAsync();
         db.Entry(patch).State = EntityState.Detached;
         return patch;

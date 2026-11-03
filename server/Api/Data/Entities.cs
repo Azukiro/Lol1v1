@@ -276,6 +276,8 @@ public class BattleProfile
     public string SeasonId { get; set; } = "";
     /// <summary>Meilleure cote de la saison.</summary>
     public int PeakRating { get; set; }
+    /// <summary>Palier à la fin de la semaine passée (cadre de l'icône), relevé au patch du lundi ; null = pas classé.</summary>
+    public Api.Domain.Battle.Tier? WeekTier { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
 

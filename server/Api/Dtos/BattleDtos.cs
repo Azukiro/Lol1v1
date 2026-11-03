@@ -10,7 +10,8 @@ public sealed record ArenaOpponentDto(PlayerCardDto Player, int Rating, bool Fri
 /// <summary>Arène : cote, récompenses du jour, analyse de son roster et adversaires.</summary>
 public sealed record ArenaDto(
     int Rating, int Wins, int Losses, int? Rank, int RewardedToday, int RewardedPerDay, int WinEssence, DateTimeOffset ResetAt,
-    int RematchHours, bool RosterReady, TeamReport? Team, List<ArenaOpponentDto> Opponents, SeasonDto Season, SeasonResultDto? LastSeason);
+    int RematchHours, bool RosterReady, TeamReport? Team, List<ArenaOpponentDto> Opponents, SeasonDto Season, SeasonResultDto? LastSeason,
+    Tier? Frame = null);
 
 /// <summary>Saison en cours : palier de la cote, plancher du palier et seuil du suivant (null au sommet).</summary>
 public sealed record SeasonDto(string Id, int Number, DateTimeOffset EndsAt, Tier Tier, int TierFloor, int? NextTierAt, int PeakRating);
@@ -27,7 +28,9 @@ public sealed record ShareDto(string Code);
 /// <summary>Aperçu avant l'attaque : vis-à-vis, contres et synergies des deux rosters.</summary>
 public sealed record BattlePreviewDto(PlayerCardDto Opponent, int Rating, TeamReport Mine, TeamReport Theirs, DateTimeOffset? AvailableAt);
 
-public sealed record BattlePlayerDto(Guid UserId, string DisplayName, int? ProfileIconId, int RatingBefore, int RatingAfter, int? AvatarChampionId = null);
+/// <summary>Frame = palier de la semaine passée (cadre de l'icône), null si pas classé.</summary>
+public sealed record BattlePlayerDto(
+    Guid UserId, string DisplayName, int? ProfileIconId, int RatingBefore, int RatingAfter, int? AvatarChampionId = null, Tier? Frame = null);
 
 /// <summary>Combat complet (rejouable) ; A = attaquant, B = défenseur.</summary>
 public sealed record BattleDto(
@@ -37,5 +40,6 @@ public sealed record BattleDto(
 public sealed record BattleSummaryDto(
     Guid Id, DateTimeOffset CreatedAt, bool Attacked, Guid OpponentId, string OpponentName, int? OpponentIcon, bool Won, int RatingDelta, int Essence);
 
-public sealed record LadderEntryDto(int Rank, Guid UserId, string DisplayName, int? ProfileIconId, int Rating, int Wins, int Losses, int? AvatarChampionId = null);
+public sealed record LadderEntryDto(
+    int Rank, Guid UserId, string DisplayName, int? ProfileIconId, int Rating, int Wins, int Losses, int? AvatarChampionId = null, Tier? Frame = null);
 public sealed record LadderDto(List<LadderEntryDto> Top, LadderEntryDto? Me);

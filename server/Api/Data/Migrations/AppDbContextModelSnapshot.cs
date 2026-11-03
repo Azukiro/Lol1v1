@@ -87,6 +87,11 @@ namespace Api.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
 
+                    b.Property<string>("WeekTier")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("week_tier");
+
                     b.Property<int>("Wins")
                         .HasColumnType("integer")
                         .HasColumnName("wins");

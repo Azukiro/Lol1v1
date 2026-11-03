@@ -841,7 +841,14 @@ async function saveRoster(slots) {
 }
 
 function avatarHTML(p) {
-  return `<span class="avatar">${avatarInner(p)}</span>`;
+  return `<span class="avatar${p.frame ? ' framed' : ''}"${frameAttrs(p.frame)}>${avatarInner(p)}</span>`;
+}
+
+/** Cadre de l'icône : palier du joueur en fin de semaine passée. */
+const frameAttrs = (tier) => (tier ? ` style="--fc:${TIER[tier].color}" title="${TIER[tier].label} la semaine passée"` : '');
+function setFrame(el, tier) {
+  el.classList.toggle('framed', !!tier);
+  if (tier) { el.style.setProperty('--fc', TIER[tier].color); el.title = `${TIER[tier].label} la semaine passée`; } else { el.style.removeProperty('--fc'); el.removeAttribute('title'); }
 }
 
 // ---------- Icône de profil : un champion au choix ----------
@@ -1044,7 +1051,7 @@ function renderArenaHead() {
   const span = s.nextTierAt ? s.nextTierAt - s.tierFloor : 1;
   const pct = s.nextTierAt ? Math.min(100, Math.max(0, ((a.rating - s.tierFloor) / span) * 100)) : 100;
   const next = Object.keys(TIER)[Object.keys(TIER).indexOf(s.tier) + 1];
-  $('#arena-season').innerHTML = `<div class="season-top">${tierBadge(s.tier)}<span class="muted">Saison ${s.number} · fin dans ${daysLeft(s.endsAt)}</span></div>
+  $('#arena-season').innerHTML = `<div class="season-top">${S.user ? avatarHTML({ ...S.user, frame: a.frame }) : ''}${tierBadge(s.tier)}<span class="muted">Saison ${s.number} · fin dans ${daysLeft(s.endsAt)}</span></div>
     <div class="tier-bar" style="--tc:${TIER[s.tier].color}"><i style="width:${pct}%"></i></div>
     <span class="tier-next">${s.nextTierAt ? `${TIER[next].label} à ${s.nextTierAt} pts · encore ${s.nextTierAt - a.rating}` : 'Palier maximal atteint'}</span>`;
   if (a.lastSeason && !S.seasonShown) { S.seasonShown = true; showSeasonEnd(a.lastSeason); }
@@ -1092,7 +1099,7 @@ function foeHTML(o) {
   const status = o.revenge ? '<span class="cta revenge">Revanche</span>'
     : wait > 0 ? `<span class="cta wait">${fmtWait(wait)}</span>` : '<span class="cta">Défier</span>';
   return `<button class="foe${o.revenge ? ' hot' : ''}" data-foe="${p.userId}" type="button">
-    <span class="avatar">${avatarInner(p)}</span>
+    ${avatarHTML(p)}
     <span class="who"><b>${esc(p.displayName)}</b><span>${o.rating} pts${o.friend ? ' · ami' : ''}</span></span>
     <span class="mini-roster">${p.roster.map((s) => { const it = s && S.cat && item(s.kind, s.itemId); return it ? `<img loading="lazy" class="r-${it.rarity}" src="${esc(it.art)}" alt="">` : '<i></i>'; }).join('')}</span>
     ${status}
@@ -1108,7 +1115,7 @@ function renderFoes() {
 function ladderRow(e) {
   const mine = e.userId === S.user?.id;
   return `<div class="lrow${mine ? ' me' : ''}${e.rank <= 3 ? ` podium p${e.rank}` : ''}">
-    <span class="rank">${e.rank}</span><span class="avatar">${avatarInner(e)}</span>
+    <span class="rank">${e.rank}</span>${avatarHTML(e)}
     <span class="who"><b>${esc(e.displayName)}${mine ? ' (toi)' : ''}</b><span>${e.wins} V · ${e.losses} D</span></span>
     ${tierBadge(tierOf(e.rating))}<b class="pts">${e.rating}</b></div>`;
 }
@@ -1580,6 +1587,7 @@ async function playBattle(b, { spectator = false } = {}) {
   const el = $('#battle');
   el.hidden = false; el.className = `battle${spectator ? ' spectator' : ''}`;
   $('#b-me-av').innerHTML = avatarInner(pMe); $('#b-them-av').innerHTML = avatarInner(pThem);
+  setFrame($('#b-me-av'), pMe.frame); setFrame($('#b-them-av'), pThem.frame);
   $('#b-me-name').textContent = spectator ? pMe.displayName : mineA ? 'Toi' : 'Toi (défense)'; $('#b-them-name').textContent = pThem.displayName;
   $('#b-share').hidden = true; $('#b-feed').innerHTML = ''; $('#b-end').hidden = true;
   $('#b-announce').hidden = true; $('#b-callout').hidden = true;

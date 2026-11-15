@@ -1296,21 +1296,49 @@ function bossHTML(b) {
   const wait = Date.parse(b.resetAt) - now();
   return `<section class="boss">
     <div class="boss-head"><span class="kicker">Boss de la semaine · fin dans ${daysLeft(b.endsAt)}</span><h2>${esc(b.name)}</h2>
-      <p class="muted">Équipe Exaltée gonflée à +35 %. Fais un max de dégâts : ${b.killPoints} par kill, ${b.towerPoints} par tour, ${fmtInt(b.winPoints)} si tu le bats. Ton meilleur score compte.</p></div>
+      <p class="muted">Équipe Exaltée gonflée à +35 %. Fais un max de dégâts : ${b.killPoints} par kill, ${b.towerPoints} par tour, ${fmtInt(b.winPoints)} si tu le bats.
+        C'est toi qui fais les calls : à chaque phase, lis les intentions du boss et contre-le (+${b.readPoints} par call réussi). Ton meilleur score compte.</p></div>
     <div class="boss-units">${units}</div>
     <div class="boss-me"><div><span class="kicker">Ton record</span><b>${b.myBest != null ? fmtInt(b.myBest) : '—'}</b><span>${b.myRank ? `#${b.myRank} cette semaine` : 'pas encore classé'}</span></div>
       <div><span class="kicker">Tentatives</span><b>${b.attemptsLeft} / ${b.attemptsPerDay}</b><span>aujourd'hui</span></div></div>
-    <button class="btn primary big block" id="boss-go" type="button" ${b.attemptsLeft && b.mine ? '' : 'disabled'}>${!b.mine ? 'Complète ton roster d\'abord' : b.attemptsLeft ? 'Attaquer le boss' : `Nouvelles tentatives ${fmtWait(wait)}`}</button>
+    <button class="btn primary big block" id="boss-go" type="button" ${b.openRun || (b.attemptsLeft && b.mine) ? '' : 'disabled'}>${b.openRun ? 'Reprendre la partie en cours'
+      : !b.mine ? 'Complète ton roster d\'abord' : b.attemptsLeft ? 'Attaquer le boss' : `Nouvelles tentatives ${fmtWait(wait)}`}</button>
     <p class="muted boss-rewards">Lundi : 1er +3 prestige, 2e +2, 3e +1, tous les autres participants +1 relique. Chaque tentative donne de l'XP de pass.</p>
     <div class="section-head"><h2>Dégâts infligés</h2><span class="muted">${b.top.length} joueur${b.top.length > 1 ? 's' : ''}</span></div>
     ${rows ? `<div class="ladder">${rows}</div>` : '<p class="empty-note">Personne n\'a encore attaqué : sois le premier.</p>'}
   </section>`;
 }
 
+/** Coquille de combat pour une partie contre le boss en cours (avant la fin, pas de score). */
+const bossShell = (s) => ({ id: s.runId, attacker: s.me, defender: s.boss, a: s.a, b: s.b, events: s.events, attackerWon: false,
+  boss: true, essence: 0, passXp: 0, minutes: 0 });
+
 async function attackBoss() {
   const btn = $('#boss-go'); btn.disabled = true; btn.textContent = 'Combat en cours…';
-  try { await playBattle(await api('/capsules/boss/attack', { method: 'POST' })); }
-  catch (e) { toast(e.message, true); renderBoss(); }
+  try {
+    const step = await api('/capsules/boss/attack', { method: 'POST' });
+    await playBattle(bossShell(step), { live: { step } });
+  } catch (e) { toast(e.message, true); renderBoss(); }
+}
+
+const STAGE_KICKER = { PLAN: 'Avant les lanes', OBJECTIVES: 'Avant les dragons', FIGHT: 'Avant le combat' };
+
+/** Panneau de décision pendant le combat contre le boss ; renvoie l'option choisie (0 à 2). Touches 1, 2, 3 au clavier. */
+function askTactic(d) {
+  const el = $('#b-tactic');
+  el.innerHTML = `<span class="kicker">${STAGE_KICKER[d.stage]} · ${d.minute}'</span>
+    <h3>${esc(d.title)}</h3><p>${esc(d.text)}</p>
+    <div class="tactic-hints"><span class="kicker">Renseignements</span>${d.hints.slice().sort((x, y) => y.percent - x.percent)
+      .map((h) => `<div class="tactic-hint" style="--p:${h.percent}%"><span>${esc(h.label)}</span><b>${h.percent} %</b></div>`).join('')}</div>
+    <div class="tactic-opts">${d.options.map((o) => `<button type="button" class="tactic-opt" data-tactic="${o.id}"><b><em>${o.id + 1}</em>${esc(o.label)}</b><span>${esc(o.text)}</span></button>`).join('')}</div>`;
+  el.hidden = false;
+  audio.tone(520, 0.12, 'triangle', 0.05); buzz(25);
+  return new Promise((resolve) => {
+    const done = (choice) => { el.hidden = true; el.onclick = null; removeEventListener('keydown', key); resolve(choice); };
+    const key = (e) => { if (['1', '2', '3'].includes(e.key)) done(+e.key - 1); };
+    el.onclick = (e) => { const b = e.target.closest('[data-tactic]'); if (b) done(+b.dataset.tactic); };
+    addEventListener('keydown', key);
+  });
 }
 
 function showBossResult(r) {
@@ -1898,21 +1926,25 @@ function buildMap(mine, theirs) {
 }
 
 /** Rejoue un combat ; en spectateur (lien partagé), l'attaquant est à gauche et rien n'est « à toi ». */
-async function playBattle(b, { spectator = false } = {}) {
+/**
+ * Rejoue un combat. live = partie contre le boss en cours ({ step }) : la partie s'arrête à chaque décision,
+ * le choix part au serveur, puis la suite se joue ; à la fin, b devient le combat complet (score, XP).
+ */
+async function playBattle(b, { spectator = false, live = null } = {}) {
   replay.battle = b; replay.spectator = spectator;
   const mineA = spectator || b.attacker.userId === S.user?.id;
   R.me = mineA ? 'A' : 'B';
-  const [mine, theirs] = mineA ? [b.a, b.b] : [b.b, b.a];
+  let [mine, theirs] = mineA ? [b.a, b.b] : [b.b, b.a];
   const [pMe, pThem] = mineA ? [b.attacker, b.defender] : [b.defender, b.attacker];
   R.spectatorNames = spectator ? { me: pMe.displayName, them: pThem.displayName } : null;
-  const won = mineA === b.attackerWon;
+  let won = mineA === b.attackerWon;
   const el = $('#battle');
   el.hidden = false; el.className = `battle${spectator ? ' spectator' : ''}`;
   $('#b-me-av').innerHTML = avatarInner(pMe); $('#b-them-av').innerHTML = avatarInner(pThem);
   setFrame($('#b-me-av'), pMe.frame, pMe.legend); setFrame($('#b-them-av'), pThem.frame, pThem.legend);
   $('#b-me-name').textContent = spectator ? pMe.displayName : mineA ? 'Toi' : 'Toi (défense)'; $('#b-them-name').textContent = pThem.displayName;
   $('#b-share').hidden = true; $('#b-feed').innerHTML = ''; $('#b-end').hidden = true;
-  $('#b-announce').hidden = true; $('#b-callout').hidden = true;
+  $('#b-announce').hidden = true; $('#b-callout').hidden = true; $('#b-tactic').hidden = true;
   $('#b-skip').hidden = false; $('#b-speed').hidden = false; $('#b-replay').hidden = true; $('#b-close').hidden = true;
   $('#b-speed').textContent = `×${replay.speed}`;
   buildMap(mine, theirs);
@@ -1927,10 +1959,35 @@ async function playBattle(b, { spectator = false } = {}) {
   await bpause(1400);
 
   let prev = zero;
-  for (const ev of b.events) {
+  let i = 0;
+  for (;;) {
+    const events = live ? live.step.events : b.events;
+    for (; i < events.length; i++) {
+      if (el.hidden || replay.battle !== b) return;
+      await stepEvent(events[i], prev);
+      prev = events[i];
+    }
+    if (!live?.step.decision) break;
+    // Décision : le combat attend le call du joueur (même en mode « Passer »).
+    $('#b-announce').hidden = true; $('#b-callout').hidden = true;
+    const choice = await askTactic(live.step.decision);
     if (el.hidden || replay.battle !== b) return;
-    await stepEvent(ev, prev);
-    prev = ev;
+    try {
+      live.step = await api(`/capsules/boss/runs/${live.step.runId}/choose`, { method: 'POST', body: { choice } });
+    } catch (e) { toast(e.message, true); continue; }
+    const r = live.step.results[live.step.results.length - 1];
+    replay.skip = false;
+    announce(r.outcome > 0 ? 'Bien lu !' : r.outcome < 0 ? 'Contré' : 'Statu quo', r.text, r.outcome > 0 ? 'me' : r.outcome < 0 ? 'them' : 'neutral', 2000);
+    if (r.outcome > 0) { audio.chime(3); buzz([30, 30, 60]); } else if (r.outcome < 0) buzz(80);
+    await bpause(1900);
+  }
+  if (live) {
+    // Fin de la partie contre le boss : le combat complet remplace la coquille.
+    const results = live.step.results;
+    b = { ...live.step.battle, tactics: results };
+    replay.battle = b;
+    [mine, theirs] = [b.a, b.b];
+    won = b.attackerWon;
   }
   if (replay.battle !== b) return;
   if (replay.skip) { $('#b-announce').hidden = true; $('#b-callout').hidden = true; }
@@ -1952,6 +2009,7 @@ async function playBattle(b, { spectator = false } = {}) {
         : `<span class="chip ${delta >= 0 ? 'up' : 'down'}">${signed(delta)} pts · ${pMe.ratingAfter}</span>`}
       ${!spectator && mineA && b.essence ? `<span class="chip ess">+${b.essence} essence</span>` : ''}
       ${!spectator && mineA && b.passXp ? `<span class="chip xp">+${b.passXp} XP pass</span>` : ''}
+      ${b.tactics?.length ? `<span class="chip">${b.tactics.filter((t) => t.outcome > 0).length} / ${b.tactics.length} calls réussis</span>` : ''}
       <span class="chip gold">MVP · ${esc(mvp.champion)}</span></div>
     <div class="pg-board"><div class="pg-team me"><span class="kicker">${esc(spectator ? pMe.displayName : 'Ton équipe')}</span>${rows(mine.units, 'me')}</div>
       <div class="pg-team them"><span class="kicker">${esc(pThem.displayName)}</span>${rows(theirs.units, 'them')}</div></div>
@@ -2369,7 +2427,8 @@ function showGuide() {
       <li><b>Essence</b> : 2 victoires en attaque = 1 relique, jusqu'à 4 victoires payées par jour.</li>
       <li><b>Revanche</b> : un seul défi par joueur jusqu'à sa riposte, ou 24 h.</li>
       <li><b>Pass de saison</b> : victoire en attaque +30 XP, défaite +15, défense tenue +10, boss +20 ; 80 XP par niveau, 15 niveaux payés tout de suite. Le dernier donne le cadre animé Légende.</li>
-      <li><b>Boss de la semaine</b> : 3 tentatives par jour, sans effet sur la cote. 100 par kill, 250 par tour, 3 000 si tu le bats. Le lundi : 1er +3 prestige, 2e +2, 3e +1, les autres +1 relique.</li>
+      <li><b>Boss de la semaine</b> : 3 tentatives par jour, sans effet sur la cote. 100 par kill, 250 par tour, 3 000 si tu le bats.
+        Tu fais les calls (plan de jeu, objectifs, chaque teamfight) : contrer l'intention du boss donne +20 % sur la phase et +300 points, te faire contrer −15 %. Le lundi : 1er +3 prestige, 2e +2, 3e +1, les autres +1 relique.</li>
       <li><b>Week-ends</b> : du samedi au lundi minuit, en rotation : double essence, double XP de pass, méta folle (une classe +15 %, une autre −10 %).</li>
       <li><b>Saisons</b> : deux semaines, du lundi au lundi. Argent 1050, Or 1150, Platine 1250, Diamant 1400, Maître 1550, Grand maître 1700, Challenger 1850. Récompense de palier dès 5 combats, ton palier final devient le cadre de ton icône pour la saison suivante, puis la cote revient à mi-chemin de 1000.</li></ul>`)}
     ${sec('Check-list pour maximiser ton équipe', `<ul class="g-list check">

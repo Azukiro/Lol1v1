@@ -75,6 +75,76 @@ public class ArenaFeaturesTests
         Assert.Equal((1, 0), Boss.Reward(7));
     }
 
+    /// <summary>Partie complète contre le boss : toujours la même option (0 à 2) à chaque décision.</summary>
+    private static async Task<BattleDto> PlayBoss(HttpClient http, int pick)
+    {
+        var step = (await (await http.PostAsync("/api/v1/capsules/boss/attack", null)).EnsureSuccessStatusCode()
+            .Content.ReadFromJsonAsync<BossStepDto>(ApiJson.Options))!;
+        Assert.Equal(0, step.Decision!.Index);
+        Assert.Empty(step.Events);
+        var seen = 0;
+        while (step.Battle is null)
+        {
+            Assert.True(step.Events.Count >= seen);
+            seen = step.Events.Count;
+            step = (await (await http.PostAsJsonAsync($"/api/v1/capsules/boss/runs/{step.RunId}/choose", new { choice = pick % 3 })).EnsureSuccessStatusCode()
+                .Content.ReadFromJsonAsync<BossStepDto>(ApiJson.Options))!;
+        }
+        Assert.Null(step.Decision);
+        Assert.InRange(step.Results.Count, 4, 5);
+        Assert.Equal(step.Battle.Events.Select(e => e.Text), step.Events.Select(e => e.Text));
+        return step.Battle;
+    }
+
+    [Fact]
+    public void Boss_decisions_only_change_what_comes_after()
+    {
+        CatalogSpell[] kit = [new("P", null), new("Q", null), new("W", null), new("E", null), new("R", null)];
+        BattleUnit U(int id, string alias, params ChampionClass[] c) =>
+            new(CapsuleItemKind.CHAMPION, id, alias, id, Rarity.EPIC, c, [], Talents.For(alias, c, kit.Select(k => (k.Name, k.Icon)).ToList()));
+        List<BattleUnit> team = [U(1, "Darius", ChampionClass.FIGHTER), U(2, "LeeSin", ChampionClass.FIGHTER), U(3, "TwistedFate", ChampionClass.MAGE),
+            U(4, "Jinx", ChampionClass.MARKSMAN), U(5, "Thresh", ChampionClass.SUPPORT)];
+        Dictionary<int, string> names = [];
+        for (var seed = 1; seed < 40; seed++)
+        {
+            var start = BattleRules.SimulateBoss(team, team, seed, names, []);
+            Assert.Equal(0, start.Decision!.Index);
+            Assert.Empty(start.Events);
+            var a = BattleRules.SimulateBoss(team, team, seed, names, [0]);
+            var b = BattleRules.SimulateBoss(team, team, seed, names, [0, 2]);
+            Assert.Equal(1, a.Decision!.Index);
+            Assert.Equal(a.Events, b.Events.Take(a.Events.Count));
+            Assert.Equal(3, a.Decision.Hints.Count);
+            Assert.Equal(100, a.Decision.Hints.Sum(h => h.Percent));
+            var full = BattleRules.SimulateBoss(team, team, seed, names, [0, 1, 2, 0, 1]);
+            Assert.NotNull(full.Outcome);
+            Assert.Equal(full.Outcome!.Events.Count, full.Events.Count);
+        }
+        Assert.Equal(1, BossTactics.Duel(0, 1));
+        Assert.Equal(0, BossTactics.Duel(2, 2));
+        Assert.Equal(-1, BossTactics.Duel(0, 2));
+    }
+
+    [Fact]
+    public async Task An_unfinished_boss_run_is_resumed_without_spending_an_attempt()
+    {
+        await using var factory = new ApiFactory();
+        SeedCatalog(factory);
+        var (a, _) = await Player(factory, "resumeA");
+        var first = (await (await a.PostAsync("/api/v1/capsules/boss/attack", null)).EnsureSuccessStatusCode()
+            .Content.ReadFromJsonAsync<BossStepDto>(ApiJson.Options))!;
+        (await a.PostAsJsonAsync($"/api/v1/capsules/boss/runs/{first.RunId}/choose", new { choice = 1 })).EnsureSuccessStatusCode();
+        var boss = (await a.GetFromJsonAsync<BossDto>("/api/v1/capsules/boss", ApiJson.Options))!;
+        Assert.Equal((Boss.AttemptsPerDay - 1, first.RunId), (boss.AttemptsLeft, boss.OpenRun));
+        var again = (await (await a.PostAsync("/api/v1/capsules/boss/attack", null)).EnsureSuccessStatusCode()
+            .Content.ReadFromJsonAsync<BossStepDto>(ApiJson.Options))!;
+        Assert.Equal(first.RunId, again.RunId);
+        Assert.Equal(1, again.Decision!.Index);
+        Assert.Single(again.Results);
+        Assert.Equal(Boss.AttemptsPerDay - 1, (await a.GetFromJsonAsync<BossDto>("/api/v1/capsules/boss", ApiJson.Options))!.AttemptsLeft);
+        Assert.Equal(HttpStatusCode.BadRequest, (await a.PostAsJsonAsync($"/api/v1/capsules/boss/runs/{first.RunId}/choose", new { choice = 7 })).StatusCode);
+    }
+
     private static async Task<(HttpClient Http, Guid Id)> Player(ApiFactory factory, string name)
     {
         var http = factory.CreateClient();
@@ -150,8 +220,7 @@ public class ArenaFeaturesTests
         var best = 0;
         for (var i = 0; i < Boss.AttemptsPerDay; i++)
         {
-            var fight = (await (await a.PostAsync("/api/v1/capsules/boss/attack", null)).EnsureSuccessStatusCode()
-                .Content.ReadFromJsonAsync<BattleDto>(ApiJson.Options))!;
+            var fight = await PlayBoss(a, i);
             Assert.True(fight.Boss);
             Assert.Equal(SeasonPass.BossXp, fight.PassXp);
             best = Math.Max(best, fight.BossScore!.Value);

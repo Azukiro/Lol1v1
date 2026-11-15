@@ -120,6 +120,60 @@ namespace Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Api.Data.BossRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Choices")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("choices");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("Done")
+                        .HasColumnType("boolean")
+                        .HasColumnName("done");
+
+                    b.Property<int>("Seed")
+                        .HasColumnType("integer")
+                        .HasColumnName("seed");
+
+                    b.Property<string>("TeamA")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("team_a");
+
+                    b.Property<string>("TeamB")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("team_b");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("WeekId")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasColumnName("week_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_boss_run");
+
+                    b.HasIndex("UserId", "Done")
+                        .HasDatabaseName("ix_boss_run_user_id_done");
+
+                    b.ToTable("boss_run", (string)null);
+                });
+
             modelBuilder.Entity("Api.Data.BossScore", b =>
                 {
                     b.Property<string>("WeekId")
@@ -1184,6 +1238,16 @@ namespace Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_battle_profile_user_user_id");
+                });
+
+            modelBuilder.Entity("Api.Data.BossRun", b =>
+                {
+                    b.HasOne("Api.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_boss_run_user_user_id");
                 });
 
             modelBuilder.Entity("Api.Data.BossScore", b =>

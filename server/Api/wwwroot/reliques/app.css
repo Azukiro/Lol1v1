@@ -721,6 +721,26 @@ button.slot:active { transform: scale(.97); }
 .boss-rewards { margin: 0; font-size: 13px; text-align: center; }
 .chip.xp { color: var(--cyan); }
 
+/* Décisions contre le boss (panneau en bas de la carte) */
+.tactic { position: absolute; left: 0; right: 0; bottom: 0; z-index: 7; display: grid; gap: 10px; padding: 14px 14px 12px; border-radius: 16px;
+  background: rgba(8, 11, 18, .95); border: 1px solid var(--line-2); box-shadow: 0 -12px 40px rgba(0, 0, 0, .6); animation: rise .3s both; }
+.tactic .kicker { color: var(--yellow); }
+.tactic h3 { font-size: 24px; }
+.tactic p { margin: -6px 0 0; font-size: 13px; color: var(--muted); }
+.tactic-hints { display: grid; gap: 4px; }
+.tactic-hints .kicker { color: var(--pink); font-size: 10px; }
+.tactic-hint { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; border-radius: 6px; font-size: 13px;
+  background: linear-gradient(90deg, rgba(255, 51, 102, .24) var(--p), transparent var(--p)), var(--panel); }
+.tactic-hint b { font-variant-numeric: tabular-nums; }
+.tactic-opts { display: grid; gap: 6px; }
+.tactic-opt { display: grid; gap: 2px; padding: 10px 12px; border-radius: 12px; text-align: left; background: var(--panel-2); border: 1px solid var(--line-2);
+  transition: border-color .15s, transform .15s; }
+.tactic-opt b { display: flex; align-items: center; gap: 8px; font-family: var(--display); font-size: 16px; text-transform: uppercase; letter-spacing: .04em; }
+.tactic-opt em { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; font-style: normal; font-size: 12px; color: var(--bg); background: var(--cyan); }
+.tactic-opt span { font-size: 12px; color: var(--muted); }
+.tactic-opt:hover, .tactic-opt:focus-visible { border-color: var(--cyan); transform: translateY(-1px); }
+@media (min-width: 640px) { .tactic-opts { grid-template-columns: repeat(3, 1fr); } }
+
 /* Cadre Légende : anneau animé */
 .avatar.legend { border-color: #ffd36b; isolation: isolate; box-shadow: 0 0 18px rgba(255, 211, 107, .55); }
 .avatar.legend::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; z-index: -1;

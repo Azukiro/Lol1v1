@@ -45,7 +45,11 @@ public sealed class BattlesController(BattleService battles) : ControllerBase
 
     [HttpPost("boss/attack")]
     [EnableRateLimiting(RateLimits.RelicWrite)]
-    public Task<BattleDto> AttackBoss() => battles.AttackBossAsync(User.UserId());
+    public Task<BossStepDto> AttackBoss() => battles.AttackBossAsync(User.UserId());
+
+    [HttpPost("boss/runs/{runId:guid}/choose")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
+    public Task<BossStepDto> ChooseBoss(Guid runId, TacticChoiceRequest req) => battles.ChooseBossAsync(User.UserId(), runId, req.Choice);
 
     [HttpPost("boss/{weekId}/seen")]
     [EnableRateLimiting(RateLimits.RelicWrite)]

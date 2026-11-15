@@ -306,9 +306,36 @@ public static class BattleRules
         return keys.OrderByDescending(k => k.Weight).Take(3).Select(k => k.Text).ToList();
     }
 
-    /// <summary>État d'une partie en cours.</summary>
-    private sealed class Game(IReadOnlyList<BattleUnit>[] teams, TeamReport[] reports, Random rng)
+    /// <summary>
+    /// Partie contre le boss (camp B) avec les décisions du joueur (camp A) : rejouée depuis le début avec les mêmes graines,
+    /// elle s'arrête à la première décision sans réponse. Une décision ne change que la suite : le début reste identique.
+    /// </summary>
+    public static BossProgress SimulateBoss(IReadOnlyList<BattleUnit> a, IReadOnlyList<BattleUnit> b, int seed,
+        IReadOnlyDictionary<int, string> lineNames, IReadOnlyList<int> choices)
     {
+        if (a.Count != TeamSize || b.Count != TeamSize) throw new ArgumentException($"Il faut {TeamSize} unités par équipe.");
+        var (ra, rb) = Analyze(a, b, lineNames);
+        var plan = new TacticPlan(seed, choices);
+        var game = new Game([a, b], [ra, rb], new Random(seed), plan);
+        try
+        {
+            var outcome = game.Play();
+            return new BossProgress(outcome.Events, null, plan.Results, outcome);
+        }
+        catch (TacticPause pause)
+        {
+            return new BossProgress([.. game.Events], pause.Decision, plan.Results, null);
+        }
+    }
+
+    /// <summary>État d'une partie en cours.</summary>
+    private sealed class Game(IReadOnlyList<BattleUnit>[] teams, TeamReport[] reports, Random rng, TacticPlan? tactics = null)
+    {
+        /// <summary>Multiplicateurs du camp A choisis contre le boss : lanes, objectifs (dragons).</summary>
+        private double _laneTactic = 1, _objectiveTactic = 1;
+        public IReadOnlyList<BattleEvent> Events => _events;
+        private double Tactic(int index) => tactics?.Apply(index, _minute) ?? 1;
+
         private readonly int[] _kills = new int[2], _towers = new int[2], _objectives = new int[2];
         private readonly double[] _buff = new double[2];
         private readonly bool[] _revived = new bool[2];
@@ -366,6 +393,7 @@ public static class BattleRules
         public BattleOutcome Play()
         {
             _minute = 3;
+            _laneTactic = Tactic(0);
             var lanesWon = new int?[3];
             var lanes = new[] { 0, 1, 2 }.OrderBy(_ => rng.Next()).ToArray();
             var roams = PlanRoams();
@@ -377,7 +405,8 @@ public static class BattleRules
             }
 
             _minute += rng.Next(2, 4);
-            Objective("le premier dragon", 0.04, "dragon");
+            _objectiveTactic = Tactic(1);
+            Objective("le premier dragon", 0.04, "dragon", _objectiveTactic);
 
             _minute += rng.Next(2, 4);
             for (var lane = 0; lane < 3; lane++)
@@ -399,7 +428,7 @@ public static class BattleRules
             }
 
             _minute += rng.Next(3, 5);
-            Objective("le deuxième dragon", 0.04, "dragon");
+            Objective("le deuxième dragon", 0.04, "dragon", _objectiveTactic);
 
             var fights = new int[2];
             var fightIndex = 0;
@@ -445,6 +474,7 @@ public static class BattleRules
             for (var s = 0; s < 2; s++)
                 power[s] = roles.Sum(r => Power(s, r) * At(s, r, 0)
                     * (Has(s, r, TalentEffect.LANE_DOMINANCE) ? 1.25 : 1) * (Has(s, r, TalentEffect.SCALING) ? 0.93 : 1));
+            power[0] *= _laneTactic;
 
             foreach (var (s, r, _) in roams)
             {
@@ -478,11 +508,12 @@ public static class BattleRules
         }
 
         /// <summary>Objectif neutre disputé par la jungle (et le support), avantage d'or compris ; bonus de puissance au vainqueur.</summary>
-        private void Objective(string name, double buff, string place)
+        private void Objective(string name, double buff, string place, double tactic = 1)
         {
             var p = new double[2];
             for (var s = 0; s < 2; s++)
                 p[s] = (Power(s, Jungle) * At(s, Jungle, 1) + Power(s, Support) * At(s, Support, 1) * 0.5) * Lead(s) * (1 + _buff[s]) * (With(s, TalentEffect.OBJECTIVE).Any() ? 1.2 : 1);
+            p[0] *= tactic;
             var winner = Wins(p[0], p[1], 4) ? 0 : 1;
             _buff[winner] += buff;
             _objectives[winner]++;
@@ -494,6 +525,7 @@ public static class BattleRules
         /// <summary>Teamfight : la puissance d'équipe pondérée par l'or, les objectifs et les talents décide ; renvoie le camp gagnant.</summary>
         private int Teamfight(int index)
         {
+            var tactic = Tactic(1 + index);
             var down = new[] { new HashSet<int>(), new HashSet<int>() };
             var place = index switch { 1 => "fight-dragon", 2 => "fight-mid", _ => "fight-ancient" };
 
@@ -531,6 +563,7 @@ public static class BattleRules
                 p[s] = Enumerable.Range(0, TeamSize).Where(r => !down[s].Contains(r))
                     .Sum(r => Power(s, r) * CounterMult(s, r) * At(s, r, phase, fight: true) * (Has(s, r, TalentEffect.SCALING) ? 1 + 0.12 * index : 1))
                     * Lead(s) * (1 + _buff[s]) * mult[s] * (1 + reports[s].FightPercent / 100.0);
+            p[0] *= tactic;
             var winner = Wins(p[0], p[1], 6) ? 0 : 1;
 
             // Une fois par partie, un talent de résurrection peut renverser un combat perdu.

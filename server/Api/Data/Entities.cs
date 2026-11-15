@@ -330,6 +330,25 @@ public class BossScore
     public bool Seen { get; set; }
 }
 
+/// <summary>
+/// Partie en cours contre le boss : graine et équipes figées au lancement (la tentative est déjà comptée), choix du joueur
+/// à chaque décision. Rejouée depuis le début à chaque choix ; Done = terminée et scorée.
+/// </summary>
+public class BossRun
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public string WeekId { get; set; } = "";
+    public int Seed { get; set; }
+    /// <summary>Équipes figées (jsonb, listes de <see cref="Api.Domain.Battle.BattleUnit"/>) : A = joueur, B = boss.</summary>
+    public string TeamA { get; set; } = "[]";
+    public string TeamB { get; set; } = "[]";
+    /// <summary>Choix déjà faits, dans l'ordre des décisions (« 0,2,1 »).</summary>
+    public string Choices { get; set; } = "";
+    public bool Done { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 /// <summary>Notification déjà envoyée (clé unique : « event:2026-W47 », « revenge:{id} »…), pour ne l'envoyer qu'une fois.</summary>
 public class PushLog
 {

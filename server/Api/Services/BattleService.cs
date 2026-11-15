@@ -760,18 +760,26 @@ public sealed class BattleService(
         var mineScore = scores.FirstOrDefault(b => b.UserId == userId);
         var today = Local(now).ToString("yyyy-MM-dd");
         var used = mineScore is { } m && m.Day == today ? m.DayAttempts : 0;
+        var open = await db.BossRuns.Where(r => r.UserId == userId && !r.Done && r.WeekId == weekId).Select(r => (Guid?)r.Id).FirstOrDefaultAsync();
         return new BossDto(weekId, Boss.NameOf(weekId), WeekEnd(now), bossReport, mineReport, Math.Max(0, Boss.AttemptsPerDay - used), Boss.AttemptsPerDay,
-            Today(now).End, mineScore?.Best, mineScore is null ? null : scores.IndexOf(mineScore) + 1, top, Boss.KillPoints, Boss.TowerPoints, Boss.WinPoints);
+            Today(now).End, mineScore?.Best, mineScore is null ? null : scores.IndexOf(mineScore) + 1, top, Boss.KillPoints, Boss.TowerPoints, Boss.WinPoints,
+            open, BossTactics.ReadPoints);
     }
 
-    /// <summary>Tentative contre le boss : ne compte pas pour la cote ; le meilleur score de la semaine est gardé, XP de pass à la clé.</summary>
-    public async Task<BattleDto> AttackBossAsync(Guid userId)
+    /// <summary>
+    /// Lance une partie contre le boss (la tentative est comptée tout de suite), ou reprend celle en cours cette semaine.
+    /// La partie s'arrête à chaque décision : plan de jeu, objectifs, puis chaque teamfight.
+    /// </summary>
+    public async Task<BossStepDto> AttackBossAsync(Guid userId)
     {
         await EnsureBossPayoutAsync();
         var catalog = await catalogs.GetAsync();
         using var l = await locks.AcquireAsync(userId);
         var now = clock.GetUtcNow();
         var weekId = WeekId(now);
+        var open = await db.BossRuns.Where(r => r.UserId == userId && !r.Done && r.WeekId == weekId).OrderByDescending(r => r.CreatedAt).FirstOrDefaultAsync();
+        if (open is not null) return await StepAsync(open, catalog);
+
         var meta = (await CurrentMetaAsync(catalog)).Changes;
         var boss = BossUnits(catalog, weekId, meta) ?? throw new AppException("Le boss se prépare, reviens dans un instant.", 503);
         var mine = Units(catalog, await social.GetRosterAsync(userId), meta)
@@ -779,31 +787,89 @@ public sealed class BattleService(
 
         var today = Local(now).ToString("yyyy-MM-dd");
         var score = await db.BossScores.FirstOrDefaultAsync(b => b.WeekId == weekId && b.UserId == userId);
-        if (score is null) db.BossScores.Add(score = new BossScore { WeekId = weekId, UserId = userId, Day = today });
+        if (score is null) db.BossScores.Add(score = new BossScore { WeekId = weekId, UserId = userId, Day = today, UpdatedAt = now });
         if (score.Day != today) (score.Day, score.DayAttempts) = (today, 0);
         if (score.DayAttempts >= Boss.AttemptsPerDay)
             throw new AppException($"Plus de tentative aujourd'hui ({Boss.AttemptsPerDay} par jour) : reviens demain.", 409);
-
-        var seed = CryptoRandom.Instance.Next();
-        var outcome = BattleRules.Simulate(mine, boss, seed, LineNames(catalog));
-        var points = Boss.Score(outcome);
         score.DayAttempts++;
         score.Attempts++;
-        if (points > score.Best) (score.Best, score.UpdatedAt) = (points, now);
-        else if (score.UpdatedAt == default) score.UpdatedAt = now;
 
-        var profile = await GetOrCreateProfileAsync(userId, now);
-        var ev = ArenaEvents.Current(Local(now));
-        var xp = SeasonPass.BossXp * (ev?.XpMultiplier ?? 1);
-        var rewards = GrantPassXp(profile, await db.CapsuleWallets.FirstOrDefaultAsync(w => w.UserId == userId), xp);
+        var run = new BossRun
+        {
+            UserId = userId, WeekId = weekId, Seed = CryptoRandom.Instance.Next(), CreatedAt = now,
+            TeamA = JsonSerializer.Serialize(mine, Json), TeamB = JsonSerializer.Serialize(boss, Json),
+        };
+        db.BossRuns.Add(run);
         await db.SaveChangesAsync();
+        return await StepAsync(run, catalog);
+    }
 
+    /// <summary>Choix du joueur à la décision en cours ; à la dernière, la partie est scorée (meilleur score de la semaine, XP de pass).</summary>
+    public async Task<BossStepDto> ChooseBossAsync(Guid userId, Guid runId, int choice)
+    {
+        if (choice is < 0 or > 2) throw new AppException("Choix inconnu.");
+        var catalog = await catalogs.GetAsync();
+        using var l = await locks.AcquireAsync(userId);
+        var run = await db.BossRuns.FirstOrDefaultAsync(r => r.Id == runId && r.UserId == userId)
+            ?? throw new AppException("Partie introuvable.", 404);
+        if (run.Done) throw new AppException("Cette partie est déjà terminée.", 409);
+
+        var choices = ParseChoices(run.Choices);
+        choices.Add(choice);
+        run.Choices = string.Join(',', choices);
+        var progress = Progress(run, catalog, choices);
+        BattleDto? final = null;
+        if (progress.Outcome is { } outcome)
+        {
+            run.Done = true;
+            var now = clock.GetUtcNow();
+            var points = Boss.Score(outcome) + BossTactics.ReadPoints * progress.Results.Count(r => r.Outcome > 0);
+            var score = await db.BossScores.FirstOrDefaultAsync(b => b.WeekId == run.WeekId && b.UserId == userId);
+            if (score is null) db.BossScores.Add(score = new BossScore { WeekId = run.WeekId, UserId = userId, Day = Local(now).ToString("yyyy-MM-dd"), UpdatedAt = now });
+            if (points > score.Best) (score.Best, score.UpdatedAt) = (points, now);
+
+            var profile = await GetOrCreateProfileAsync(userId, now);
+            var xp = SeasonPass.BossXp * (ArenaEvents.Current(Local(now))?.XpMultiplier ?? 1);
+            var rewards = GrantPassXp(profile, await db.CapsuleWallets.FirstOrDefaultAsync(w => w.UserId == userId), xp);
+            await db.SaveChangesAsync();
+            var (me, them) = await BossPlayersAsync(run, userId);
+            final = new BattleDto(run.Id, now, me, them, outcome.Winner == BattleSide.A, 0, outcome.Minutes, outcome.A, outcome.B, outcome.Events,
+                xp, rewards, true, points, score.Best);
+        }
+        else await db.SaveChangesAsync();
+        return await StepAsync(run, catalog, progress, final);
+    }
+
+    private static List<int> ParseChoices(string s) =>
+        string.IsNullOrEmpty(s) ? [] : s.Split(',').Select(int.Parse).ToList();
+
+    private (List<BattleUnit> A, List<BattleUnit> B) RunTeams(BossRun run) =>
+        (JsonSerializer.Deserialize<List<BattleUnit>>(run.TeamA, Json)!, JsonSerializer.Deserialize<List<BattleUnit>>(run.TeamB, Json)!);
+
+    private BossProgress Progress(BossRun run, CapsuleCatalog catalog, List<int> choices)
+    {
+        var (a, b) = RunTeams(run);
+        return BattleRules.SimulateBoss(a, b, run.Seed, LineNames(catalog), choices);
+    }
+
+    private async Task<(BattlePlayerDto Me, BattlePlayerDto Boss)> BossPlayersAsync(BossRun run, Guid userId)
+    {
         var user = await db.Users.Include(u => u.RiotAccount).FirstAsync(u => u.Id == userId);
-        var me = new BattlePlayerDto(userId, user.DisplayName, user.RiotAccount?.ProfileIconId, profile.Rating, profile.Rating, user.AvatarChampionId,
-            profile.SeasonTier, profile.Legend);
-        var them = new BattlePlayerDto(Guid.Empty, Boss.NameOf(weekId), null, 0, 0, boss[BattleRules.Mid].ChampionId);
-        return new BattleDto(Guid.NewGuid(), now, me, them, outcome.Winner == BattleSide.A, 0, outcome.Minutes, outcome.A, outcome.B, outcome.Events,
-            xp, rewards, true, points, score.Best);
+        var profile = await db.BattleProfiles.FirstOrDefaultAsync(p => p.UserId == userId);
+        var rating = profile?.Rating ?? _o.StartRating;
+        var (_, b) = RunTeams(run);
+        return (new BattlePlayerDto(userId, user.DisplayName, user.RiotAccount?.ProfileIconId, rating, rating, user.AvatarChampionId,
+                profile?.SeasonTier, profile?.Legend ?? false),
+            new BattlePlayerDto(Guid.Empty, Boss.NameOf(run.WeekId), null, 0, 0, b[BattleRules.Mid].ChampionId));
+    }
+
+    private async Task<BossStepDto> StepAsync(BossRun run, CapsuleCatalog catalog, BossProgress? progress = null, BattleDto? final = null)
+    {
+        progress ??= Progress(run, catalog, ParseChoices(run.Choices));
+        var (a, b) = RunTeams(run);
+        var (ra, rb) = BattleRules.Analyze(a, b, LineNames(catalog));
+        var (me, them) = await BossPlayersAsync(run, run.UserId);
+        return new BossStepDto(run.Id, me, them, ra, rb, progress.Events, progress.Decision, progress.Results, final, BossTactics.ReadPoints);
     }
 
     public async Task MarkBossSeenAsync(Guid userId, string weekId)

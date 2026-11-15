@@ -24,7 +24,15 @@ public sealed record ArenaEventDto(string Id, ArenaEventKind Kind, string Title,
 /// <summary>Boss de la semaine : son équipe, mes tentatives et le classement des dégâts.</summary>
 public sealed record BossDto(
     string WeekId, string Name, DateTimeOffset EndsAt, TeamReport Team, TeamReport? Mine, int AttemptsLeft, int AttemptsPerDay, DateTimeOffset ResetAt,
-    int? MyBest, int? MyRank, List<BossEntryDto> Top, int KillPoints, int TowerPoints, int WinPoints);
+    int? MyBest, int? MyRank, List<BossEntryDto> Top, int KillPoints, int TowerPoints, int WinPoints, Guid? OpenRun = null, int ReadPoints = 0);
+/// <summary>
+/// Étape d'une partie contre le boss : événements depuis le début, décision attendue (null à la fin), décisions résolues,
+/// et le combat complet (score, XP) une fois terminé.
+/// </summary>
+public sealed record BossStepDto(
+    Guid RunId, BattlePlayerDto Me, BattlePlayerDto Boss, TeamReport A, TeamReport B, List<BattleEvent> Events,
+    TacticDecision? Decision, List<TacticResult> Results, BattleDto? Battle, int ReadPoints);
+public sealed record TacticChoiceRequest(int Choice);
 public sealed record BossEntryDto(int Rank, Guid UserId, string DisplayName, int? ProfileIconId, int? AvatarChampionId, int Best, int Attempts);
 /// <summary>Résultat de fin de semaine contre le boss, avec les reliques versées.</summary>
 public sealed record BossResultDto(string WeekId, string Name, int Rank, int Players, int Best, int RewardStandard, int RewardPremium);

@@ -186,7 +186,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable("battle_profile", t => t.HasCheckConstraint("ck_battle_profile_counts", "rating >= 0 AND wins >= 0 AND losses >= 0"));
             e.HasKey(x => x.UserId);
             e.HasIndex(x => x.Rating);
-            e.Property(x => x.SeasonId).HasMaxLength(7);
+            e.Property(x => x.SeasonId).HasMaxLength(16);
             e.HasOne<User>().WithOne().HasForeignKey<BattleProfile>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -206,7 +206,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.ToTable("season_result");
             e.HasKey(x => new { x.UserId, x.SeasonId });
-            e.Property(x => x.SeasonId).HasMaxLength(7);
+            e.Property(x => x.SeasonId).HasMaxLength(16);
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 

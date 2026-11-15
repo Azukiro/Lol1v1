@@ -79,8 +79,8 @@ namespace Api.Data.Migrations
 
                     b.Property<string>("SeasonId")
                         .IsRequired()
-                        .HasMaxLength(7)
-                        .HasColumnType("character varying(7)")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
                         .HasColumnName("season_id");
 
                     b.Property<string>("SeasonTier")
@@ -780,8 +780,8 @@ namespace Api.Data.Migrations
                         .HasColumnName("user_id");
 
                     b.Property<string>("SeasonId")
-                        .HasMaxLength(7)
-                        .HasColumnType("character varying(7)")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
                         .HasColumnName("season_id");
 
                     b.Property<DateTimeOffset>("CreatedAt")

@@ -56,6 +56,14 @@ public sealed class CapsulesController(
     [EnableRateLimiting(RateLimits.RelicWrite)]
     public Task<List<RosterSlotDto?>> Roster(RosterRequest req) => social.SetRosterAsync(User.UserId(), req.Slots);
 
+    [HttpPost("teams/{index:int}/select")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
+    public Task<TeamsDto> SelectTeam(int index) => social.SelectTeamAsync(User.UserId(), index);
+
+    [HttpPut("teams/{index:int}/name")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
+    public Task<TeamsDto> RenameTeam(int index, RenameTeamRequest req) => social.RenameTeamAsync(User.UserId(), index, req.Name);
+
     [HttpGet("friends")]
     public Task<List<PlayerCardDto>> Friends() => social.GetFriendsAsync(User.UserId());
 

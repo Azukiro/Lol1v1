@@ -155,6 +155,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasKey(x => x.UserId);
             e.Property(x => x.Version).IsConcurrencyToken();
             e.Property(x => x.Roster).HasColumnType("jsonb");
+            e.Property(x => x.Teams).HasColumnType("jsonb");
             e.HasOne<User>().WithOne().HasForeignKey<CapsuleWallet>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 

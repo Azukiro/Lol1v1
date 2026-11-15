@@ -19,9 +19,9 @@ public sealed class BattleOptions
     public double EloScale { get; set; } = 1200;
     /// <summary>
     /// Part du gain de l'attaquant que perd un défenseur battu (il n'était pas là pour jouer) ; une défense réussie rapporte la mise entière.
-    /// Les cotes gonflent un peu : le retour à mi-chemin de 1000 en fin de saison compense.
+    /// Les cotes gonflent un peu avec le volume de combats : 0,75 limite l'effet, le retour à mi-chemin de 1000 en fin de saison fait le reste.
     /// </summary>
-    public double DefenderLossShare { get; set; } = 0.5;
+    public double DefenderLossShare { get; set; } = 0.75;
     /// <summary>Victoires récompensées en essence par jour (heure de Paris).</summary>
     public int RewardedWinsPerDay { get; set; } = 4;
     /// <summary>Essence d'une victoire ; 0 = la moitié du prix d'une relique (2 victoires = 1 relique).</summary>
@@ -29,6 +29,8 @@ public sealed class BattleOptions
     /// <summary>Après une attaque, la même cible n'est réattaquable qu'après sa riposte ou ce délai.</summary>
     public int RematchHours { get; set; } = 24;
     public string TimeZone { get; set; } = "Europe/Paris";
+    /// <summary>Compte de test : le battre ne vaut rien, perdre contre lui affiche une étiquette moqueuse (vide = désactivé).</summary>
+    public string ShameAccount { get; set; } = "AmiTest";
 }
 
 /// <summary>
@@ -90,7 +92,7 @@ public sealed class BattleService(
             team is not null, team is null ? null : BattleRules.Analyze(team, LineNames(catalog)), opponents,
             new SeasonDto(seasonId, Seasons.Number(seasonId), SeasonEnd(now), Seasons.TierOf(rating), Seasons.Floor(rating), Seasons.NextThreshold(rating),
                 profile?.PeakRating ?? rating),
-            last is null ? null : ToDto(last), profile?.WeekTier);
+            last is null ? null : ToDto(last), profile?.SeasonTier);
     }
 
     public async Task<BattlePreviewDto> PreviewAsync(Guid userId, Guid opponentId)
@@ -197,9 +199,13 @@ public sealed class BattleService(
         var top = await ranked.OrderByDescending(p => p.Rating).ThenByDescending(p => p.Wins).ThenBy(p => p.UpdatedAt).Take(100).ToListAsync();
         var ids = top.Select(p => p.UserId).Append(userId).ToList();
         var users = await db.Users.Include(u => u.RiotAccount).Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id);
+        var titles = (await db.SeasonResults.Where(r => r.Rank == 1 && ids.Contains(r.UserId)).Select(r => new { r.UserId, r.SeasonId }).ToListAsync())
+            .GroupBy(r => r.UserId).ToDictionary(g => g.Key, g => g.Select(r => Seasons.Number(r.SeasonId)).OrderBy(n => n).ToList());
+        var shamed = await ShamedThisSeasonAsync(ids);
         LadderEntryDto Entry(BattleProfile p, int rank) =>
             new(rank, p.UserId, users.GetValueOrDefault(p.UserId)?.DisplayName ?? "?", users.GetValueOrDefault(p.UserId)?.RiotAccount?.ProfileIconId,
-                p.Rating, p.Wins, p.Losses, users.GetValueOrDefault(p.UserId)?.AvatarChampionId, p.WeekTier);
+                p.Rating, p.Wins, p.Losses, users.GetValueOrDefault(p.UserId)?.AvatarChampionId, p.SeasonTier, titles.GetValueOrDefault(p.UserId),
+                shamed.Contains(p.UserId));
 
         var entries = new List<LadderEntryDto>();
         for (var i = 0; i < top.Count; i++)
@@ -291,6 +297,10 @@ public sealed class BattleService(
             }).First();
 
         var form = battles.AsEnumerable().Reverse().Take(10).Select(b => (b.AttackerId == playerId) == b.AttackerWon).ToList();
+        var shameId = await ShameIdAsync();
+        var shameLosses = shameId is { } sid && sid != playerId
+            ? battles.Count(b => (b.AttackerId == sid && b.AttackerWon) || (b.DefenderId == sid && !b.AttackerWon))
+            : 0;
         return new PlayerStatsDto(card, rating, Seasons.TierOf(rating), ranked ? await RankAsync(profile!) : null, rankedCount,
             profile?.Wins ?? 0, profile?.Losses ?? 0, profile?.PeakRating ?? rating, best,
             wins, battles.Count - wins, attackWins, attackLosses, defenseWins, defenseLosses,
@@ -299,7 +309,27 @@ public sealed class BattleService(
             upset is { } up ? new RivalDto(up.Id, names.GetValueOrDefault(up.Id, "Joueur supprimé"), 1, up.Gap) : null,
             Rival(beaten), Rival(lostTo), Champ(c => c.Games), Champ(c => c.Kills),
             seasons.Count == 0 ? null : seasons.Max(s => s.Tier), seasons.Count, seasons.Count(s => s.Rank <= 3), seasons.Count(s => s.Rank == 1),
-            battles.Count == 0 ? null : battles[0].CreatedAt);
+            battles.Count == 0 ? null : battles[0].CreatedAt,
+            seasons.Where(s => s.Rank == 1).Select(s => Seasons.Number(s.SeasonId)).OrderBy(n => n).ToList(),
+            shameLosses, shameLosses > 0 ? _o.ShameAccount : null);
+    }
+
+    private async Task<Guid?> ShameIdAsync() =>
+        string.IsNullOrWhiteSpace(_o.ShameAccount) ? null
+            : await db.Users.Where(u => u.DisplayName == _o.ShameAccount).Select(u => (Guid?)u.Id).FirstOrDefaultAsync();
+
+    /// <summary>Joueurs (parmi <paramref name="ids"/>) battus par le compte de test depuis le début de la saison.</summary>
+    private async Task<HashSet<Guid>> ShamedThisSeasonAsync(List<Guid> ids)
+    {
+        if (await ShameIdAsync() is not { } sid) return [];
+        var tz = Zone;
+        var start = Seasons.StartOf(Local(clock.GetUtcNow()));
+        var since = new DateTimeOffset(start, tz.GetUtcOffset(start)).ToUniversalTime();
+        var losers = await db.RelicBattles
+            .Where(b => b.CreatedAt >= since && ((b.AttackerId == sid && b.AttackerWon && ids.Contains(b.DefenderId))
+                || (b.DefenderId == sid && !b.AttackerWon && ids.Contains(b.AttackerId))))
+            .Select(b => b.AttackerId == sid ? b.DefenderId : b.AttackerId).Distinct().ToListAsync();
+        return losers.ToHashSet();
     }
 
     private async Task<int> RankAsync(BattleProfile p) =>
@@ -308,7 +338,7 @@ public sealed class BattleService(
     private async Task<BattleDto> ToDtoAsync(RelicBattle b, BattleOutcome o)
     {
         var users = await db.Users.Include(u => u.RiotAccount).Where(u => u.Id == b.AttackerId || u.Id == b.DefenderId).ToDictionaryAsync(u => u.Id);
-        var frames = await db.BattleProfiles.Where(p => p.UserId == b.AttackerId || p.UserId == b.DefenderId).ToDictionaryAsync(p => p.UserId, p => p.WeekTier);
+        var frames = await db.BattleProfiles.Where(p => p.UserId == b.AttackerId || p.UserId == b.DefenderId).ToDictionaryAsync(p => p.UserId, p => p.SeasonTier);
         BattlePlayerDto Player(Guid id, int before, int after) =>
             new(id, users.GetValueOrDefault(id)?.DisplayName ?? "Joueur supprimé", users.GetValueOrDefault(id)?.RiotAccount?.ProfileIconId, before, after,
                 users.GetValueOrDefault(id)?.AvatarChampionId, frames.GetValueOrDefault(id));
@@ -416,26 +446,30 @@ public sealed class BattleService(
         return (At(midnight), At(midnight.AddDays(1)));
     }
 
-    private string SeasonId(DateTimeOffset now) => Seasons.IdOf(TimeZoneInfo.ConvertTime(now, Zone));
+    private DateTime Local(DateTimeOffset now) => TimeZoneInfo.ConvertTime(now, Zone).DateTime;
 
-    /// <summary>Fin de la saison en cours : le premier du mois suivant à minuit (heure locale).</summary>
+    private string SeasonId(DateTimeOffset now) => Seasons.IdOf(Local(now));
+
+    /// <summary>Fin de la saison en cours, à minuit (heure locale).</summary>
     private DateTimeOffset SeasonEnd(DateTimeOffset now)
     {
         var tz = Zone;
-        var local = TimeZoneInfo.ConvertTime(now, tz);
-        var next = new DateTime(local.Year, local.Month, 1).AddMonths(1);
-        return new DateTimeOffset(next, tz.GetUtcOffset(next)).ToUniversalTime();
+        var end = Seasons.EndOf(Local(now));
+        return new DateTimeOffset(end, tz.GetUtcOffset(end)).ToUniversalTime();
     }
 
     private static readonly SemaphoreSlim SeasonGate = new(1, 1);
 
     /// <summary>
-    /// Bascule de saison, au premier passage après le changement de mois : chaque profil d'une saison passée est archivé
-    /// (rang, palier, reliques versées dans le portefeuille), puis sa cote est remise à niveau.
+    /// Bascule de saison, au premier passage après la fin de saison : chaque profil d'une saison passée est archivé
+    /// (rang, palier, reliques versées dans le portefeuille), son palier final devient le cadre de son icône pour la saison
+    /// qui commence (aucun cadre s'il n'a pas joué la saison précédente), puis sa cote est remise à niveau.
     /// </summary>
     public async Task EnsureSeasonAsync()
     {
-        var current = SeasonId(clock.GetUtcNow());
+        var local = Local(clock.GetUtcNow());
+        var current = Seasons.IdOf(local);
+        var previous = Seasons.IdOf(Seasons.StartOf(local).AddDays(-1));
         if (!await db.BattleProfiles.AnyAsync(p => p.SeasonId != current)) return;
         await SeasonGate.WaitAsync();
         try
@@ -464,6 +498,7 @@ public sealed class BattleService(
                 }
                 foreach (var p in season)
                 {
+                    p.SeasonTier = season.Key == previous && p.Wins + p.Losses > 0 ? Seasons.TierOf(p.Rating) : null;
                     p.Rating = Seasons.SoftReset(p.Rating, _o.StartRating);
                     p.PeakRating = p.Rating;
                     p.Wins = p.Losses = 0;
@@ -488,7 +523,7 @@ public sealed class BattleService(
 
     /// <summary>
     /// Patch de la semaine en cours, créé au premier passage de la semaine à partir des rosters complets du moment
-    /// (<see cref="Meta.Generate"/>), puis figé. Relève aussi le palier de chaque joueur pour son cadre de la semaine.
+    /// (<see cref="Meta.Generate"/>), puis figé.
     /// </summary>
     private async Task<(MetaPatch Patch, List<MetaChange> Changes)> CurrentMetaAsync(CapsuleCatalog catalog)
     {
@@ -533,17 +568,6 @@ public sealed class BattleService(
             Changes = JsonSerializer.Serialize(Meta.Generate(candidates, StableSeed(id)), Json), CreatedAt = clock.GetUtcNow(),
         };
         db.MetaPatches.Add(patch);
-        // Cadres de la semaine : palier de chaque joueur classé au moment du patch, c'est-à-dire en fin de semaine passée.
-        // Si une saison s'est terminée pendant cette semaine, la remise à niveau a fait baisser les cotes : le palier final
-        // de la saison compte aussi, le meilleur des deux l'emporte.
-        var ended = Seasons.EndedDuring(start.AddDays(-7), start);
-        var finals = ended is null ? []
-            : await db.SeasonResults.Where(r => r.SeasonId == ended).ToDictionaryAsync(r => r.UserId, r => r.Tier);
-        foreach (var p in await db.BattleProfiles.ToListAsync())
-        {
-            Tier? now = p.Wins + p.Losses > 0 ? Seasons.TierOf(p.Rating) : null;
-            p.WeekTier = finals.TryGetValue(p.UserId, out var final) && (now is null || final > now) ? final : now;
-        }
         await db.SaveChangesAsync();
         db.Entry(patch).State = EntityState.Detached;
         return patch;

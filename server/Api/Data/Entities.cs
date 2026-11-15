@@ -220,6 +220,9 @@ public class CapsuleWallet
     public bool FullNotified { get; set; }
     /// <summary>Roster mis en avant : 5 objets possédés, un par poste (jsonb, [{kind,itemId}|null] × 5).</summary>
     public string? Roster { get; set; }
+    /// <summary>Équipes enregistrées (jsonb, [{name,slots}]) ; celle d'indice <see cref="ActiveTeam"/> est recopiée dans <see cref="Roster"/>.</summary>
+    public string? Teams { get; set; }
+    public int ActiveTeam { get; set; }
     /// <summary>Jeton de concurrence, incrémenté à chaque écriture (AppDbContext) : deux requêtes simultanées ne dépensent pas le même stock.</summary>
     public int Version { get; set; }
 }
@@ -272,12 +275,12 @@ public class BattleProfile
     public int Rating { get; set; }
     public int Wins { get; set; }
     public int Losses { get; set; }
-    /// <summary>Saison de la cote ("2026-10") ; une saison passée est archivée puis remise à niveau.</summary>
+    /// <summary>Saison de la cote ("2026-10", puis "2026-11-16") ; une saison passée est archivée puis remise à niveau.</summary>
     public string SeasonId { get; set; } = "";
     /// <summary>Meilleure cote de la saison.</summary>
     public int PeakRating { get; set; }
-    /// <summary>Palier à la fin de la semaine passée (cadre de l'icône), relevé au patch du lundi ; null = pas classé.</summary>
-    public Api.Domain.Battle.Tier? WeekTier { get; set; }
+    /// <summary>Palier final de la saison précédente (cadre de l'icône), relevé à la bascule de saison ; null = pas classé.</summary>
+    public Api.Domain.Battle.Tier? SeasonTier { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
 

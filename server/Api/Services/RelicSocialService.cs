@@ -23,22 +23,79 @@ public sealed class RelicSocialService(AppDbContext db)
         return Enumerable.Range(0, RosterSize).Select(i => i < slots.Count ? slots[i] : null).ToList();
     }
 
+    public const int TeamCount = 3;
+    public const int TeamNameMax = 20;
+
+    /// <summary>Équipes enregistrées (toujours <see cref="TeamCount"/>) ; l'équipe active reprend le roster en vigueur.</summary>
+    public static List<TeamDto> ParseTeams(CapsuleWallet? wallet)
+    {
+        var saved = string.IsNullOrEmpty(wallet?.Teams) ? [] : JsonSerializer.Deserialize<List<TeamDto?>>(wallet.Teams, Json) ?? [];
+        var active = wallet?.ActiveTeam ?? 0;
+        return Enumerable.Range(0, TeamCount).Select(i =>
+        {
+            var t = i < saved.Count ? saved[i] : null;
+            var name = string.IsNullOrWhiteSpace(t?.Name) ? $"Équipe {i + 1}" : t.Name;
+            var slots = i == active ? ParseRoster(wallet?.Roster) : Pad(t?.Slots);
+            return new TeamDto(name, slots);
+        }).ToList();
+    }
+
+    private static List<RosterSlotDto?> Pad(List<RosterSlotDto?>? slots) =>
+        Enumerable.Range(0, RosterSize).Select(i => slots is not null && i < slots.Count ? slots[i] : null).ToList();
+
+    private async Task<HashSet<(CapsuleItemKind, int)>> OwnedAsync(Guid userId) =>
+        (await db.CollectionItems.Where(c => c.UserId == userId).Select(c => new { c.Kind, c.ItemId }).ToListAsync())
+            .Select(c => (c.Kind, c.ItemId)).ToHashSet();
+
+    private async Task<CapsuleWallet> WalletAsync(Guid userId) =>
+        await db.CapsuleWallets.FirstOrDefaultAsync(w => w.UserId == userId) ?? throw new AppException("Ouvre d'abord une relique.", 409);
+
+    private static TeamsDto ToDto(CapsuleWallet w) => new(ParseTeams(w), w.ActiveTeam, ParseRoster(w.Roster));
+
+    /// <summary>Change d'équipe active : son roster attaque et défend désormais (objets plus possédés retirés).</summary>
+    public async Task<TeamsDto> SelectTeamAsync(Guid userId, int index)
+    {
+        if (index is < 0 or >= TeamCount) throw new AppException("Équipe inconnue.");
+        var wallet = await WalletAsync(userId);
+        var teams = ParseTeams(wallet);
+        var owned = await OwnedAsync(userId);
+        wallet.Teams = JsonSerializer.Serialize(teams, Json);
+        wallet.ActiveTeam = index;
+        wallet.Roster = JsonSerializer.Serialize(teams[index].Slots.Select(s => s is not null && owned.Contains((s.Kind, s.ItemId)) ? s : null).ToList(), Json);
+        await db.SaveChangesAsync();
+        return ToDto(wallet);
+    }
+
+    public async Task<TeamsDto> RenameTeamAsync(Guid userId, int index, string? name)
+    {
+        if (index is < 0 or >= TeamCount) throw new AppException("Équipe inconnue.");
+        name = name?.Trim() ?? "";
+        if (name.Length is 0 or > TeamNameMax) throw new AppException($"Nom d'équipe : 1 à {TeamNameMax} caractères.");
+        var wallet = await WalletAsync(userId);
+        var teams = ParseTeams(wallet);
+        teams[index] = teams[index] with { Name = name };
+        wallet.Teams = JsonSerializer.Serialize(teams, Json);
+        await db.SaveChangesAsync();
+        return ToDto(wallet);
+    }
+
     public async Task<List<RosterSlotDto?>> GetRosterAsync(Guid userId) =>
         ParseRoster(await db.CapsuleWallets.Where(w => w.UserId == userId).Select(w => w.Roster).FirstOrDefaultAsync());
 
-    /// <summary>Place 5 objets possédés (ou null) aux postes TOP, JUNGLE, MID, BOT, SUPPORT.</summary>
+    /// <summary>Place 5 objets possédés (ou null) aux postes TOP, JUNGLE, MID, BOT, SUPPORT de l'équipe active.</summary>
     public async Task<List<RosterSlotDto?>> SetRosterAsync(Guid userId, List<RosterSlotDto?>? slots)
     {
         if (slots is null || slots.Count != RosterSize) throw new AppException($"Le roster compte {RosterSize} postes.");
         var picked = slots.Where(s => s is not null).Select(s => (s!.Kind, s.ItemId)).ToList();
         if (picked.Distinct().Count() != picked.Count) throw new AppException("Un même objet ne peut occuper deux postes.");
-        var owned = (await db.CollectionItems.Where(c => c.UserId == userId).Select(c => new { c.Kind, c.ItemId }).ToListAsync())
-            .Select(c => (c.Kind, c.ItemId)).ToHashSet();
+        var owned = await OwnedAsync(userId);
         if (picked.Any(p => !owned.Contains(p))) throw new AppException("Seuls les objets de ta collection peuvent aller dans ton roster.");
 
-        var wallet = await db.CapsuleWallets.FirstOrDefaultAsync(w => w.UserId == userId)
-            ?? throw new AppException("Ouvre d'abord une relique.", 409);
+        var wallet = await WalletAsync(userId);
+        var teams = ParseTeams(wallet);
         wallet.Roster = JsonSerializer.Serialize(slots, Json);
+        teams[wallet.ActiveTeam] = teams[wallet.ActiveTeam] with { Slots = ParseRoster(wallet.Roster) };
+        wallet.Teams = JsonSerializer.Serialize(teams, Json);
         await db.SaveChangesAsync();
         return ParseRoster(wallet.Roster);
     }
@@ -120,7 +177,7 @@ public sealed class RelicSocialService(AppDbContext db)
         var wallets = await db.CapsuleWallets.Where(w => ids.Contains(w.UserId)).ToDictionaryAsync(w => w.UserId);
         var owned = await db.CollectionItems.Where(c => ids.Contains(c.UserId)).GroupBy(c => c.UserId)
             .Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count);
-        var frames = await db.BattleProfiles.Where(p => ids.Contains(p.UserId) && p.WeekTier != null).ToDictionaryAsync(p => p.UserId, p => p.WeekTier);
+        var frames = await db.BattleProfiles.Where(p => ids.Contains(p.UserId) && p.SeasonTier != null).ToDictionaryAsync(p => p.UserId, p => p.SeasonTier);
         return users.ToDictionary(u => u.Id, u =>
         {
             wallets.TryGetValue(u.Id, out var w);

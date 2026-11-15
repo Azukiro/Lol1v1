@@ -83,14 +83,14 @@ namespace Api.Data.Migrations
                         .HasColumnType("character varying(7)")
                         .HasColumnName("season_id");
 
+                    b.Property<string>("SeasonTier")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("season_tier");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
-
-                    b.Property<string>("WeekTier")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("week_tier");
 
                     b.Property<int>("Wins")
                         .HasColumnType("integer")
@@ -162,6 +162,10 @@ namespace Api.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("accrual_anchor");
 
+                    b.Property<int>("ActiveTeam")
+                        .HasColumnType("integer")
+                        .HasColumnName("active_team");
+
                     b.Property<int>("Essence")
                         .HasColumnType("integer")
                         .HasColumnName("essence");
@@ -185,6 +189,10 @@ namespace Api.Data.Migrations
                     b.Property<int>("Stored")
                         .HasColumnType("integer")
                         .HasColumnName("stored");
+
+                    b.Property<string>("Teams")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("teams");
 
                     b.Property<int>("TotalOpened")
                         .HasColumnType("integer")

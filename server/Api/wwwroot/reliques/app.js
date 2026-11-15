@@ -35,6 +35,8 @@ const S = {
   coll: { group: 'rarity', q: '', missing: false, rarity: null, role: null, open: new Set(), limits: {} },
   pushKey: null,
   roster: [null, null, null, null, null],
+  teams: [],
+  activeTeam: 0,
   friend: null,
   friends: [],
 };
@@ -702,6 +704,9 @@ function renderRoster() {
   const editable = !friend;
   $('#roster-title').textContent = friend ? `Roster de ${friend.name}` : 'Mon roster';
   $('#roster-hint').textContent = editable ? 'Touche un poste' : '';
+  $('#team-tabs').hidden = !editable || !S.teams.length;
+  $('#team-tabs').innerHTML = editable ? S.teams.map((t, i) => `<button type="button" role="tab" data-team="${i}" aria-selected="${i === S.activeTeam}"
+    title="${i === S.activeTeam ? 'Équipe active (touche pour renommer)' : 'Jouer avec cette équipe'}">${esc(t.name)}</button>`).join('') : '';
   $('#roster').innerHTML = ROLES.map((role, i) => {
     const it = slots[i] && item(slots[i].kind, slots[i].itemId);
     const tag = editable ? 'button' : 'div';
@@ -837,19 +842,49 @@ async function setSlot(index, key) {
 async function saveRoster(slots) {
   try {
     S.roster = await api('/capsules/roster', { method: 'PUT', body: { slots } });
+    if (S.teams[S.activeTeam]) S.teams[S.activeTeam].slots = S.roster;
     closeSheet(); renderRoster(); buzz(20);
   } catch (e) { toast(e.message, true); }
+}
+
+// Étiquette de la honte : perdre contre le compte de test.
+const shameTag = () => "Paillasson d'AmiTest";
+const shameTitle = (account, n) => `Paillasson d'${esc(account)}${n > 1 ? ` ×${n}` : ''}`;
+
+function applyTeams(t) { S.teams = t.teams; S.activeTeam = t.active; S.roster = t.roster; }
+
+/** Équipes enregistrées : changer d'équipe change aussi la défense ; l'équipe active se renomme. */
+async function selectTeam(i) {
+  if (i === S.activeTeam) { renameTeam(i); return; }
+  try {
+    applyTeams(await api(`/capsules/teams/${i}/select`, { method: 'POST' }));
+    renderRoster(); buzz(20);
+    toast(`${S.teams[i].name} part au combat (et défend).`);
+    if (S.arena) loadArena({ quiet: true });
+  } catch (e) { toast(e.message, true); }
+}
+
+function renameTeam(i) {
+  openSheet(`<form class="picker" id="team-rename"><h2>Renommer l'équipe</h2>
+    <input id="team-name" maxlength="20" value="${esc(S.teams[i].name)}" autocomplete="off" required>
+    <button class="btn primary block" type="submit">Enregistrer</button></form>`);
+  const input = $('#team-name'); input.focus(); input.select();
+  $('#team-rename').onsubmit = async (e) => {
+    e.preventDefault();
+    try { applyTeams(await api(`/capsules/teams/${i}/name`, { method: 'PUT', body: { name: input.value } })); closeSheet(); renderRoster(); }
+    catch (err) { toast(err.message, true); }
+  };
 }
 
 function avatarHTML(p) {
   return `<span class="avatar${p.frame ? ' framed' : ''}"${frameAttrs(p.frame)}>${avatarInner(p)}</span>`;
 }
 
-/** Cadre de l'icône : palier du joueur en fin de semaine passée. */
-const frameAttrs = (tier) => (tier ? ` style="--fc:${TIER[tier].color}" title="${TIER[tier].label} la semaine passée"` : '');
+/** Cadre de l'icône : palier final du joueur à la saison passée. */
+const frameAttrs = (tier) => (tier ? ` style="--fc:${TIER[tier].color}" title="${TIER[tier].label} la saison passée"` : '');
 function setFrame(el, tier) {
   el.classList.toggle('framed', !!tier);
-  if (tier) { el.style.setProperty('--fc', TIER[tier].color); el.title = `${TIER[tier].label} la semaine passée`; } else { el.style.removeProperty('--fc'); el.removeAttribute('title'); }
+  if (tier) { el.style.setProperty('--fc', TIER[tier].color); el.title = `${TIER[tier].label} la saison passée`; } else { el.style.removeProperty('--fc'); el.removeAttribute('title'); }
 }
 
 // ---------- Icône de profil : un champion au choix ----------
@@ -950,7 +985,7 @@ function profileTitles(s, collPct) {
   const games = s.wins + s.losses;
   const top = s.rank ? Math.ceil((s.rank / s.ranked) * 100) : null;
   return [
-    s.titles && [`Champion de saison${s.titles > 1 ? ` ×${s.titles}` : ''}`, 'gold'],
+    s.titles && [`Champion de saison ${(s.titleSeasons || []).map((n) => `S${n}`).join(' · ')}`.trim(), 'gold'],
     s.rank === 1 && ['Numéro 1 du classement', 'gold'],
     s.podiums > s.titles && ['Habitué des podiums', 'gold'],
     top && top <= 10 && s.ranked >= 5 && [`Top ${top} % des joueurs`, 'gold'],
@@ -966,6 +1001,7 @@ function profileTitles(s, collPct) {
     s.kills >= 100 && ['Machine à kills', ''],
     collPct >= 30 && ['Grand collectionneur', ''],
     games >= 50 && ['Vétéran de l\'arène', ''],
+    s.shameLosses && [shameTitle(s.shameAccount, s.shameLosses), 'shame'],
   ].filter(Boolean).concat(games ? [] : [['Talent en devenir', '']]);
 }
 
@@ -1057,6 +1093,8 @@ const TIER = {
   PLATINUM: { label: 'Platine', color: '#3ddcc4' },
   DIAMOND: { label: 'Diamant', color: '#6fb7ff' },
   MASTER: { label: 'Maître', color: '#d08bff' },
+  GRANDMASTER: { label: 'Grand maître', color: '#ff5d7a' },
+  CHALLENGER: { label: 'Challenger', color: '#ffe9a0' },
 };
 const tierBadge = (t, big = false) => `<span class="tier${big ? ' big' : ''}" style="--tc:${TIER[t].color}">${TIER[t].label}</span>`;
 const SLOT_LABEL = { P: 'Passif', Q: 'A', W: 'Z', E: 'E', R: 'R' };
@@ -1206,7 +1244,8 @@ function ladderRow(e) {
   const mine = e.userId === S.user?.id;
   return `<button type="button" class="lrow${mine ? ' me' : ''}${e.rank <= 3 ? ` podium p${e.rank}` : ''}" data-profile="${e.userId}">
     <span class="rank">${e.rank}</span>${avatarHTML(e)}
-    <span class="who"><b>${esc(e.displayName)}${mine ? ' (toi)' : ''}</b><span>${e.wins} V · ${e.losses} D</span></span>
+    <span class="who"><b>${esc(e.displayName)}${mine ? ' (toi)' : ''}</b><span>${e.wins} V · ${e.losses} D</span>
+      ${e.titles?.length || e.shamed ? `<span class="ltags">${e.titles?.length ? `<em class="ltag champ" title="Champion de saison">Champion ${e.titles.map((n) => `S${n}`).join(' · ')}</em>` : ''}${e.shamed ? `<em class="ltag shame" title="A perdu contre le compte de test cette saison">${shameTag()}</em>` : ''}</span>` : ''}</span>
     ${tierBadge(tierOf(e.rating))}<b class="pts">${e.rating}</b></button>`;
 }
 
@@ -1765,7 +1804,7 @@ async function openSharedReplay(code) {
 }
 
 function tierOf(rating) {
-  const steps = [['MASTER', 1350], ['DIAMOND', 1250], ['PLATINUM', 1150], ['GOLD', 1050], ['SILVER', 950]];
+  const steps = [['CHALLENGER', 1850], ['GRANDMASTER', 1700], ['MASTER', 1550], ['DIAMOND', 1400], ['PLATINUM', 1250], ['GOLD', 1150], ['SILVER', 1050]];
   return (steps.find(([, min]) => rating >= min) || ['BRONZE'])[0];
 }
 
@@ -1807,7 +1846,7 @@ const TUTO = [
   { kicker: 'Règle 5', title: 'Chaque champion a son talent', text: 'Le sort qui fait son identité change la partie : Destinée rejoint une autre lane, Retour temporel renverse un combat, Grappin attrape une cible.', art: () => tutoTalents() },
   { kicker: 'Le match', title: 'Lanes, dragons, teamfights', text: 'Gagner ses lanes rapporte de l\'or. L\'or et les dragons font pencher les teamfights. Le premier à 2 l\'emporte.', art: () => tutoTimeline() },
   { kicker: 'Récompenses', title: 'Grimpe et remplis ta forge', text: '2 victoires = 1 relique, jusqu\'à 4 victoires payées par jour. Un seul défi par joueur jusqu\'à sa riposte (ou 24 h).', art: () => tutoRewards() },
-  { kicker: 'Saisons', title: 'Un mois, un classement', text: 'Grimpe de Bronze à Maître. En fin de mois, ton palier te rapporte des reliques, puis tout le monde repart pour une nouvelle saison.', art: () => tutoSeasons(), cta: 'Entrer dans l\'arène' },
+  { kicker: 'Saisons', title: 'Deux semaines, un classement', text: 'Grimpe de Bronze à Challenger. En fin de saison, ton palier te rapporte des reliques et devient le cadre de ton icône, puis tout le monde repart.', art: () => tutoSeasons(), cta: 'Entrer dans l\'arène' },
 ];
 const tuto = { i: 0, x: 0 };
 
@@ -1848,7 +1887,7 @@ function tutoTalents() {
 }
 
 function tutoSeasons() {
-  return `<div class="ta-tiers">${Object.keys(TIER).map((t, i) => `<span class="ta-tier" style="--i:${i};--tc:${TIER[t].color};--h:${30 + i * 13}%">${TIER[t].label}</span>`).join('')}</div>`;
+  return `<div class="ta-tiers">${Object.keys(TIER).map((t, i) => `<span class="ta-tier" style="--i:${i};--tc:${TIER[t].color};--h:${28 + i * 10}%">${TIER[t].label}</span>`).join('')}</div>`;
 }
 
 function tutoTimeline() {
@@ -2081,10 +2120,10 @@ function showGuide() {
       <li><b>Teamfights</b> : au meilleur des 3. Le premier se joue en milieu de partie, les suivants en fin de partie.</li>
       <li>Une part de hasard reste : à puissance égale, c'est du 50/50.</li></ul>`)}
     ${sec('11. Cote, récompenses et saisons', `<ul class="g-list">
-      <li><b>Cote</b> : Elo de facteur 32. À cote égale, ±16. Un défenseur battu ne perd que la moitié du gain de l'attaquant.</li>
+      <li><b>Cote</b> : Elo de facteur 32. À cote égale, ±16. Un défenseur battu perd les trois quarts du gain de l'attaquant.</li>
       <li><b>Essence</b> : 2 victoires en attaque = 1 relique, jusqu'à 4 victoires payées par jour.</li>
       <li><b>Revanche</b> : un seul défi par joueur jusqu'à sa riposte, ou 24 h.</li>
-      <li><b>Saisons</b> : une par mois. Argent 950, Or 1050, Platine 1150, Diamant 1250, Maître 1350. Récompense de palier dès 5 combats, puis la cote revient à mi-chemin de 1000.</li></ul>`)}
+      <li><b>Saisons</b> : deux semaines, du lundi au lundi. Argent 1050, Or 1150, Platine 1250, Diamant 1400, Maître 1550, Grand maître 1700, Challenger 1850. Récompense de palier dès 5 combats, ton palier final devient le cadre de ton icône pour la saison suivante, puis la cote revient à mi-chemin de 1000.</li></ul>`)}
     ${sec('Check-list pour maximiser ton équipe', `<ul class="g-list check">
       <li>Chaque champion à son poste principal (+12 %).</li>
       <li>Une frontline, des dégâts, un support ou un tank.</li>
@@ -2230,6 +2269,8 @@ function applyCollection(coll) {
   S.owned = new Map(coll.items.map((i) => [`${i.kind}:${i.itemId}`, i]));
   S.recent = coll.recent;
   S.roster = coll.roster;
+  S.teams = coll.teams || [];
+  S.activeTeam = coll.activeTeam || 0;
 }
 
 function renderAll() {
@@ -2315,6 +2356,8 @@ function bind() {
     if (pick) { setSlot(+pick.dataset.slotIndex, pick.dataset.pick); return; }
     const clear = e.target.closest('[data-pick-clear]');
     if (clear) { setSlot(+clear.dataset.pickClear, null); return; }
+    const team = e.target.closest('[data-team]');
+    if (team) { selectTeam(+team.dataset.team); return; }
     const slot = e.target.closest('[data-slot]');
     if (slot) { showSlotPicker(+slot.dataset.slot); return; }
     if (e.target.closest('#coach-meta')) { showMeta(); return; }

@@ -15,7 +15,13 @@ public sealed record OpenCapsulesResponse(List<CapsuleDropDto> Drops, CapsuleSta
 
 public sealed record OwnedItemDto(CapsuleItemKind Kind, int ItemId, int Count, DateTimeOffset FirstObtainedAt);
 public sealed record CapsuleHistoryDto(CapsuleItemKind Kind, int ItemId, Rarity Rarity, bool IsNew, DateTimeOffset OpenedAt);
-public sealed record CollectionResponse(List<OwnedItemDto> Items, List<CapsuleHistoryDto> Recent, List<RosterSlotDto?> Roster);
+public sealed record CollectionResponse(
+    List<OwnedItemDto> Items, List<CapsuleHistoryDto> Recent, List<RosterSlotDto?> Roster, List<TeamDto>? Teams = null, int ActiveTeam = 0);
+
+/// <summary>Équipe enregistrée : l'équipe active est le roster qui attaque et défend.</summary>
+public sealed record TeamDto(string Name, List<RosterSlotDto?> Slots);
+public sealed record TeamsDto(List<TeamDto> Teams, int Active, List<RosterSlotDto?> Roster);
+public sealed record RenameTeamRequest(string Name);
 
 /// <summary>Objet placé à un poste du roster (TOP, JUNGLE, MID, BOT, SUPPORT dans cet ordre).</summary>
 public sealed record RosterSlotDto(CapsuleItemKind Kind, int ItemId);

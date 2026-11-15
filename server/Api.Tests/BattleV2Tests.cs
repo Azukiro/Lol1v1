@@ -88,13 +88,18 @@ public class TalentTests(ITestOutputHelper output)
     {
         Assert.Equal(1, Seasons.Number("2026-10"));
         Assert.Equal(4, Seasons.Number("2027-01"));
-        Assert.Equal(Tier.BRONZE, Seasons.TierOf(900));
-        Assert.Equal(Tier.SILVER, Seasons.TierOf(1000));
-        Assert.Equal(Tier.GOLD, Seasons.TierOf(1050));
+        Assert.Equal(Tier.BRONZE, Seasons.TierOf(1000));
+        Assert.Equal(Tier.SILVER, Seasons.TierOf(1050));
+        Assert.Equal(Tier.GOLD, Seasons.TierOf(1150));
+        Assert.Equal(Tier.DIAMOND, Seasons.TierOf(1500));
         Assert.Equal(Tier.MASTER, Seasons.TierOf(1600));
+        Assert.Equal(Tier.GRANDMASTER, Seasons.TierOf(1700));
+        Assert.Equal(Tier.CHALLENGER, Seasons.TierOf(2400));
         Assert.Equal(1050, Seasons.NextThreshold(1000));
-        Assert.Null(Seasons.NextThreshold(1400));
-        Assert.Equal(950, Seasons.Floor(1000));
+        Assert.Equal(1850, Seasons.NextThreshold(1800));
+        Assert.Null(Seasons.NextThreshold(1900));
+        Assert.Equal(1050, Seasons.Floor(1100));
+        Assert.Equal(0, Seasons.Floor(1000));
         Assert.Equal(1100, Seasons.SoftReset(1200, 1000));
         Assert.Equal(950, Seasons.SoftReset(900, 1000));
     }

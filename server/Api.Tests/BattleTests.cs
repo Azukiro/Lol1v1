@@ -218,10 +218,10 @@ public class RatingTests
     }
 
     [Fact]
-    public void Beaten_defender_loses_half_but_a_held_defense_gains_in_full()
+    public void Beaten_defender_loses_three_quarters_but_a_held_defense_gains_in_full()
     {
-        Assert.Equal(-8, BattleService.DefenderDelta(Delta(1000, 1000, true), Defaults.DefenderLossShare));
-        Assert.Equal(-7, BattleService.DefenderDelta(13, Defaults.DefenderLossShare));
+        Assert.Equal(-12, BattleService.DefenderDelta(Delta(1000, 1000, true), Defaults.DefenderLossShare));
+        Assert.Equal(-10, BattleService.DefenderDelta(13, Defaults.DefenderLossShare));
         Assert.Equal(16, BattleService.DefenderDelta(Delta(1000, 1000, false), Defaults.DefenderLossShare));
     }
 }
@@ -302,7 +302,7 @@ public class BattleFlowTests
     }
 
     [Fact]
-    public async Task Frames_show_the_tier_reached_at_the_end_of_last_week()
+    public async Task Frames_show_last_season_final_tier_and_do_not_move_during_the_season()
     {
         await using var factory = new ApiFactory();
         SeedCatalog(factory);
@@ -311,39 +311,91 @@ public class BattleFlowTests
         await GiveRoster(factory, aId, a);
         await GiveRoster(factory, bId, b);
         await Attack(a, bId);
+
+        // Lundi suivant, même saison : pas de cadre (il ne change qu'à la bascule de saison).
+        factory.Clock.Advance(TimeSpan.FromDays(7));
         Assert.Null((await a.GetFromJsonAsync<ArenaDto>("/api/v1/capsules/arena", ApiJson.Options))!.Frame);
 
-        // Lundi suivant : le patch relève le palier des joueurs classés.
-        factory.Clock.Advance(TimeSpan.FromDays(7));
+        // Novembre : le cadre reprend le palier final d'octobre, pour toute la saison.
+        factory.Clock.Advance(new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero) - factory.Clock.GetUtcNow());
         var arena = (await a.GetFromJsonAsync<ArenaDto>("/api/v1/capsules/arena", ApiJson.Options))!;
-        Assert.Equal(Seasons.TierOf(arena.Rating), arena.Frame);
-        var ladder = (await a.GetFromJsonAsync<LadderDto>("/api/v1/capsules/ladder", ApiJson.Options))!;
-        Assert.All(ladder.Top, e => Assert.Equal(Seasons.TierOf(e.Rating), e.Frame));
-        var foe = arena.Opponents.Single(o => o.Player.UserId == bId);
-        Assert.Equal(Seasons.TierOf(foe.Rating), foe.Player.Frame);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var finals = await scope.ServiceProvider.GetRequiredService<AppDbContext>().SeasonResults
+                .Where(r => r.SeasonId == "2026-10").ToDictionaryAsync(r => r.UserId, r => r.Tier);
+            Assert.Equal(finals[aId], arena.Frame);
+            var ladder = (await a.GetFromJsonAsync<LadderDto>("/api/v1/capsules/ladder", ApiJson.Options))!;
+            Assert.Equal(finals[aId], ladder.Me?.Frame ?? finals[aId]);
+            Assert.Equal(finals[bId], arena.Opponents.Single(o => o.Player.UserId == bId).Player.Frame);
+        }
+        factory.Clock.Advance(TimeSpan.FromDays(7));
+        Assert.Equal(arena.Frame, (await a.GetFromJsonAsync<ArenaDto>("/api/v1/capsules/arena", ApiJson.Options))!.Frame);
     }
 
     [Fact]
-    public async Task A_season_ending_mid_week_keeps_its_final_tier_as_frame()
+    public async Task Season_champions_get_a_ladder_tag_and_losing_to_the_test_account_shames()
     {
         await using var factory = new ApiFactory();
         SeedCatalog(factory);
-        var (a, aId) = await Player(factory, "monthA");
-        var (b, bId) = await Player(factory, "monthB");
+        var (a, aId) = await Player(factory, "champA");
+        var (t, tId) = await Player(factory, "AmiTest");
         await GiveRoster(factory, aId, a);
-        await GiveRoster(factory, bId, b);
-        await Attack(a, bId);
+        await GiveRoster(factory, tId, t);
+        await Attack(a, tId);
+        factory.Clock.Advance(new DateTimeOffset(2026, 11, 2, 12, 0, 0, TimeSpan.Zero) - factory.Clock.GetUtcNow());
+        await a.GetFromJsonAsync<ArenaDto>("/api/v1/capsules/arena", ApiJson.Options);
+        Guid winner;
+        using (var scope = factory.Services.CreateScope())
+            winner = await scope.ServiceProvider.GetRequiredService<AppDbContext>().SeasonResults
+                .Where(r => r.SeasonId == "2026-10" && r.Rank == 1).Select(r => r.UserId).SingleAsync();
 
-        // Dimanche 1er novembre : bascule de saison, cotes remises à niveau, plus personne de classé.
-        factory.Clock.Advance(new DateTimeOffset(2026, 11, 1, 12, 0, 0, TimeSpan.Zero) - factory.Clock.GetUtcNow());
-        Assert.Null((await a.GetFromJsonAsync<ArenaDto>("/api/v1/capsules/arena", ApiJson.Options))!.Frame);
+        // AmiTest bat champA (seed forcé : on rejoue jusqu'à une défaite de champA).
+        BattleDto fight;
+        do
+        {
+            fight = await Attack(t, aId);
+            if (fight.AttackerWon) break;
+            factory.Clock.Advance(TimeSpan.FromHours(25));
+        } while (true);
 
-        // Lundi : le cadre reprend le palier final d'octobre.
-        factory.Clock.Advance(TimeSpan.FromDays(1));
-        var arena = (await a.GetFromJsonAsync<ArenaDto>("/api/v1/capsules/arena", ApiJson.Options))!;
-        using var scope = factory.Services.CreateScope();
-        var final = await scope.ServiceProvider.GetRequiredService<AppDbContext>().SeasonResults.SingleAsync(r => r.UserId == aId && r.SeasonId == "2026-10");
-        Assert.Equal(final.Tier, arena.Frame);
+        var ladder = (await a.GetFromJsonAsync<LadderDto>("/api/v1/capsules/ladder", ApiJson.Options))!;
+        Assert.Equal([1], ladder.Top.Single(e => e.UserId == winner).Titles);
+        Assert.True(ladder.Top.Single(e => e.UserId == aId).Shamed);
+        Assert.False(ladder.Top.Single(e => e.UserId == tId).Shamed);
+        var stats = (await t.GetFromJsonAsync<PlayerStatsDto>($"/api/v1/capsules/players/{aId}/stats", ApiJson.Options))!;
+        Assert.True(stats.ShameLosses >= 1);
+        Assert.Equal("AmiTest", stats.ShameAccount);
+    }
+
+    [Fact]
+    public async Task Saved_teams_switch_the_fighting_roster()
+    {
+        await using var factory = new ApiFactory();
+        SeedCatalog(factory);
+        var (a, aId) = await Player(factory, "teamA");
+        await GiveRoster(factory, aId, a);
+
+        var coll = (await a.GetFromJsonAsync<CollectionResponse>("/api/v1/capsules/collection", ApiJson.Options))!;
+        Assert.Equal(3, coll.Teams!.Count);
+        Assert.Equal(0, coll.ActiveTeam);
+        Assert.All(coll.Teams[0].Slots, s => Assert.NotNull(s));
+
+        var teams = (await (await a.PostAsync("/api/v1/capsules/teams/1/select", null)).EnsureSuccessStatusCode()
+            .Content.ReadFromJsonAsync<TeamsDto>(ApiJson.Options))!;
+        Assert.Equal(1, teams.Active);
+        Assert.All(teams.Roster, s => Assert.Null(s));
+        (await a.PutAsJsonAsync("/api/v1/capsules/roster", new { slots = new object?[] { new { kind = "CHAMPION", itemId = 3 }, null, null, null, null } }))
+            .EnsureSuccessStatusCode();
+
+        teams = (await (await a.PostAsync("/api/v1/capsules/teams/0/select", null)).EnsureSuccessStatusCode()
+            .Content.ReadFromJsonAsync<TeamsDto>(ApiJson.Options))!;
+        Assert.All(teams.Roster, s => Assert.NotNull(s));
+        Assert.Equal(3, teams.Teams[1].Slots[0]!.ItemId);
+
+        teams = (await (await a.PutAsJsonAsync("/api/v1/capsules/teams/2/name", new { name = "  Tryhard  " })).EnsureSuccessStatusCode()
+            .Content.ReadFromJsonAsync<TeamsDto>(ApiJson.Options))!;
+        Assert.Equal("Tryhard", teams.Teams[2].Name);
+        Assert.Equal(HttpStatusCode.BadRequest, (await a.PostAsync("/api/v1/capsules/teams/3/select", null)).StatusCode);
     }
 
     [Fact]
@@ -483,13 +535,17 @@ public class MetaTests
     }
 
     [Fact]
-    public void Season_end_is_found_inside_the_closed_week()
+    public void Seasons_last_two_weeks_from_november_16()
     {
-        Assert.Equal("2026-10", Seasons.EndedDuring(new DateTime(2026, 10, 26), new DateTime(2026, 11, 2)));
-        Assert.Null(Seasons.EndedDuring(new DateTime(2026, 11, 2), new DateTime(2026, 11, 9)));
-        Assert.Equal("2026-12", Seasons.EndedDuring(new DateTime(2026, 12, 28), new DateTime(2027, 1, 4)));
-        // Mois changé pile le lundi du patch : la semaine close inclut ce minuit.
-        Assert.Equal("2027-02", Seasons.EndedDuring(new DateTime(2027, 2, 22), new DateTime(2027, 3, 1)));
+        Assert.Equal("2026-11", Seasons.IdOf(new DateTime(2026, 11, 15, 23, 59, 0)));
+        Assert.Equal(new DateTime(2026, 11, 16), Seasons.EndOf(new DateTime(2026, 11, 5)));
+        Assert.Equal("2026-11-16", Seasons.IdOf(new DateTime(2026, 11, 16)));
+        Assert.Equal(3, Seasons.Number("2026-11-16"));
+        Assert.Equal("2026-11-30", Seasons.IdOf(new DateTime(2026, 12, 13, 23, 0, 0)));
+        Assert.Equal(4, Seasons.Number("2026-11-30"));
+        Assert.Equal(new DateTime(2026, 12, 14), Seasons.EndOf(new DateTime(2026, 12, 1)));
+        Assert.Equal(new DateTime(2026, 11, 30), Seasons.StartOf(new DateTime(2026, 12, 13)));
+        Assert.True(string.CompareOrdinal("2026-11", "2026-11-16") < 0);
     }
 
     [Fact]

@@ -29,7 +29,7 @@ public sealed record ShareDto(string Code);
 /// <summary>Aperçu avant l'attaque : vis-à-vis, contres et synergies des deux rosters.</summary>
 public sealed record BattlePreviewDto(PlayerCardDto Opponent, int Rating, TeamReport Mine, TeamReport Theirs, DateTimeOffset? AvailableAt);
 
-/// <summary>Frame = palier de la semaine passée (cadre de l'icône), null si pas classé.</summary>
+/// <summary>Frame = palier final de la saison précédente (cadre de l'icône), null si pas classé.</summary>
 public sealed record BattlePlayerDto(
     Guid UserId, string DisplayName, int? ProfileIconId, int RatingBefore, int RatingAfter, int? AvatarChampionId = null, Tier? Frame = null);
 
@@ -41,8 +41,10 @@ public sealed record BattleDto(
 public sealed record BattleSummaryDto(
     Guid Id, DateTimeOffset CreatedAt, bool Attacked, Guid OpponentId, string OpponentName, int? OpponentIcon, bool Won, int RatingDelta, int Essence);
 
+/// <summary>Titles = numéros des saisons terminées à la 1re place (étiquettes « Champion S2 ») ; Shamed = battu par le compte de test cette saison.</summary>
 public sealed record LadderEntryDto(
-    int Rank, Guid UserId, string DisplayName, int? ProfileIconId, int Rating, int Wins, int Losses, int? AvatarChampionId = null, Tier? Frame = null);
+    int Rank, Guid UserId, string DisplayName, int? ProfileIconId, int Rating, int Wins, int Losses, int? AvatarChampionId = null, Tier? Frame = null,
+    List<int>? Titles = null, bool Shamed = false);
 public sealed record LadderDto(List<LadderEntryDto> Top, LadderEntryDto? Me);
 
 /// <summary>Adversaire marquant d'un joueur (victime préférée, bête noire, plus bel exploit).</summary>
@@ -61,4 +63,5 @@ public sealed record PlayerStatsDto(
     int BestStreak, int Streak, List<bool> Form,
     int Kills, int Deaths, int Aces, int FirstBloods, int Flawless, int? FastestWin, int BestGain, int Essence,
     RivalDto? BestUpset, RivalDto? Victim, RivalDto? Nemesis, ChampionStatDto? Signature, ChampionStatDto? Killer,
-    Tier? BestTier, int SeasonsPlayed, int Podiums, int Titles, DateTimeOffset? FirstBattleAt);
+    Tier? BestTier, int SeasonsPlayed, int Podiums, int Titles, DateTimeOffset? FirstBattleAt,
+    List<int>? TitleSeasons = null, int ShameLosses = 0, string? ShameAccount = null);

@@ -368,6 +368,38 @@ public class BattleFlowTests
     }
 
     [Fact]
+    public async Task Test_account_shame_lasts_one_season_except_for_carried_over_players()
+    {
+        await using var factory = new ApiFactory();
+        SeedCatalog(factory);
+        var (t, tId) = await Player(factory, "Amitest");
+        var (antonio, antonioId) = await Player(factory, "antonio");
+        var (other, otherId) = await Player(factory, "champB");
+        await GiveRoster(factory, tId, t);
+        await GiveRoster(factory, antonioId, antonio);
+        await GiveRoster(factory, otherId, other);
+        factory.Clock.Advance(new DateTimeOffset(2026, 11, 3, 12, 0, 0, TimeSpan.Zero) - factory.Clock.GetUtcNow());
+
+        // Amitest bat les deux joueurs pendant la saison 2026-11.
+        foreach (var victim in new[] { antonioId, otherId })
+            while (!(await Attack(t, victim)).AttackerWon) factory.Clock.Advance(TimeSpan.FromHours(25));
+
+        async Task<int> Shame(Guid id) =>
+            (await t.GetFromJsonAsync<PlayerStatsDto>($"/api/v1/capsules/players/{id}/stats", ApiJson.Options))!.ShameLosses;
+        Assert.True(await Shame(antonioId) >= 1);
+        Assert.True(await Shame(otherId) >= 1);
+
+        // Saison suivante : l'étiquette tombe, sauf pour Antonio (exception ShameCarryOvers).
+        factory.Clock.Advance(new DateTimeOffset(2026, 11, 20, 12, 0, 0, TimeSpan.Zero) - factory.Clock.GetUtcNow());
+        Assert.True(await Shame(antonioId) >= 1);
+        Assert.Equal(0, await Shame(otherId));
+
+        // Encore une saison plus tard : plus personne.
+        factory.Clock.Advance(TimeSpan.FromDays(14));
+        Assert.Equal(0, await Shame(antonioId));
+    }
+
+    [Fact]
     public async Task Saved_teams_switch_the_fighting_roster()
     {
         await using var factory = new ApiFactory();

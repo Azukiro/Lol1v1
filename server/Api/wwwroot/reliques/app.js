@@ -1349,7 +1349,7 @@ function renderArenaTeam() {
       <button class="btn primary small" data-goto="collection">Compléter mon roster</button></div>`;
     return;
   }
-  el.innerHTML = `<div class="section-head"><h2>Ton équipe</h2><span class="power">Puissance <b>${a.team.power}</b></span></div>
+  el.innerHTML = `<div class="section-head"><h2>Ton équipe</h2><span class="power">${riskHTML(a.team)} Puissance <b>${a.team.power}</b></span></div>
     <div class="units">${a.team.units.map(unitCell).join('')}</div>
     <div class="team-foot">${synergyHTML(a.team.synergies)}<button class="btn ghost small" data-goto="collection">Modifier</button></div>`;
 }
@@ -1458,24 +1458,59 @@ function matchupRow(role, a, b) {
   </div>`;
 }
 
+// Tendance en crans (−2 à +2), jamais en pourcentage : l'aperçu dit où on est fort, pas si on gagne.
+const TREND = {
+  '-2': ['Gros désavantage', 'down'], '-1': ['Désavantage', 'down'], 0: ['Serré', 'eq'], 1: ['Avantage', 'up'], 2: ['Gros avantage', 'up'],
+};
+const RISK = [
+  ['Stable', 'Peu de coups de poker : ton équipe gagne régulièrement, mais renverse rarement plus fort qu\'elle.'],
+  ['Équilibrée', 'Deux coups de poker : un peu de place pour la surprise.'],
+  ['Volatile', 'Beaucoup de coups de poker (attrape, résurrection, scaling, hypercarry) : ça passe ou ça casse.'],
+];
+const riskOf = (team) => RISK[Math.min(2, Math.max(0, (team.risk || 0) - 1))];
+const riskHTML = (team) => { const [label, tip] = riskOf(team); return `<span class="risk r${RISK.indexOf(riskOf(team))}" title="${esc(tip)}">${label}</span>`; };
+
+function trendRow(label, v) {
+  const [text, cls] = TREND[v] || TREND[0];
+  return `<div class="tr-row ${cls}"><span>${label}</span>
+    <span class="tr-bar">${[-2, -1, 0, 1, 2].map((i) => `<i class="${i === v ? 'on' : ''}"></i>`).join('')}</span><em>${text}</em></div>`;
+}
+
+function forecastHTML(f, mine, theirs) {
+  if (!f) return '';
+  const keys = (list) => (list.length ? `<ul>${list.map((k) => `<li>${esc(k)}</li>`).join('')}</ul>` : '<p class="muted">Rien de marquant</p>');
+  return `<div class="forecast">
+    <div class="tr-list">
+      ${trendRow('Lanes', f.lanes)}${trendRow('Objectifs', f.objectives)}${trendRow('1er teamfight', f.earlyFight)}${trendRow('Teamfights suivants', f.lateFight)}
+    </div>
+    <div class="vs-syn">
+      <div><span class="kicker">Tes clés ${riskHTML(mine)}</span>${keys(f.keysA)}</div>
+      <div><span class="kicker">Ses clés ${riskHTML(theirs)}</span>${keys(f.keysB)}</div>
+    </div>
+    <p class="fine">Tendance calculée sur des parties simulées : le hasard reste, un coup de poker peut tout renverser.</p>
+  </div>`;
+}
+
 async function openFoe(id) {
   try {
     const p = await api(`/capsules/battles/preview/${id}`);
     const wait = p.availableAt ? Date.parse(p.availableAt) - now() : 0;
     const diff = p.mine.power - p.theirs.power;
+    const [trend, trendCls] = p.forecast ? TREND[p.forecast.tendency] : [diff >= 0 ? 'Favori' : 'Outsider', diff >= 0 ? 'up' : 'down'];
     openSheet(`<div class="preview">
       <span class="kicker">Aperçu du combat</span>
       <h2>Toi contre ${esc(p.opponent.displayName)}</h2>
       <button class="btn ghost small" type="button" data-profile="${id}">Voir son profil</button>
       <div class="vs-head">
         <div><span class="kicker">Ta puissance</span><b>${p.mine.power}</b></div>
-        <span class="vs-badge ${diff >= 0 ? 'up' : 'down'}">${diff >= 0 ? 'Favori' : 'Outsider'}</span>
+        <span class="vs-badge ${trendCls}">${trend}</span>
         <div class="right"><span class="kicker">${p.rating} pts</span><b>${p.theirs.power}</b></div>
       </div>
+      ${forecastHTML(p.forecast, p.mine, p.theirs)}
       <div class="matchups">${ROLES.map((r, i) => matchupRow(r, p.mine.units[i], p.theirs.units[i])).join('')}</div>
       <div class="vs-syn"><div><span class="kicker">Tes bonus</span>${synergyHTML(p.mine.synergies)}</div>
         <div><span class="kicker">Ses bonus</span>${synergyHTML(p.theirs.synergies)}</div></div>
-      <details class="talents-vs"><summary>Talents en jeu</summary>
+      <details class="talents-vs" open><summary>Talents en jeu</summary>
         <div><span class="kicker">Ton équipe</span>${p.mine.units.map((u) => `<div class="tv-row"><b>${esc(u.champion)}</b>${talentHTML(u.talent, true)}</div>`).join('')}</div>
         <div><span class="kicker">En face</span>${p.theirs.units.map((u) => `<div class="tv-row"><b>${esc(u.champion)}</b>${talentHTML(u.talent, true)}</div>`).join('')}</div>
       </details>
@@ -2326,7 +2361,9 @@ function showGuide() {
       <li><b>Dragons</b> : disputés par le jungler et le support. Chaque dragon donne +4 % à l'équipe, le gardien ancien +8 % avant le 3e teamfight.</li>
       <li><b>Or</b> : kills, tours et objectifs donnent de l'or. L'avance en or vaut au plus ±15 % de puissance.</li>
       <li><b>Teamfights</b> : au meilleur des 3. Le premier se joue en milieu de partie, les suivants en fin de partie.</li>
-      <li>Une part de hasard reste : à puissance égale, c'est du 50/50.</li></ul>`)}
+      <li>Une part de hasard reste : à puissance égale, c'est du 50/50.</li>
+      <li><b>Aperçu</b> : la tendance (de « Gros désavantage » à « Gros avantage ») vient de parties simulées avec les talents, courbes et contres. Elle indique où chaque équipe est forte, pas qui gagne.</li>
+      <li><b>Coups de poker</b> : Attrape, Résurrection, Scaling et Hypercarry peuvent tout renverser comme ne rien faire. Avec 3 ou plus, ton équipe est <b>Volatile</b> : ça passe ou ça casse.</li></ul>`)}
     ${sec('11. Cote, récompenses et saisons', `<ul class="g-list">
       <li><b>Cote</b> : Elo de facteur 32. À cote égale, ±16. Un défenseur battu perd les trois quarts du gain de l'attaquant.</li>
       <li><b>Essence</b> : 2 victoires en attaque = 1 relique, jusqu'à 4 victoires payées par jour.</li>

@@ -42,8 +42,9 @@ public sealed record SeasonResultDto(
 
 public sealed record ShareDto(string Code);
 
-/// <summary>Aperçu avant l'attaque : vis-à-vis, contres et synergies des deux rosters.</summary>
-public sealed record BattlePreviewDto(PlayerCardDto Opponent, int Rating, TeamReport Mine, TeamReport Theirs, DateTimeOffset? AvailableAt);
+/// <summary>Aperçu avant l'attaque : vis-à-vis, contres et synergies des deux rosters, et tendance du match en crans (vue de Mine).</summary>
+public sealed record BattlePreviewDto(
+    PlayerCardDto Opponent, int Rating, TeamReport Mine, TeamReport Theirs, DateTimeOffset? AvailableAt, MatchForecast? Forecast = null);
 
 /// <summary>Frame = palier final de la saison précédente (cadre de l'icône), null si pas classé.</summary>
 public sealed record BattlePlayerDto(
@@ -59,7 +60,7 @@ public sealed record BattleDto(
 public sealed record BattleSummaryDto(
     Guid Id, DateTimeOffset CreatedAt, bool Attacked, Guid OpponentId, string OpponentName, int? OpponentIcon, bool Won, int RatingDelta, int Essence);
 
-/// <summary>Titles = numéros des saisons terminées à la 1re place (étiquettes « Champion S2 ») ; Shamed = battu par le compte de test cette saison.</summary>
+/// <summary>Titles = numéros des saisons terminées à la 1re place (étiquettes « Champion S2 ») ; Shamed = battu par le compte de test cette saison (prolongé d'une saison pour les exceptions de BattleOptions.ShameCarryOvers).</summary>
 public sealed record LadderEntryDto(
     int Rank, Guid UserId, string DisplayName, int? ProfileIconId, int Rating, int Wins, int Losses, int? AvatarChampionId = null, Tier? Frame = null,
     List<int>? Titles = null, bool Shamed = false, bool Legend = false);

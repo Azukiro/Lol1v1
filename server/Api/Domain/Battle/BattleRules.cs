@@ -20,8 +20,17 @@ public sealed record UnitReport(
     int Power, int FitPercent, int CounterPercent, int Kills = 0, int Deaths = 0, Talent? Talent = null, ChampionProfile? Profile = null,
     int MetaPercent = 0);
 
-/// <summary>Bilan d'une équipe ; FightPercent = bonus ou malus de composition en teamfight.</summary>
-public sealed record TeamReport(List<UnitReport> Units, List<string> Synergies, int Power, int FightPercent = 0);
+/// <summary>
+/// Bilan d'une équipe ; FightPercent = bonus ou malus de composition en teamfight ; Risk = nombre de talents « coup de poker »
+/// (attrape, résurrection, scaling, hypercarry) : 0-1 stable, 2 équilibrée, 3+ volatile.
+/// </summary>
+public sealed record TeamReport(List<UnitReport> Units, List<string> Synergies, int Power, int FightPercent = 0, int Risk = 0);
+
+/// <summary>
+/// Tendance d'un match vue du camp A, en crans de −2 (gros désavantage) à +2 (gros avantage), jamais en pourcentage :
+/// globale, en lanes, sur les objectifs, au premier teamfight et aux suivants. Keys = clés du match de chaque camp.
+/// </summary>
+public sealed record MatchForecast(int Tendency, int Lanes, int Objectives, int EarlyFight, int LateFight, List<string> KeysA, List<string> KeysB);
 
 /// <summary>
 /// Événement de la partie, avec le score après l'événement (or en milliers). Pour l'animation : Icon = sort utilisé (talent),
@@ -60,6 +69,9 @@ public static class BattleRules
 
     /// <summary>Style en lane (duels) et en teamfight.</summary>
     private const double SoloLane = 1.10, SoloFight = 0.97, TeamfightLane = 0.95, TeamfightFight = 1.04;
+
+    /// <summary>Talents à fort écart : ils peuvent tout renverser comme ne rien faire.</summary>
+    public static readonly TalentEffect[] Gambles = [TalentEffect.PICK, TalentEffect.REVIVE, TalentEffect.SCALING, TalentEffect.HYPERCARRY];
 
     public static ChampionClass? ParseClass(string? role) => role?.ToLowerInvariant() switch
     {
@@ -184,11 +196,14 @@ public static class BattleRules
     public static (TeamReport A, TeamReport B) Analyze(IReadOnlyList<BattleUnit> a, IReadOnlyList<BattleUnit> b, IReadOnlyDictionary<int, string> lineNames)
     {
         var (ra, rb) = (Report(a, b, lineNames), Report(b, a, lineNames));
-        return (ResolveSteal(ra, rb), ResolveSteal(rb, ra));
+        return (WithRisk(ResolveSteal(ra, rb)), WithRisk(ResolveSteal(rb, ra)));
     }
 
+    private static TeamReport WithRisk(TeamReport team) =>
+        team with { Risk = team.Units.Count(u => u.Talent is { } t && Gambles.Contains(t.Effect)) };
+
     /// <summary>Analyse d'une équipe seule (sans adversaire : pas de contre).</summary>
-    public static TeamReport Analyze(IReadOnlyList<BattleUnit> team, IReadOnlyDictionary<int, string> lineNames) => Report(team, null, lineNames);
+    public static TeamReport Analyze(IReadOnlyList<BattleUnit> team, IReadOnlyDictionary<int, string> lineNames) => WithRisk(Report(team, null, lineNames));
 
     private static TeamReport Report(IReadOnlyList<BattleUnit> team, IReadOnlyList<BattleUnit>? foes, IReadOnlyDictionary<int, string> lineNames)
     {
@@ -224,6 +239,73 @@ public static class BattleRules
         return new Game([a, b], [ra, rb], new Random(seed)).Play();
     }
 
+    public const int ForecastRuns = 150;
+
+    /// <summary>Cran de tendance d'une part de victoires (0 à 1) : la zone « serré » est large, le hasard garde sa place.</summary>
+    public static int Bucket(double share) => share switch
+    {
+        < 0.30 => -2,
+        < 0.44 => -1,
+        <= 0.56 => 0,
+        <= 0.70 => 1,
+        _ => 2,
+    };
+
+    /// <summary>
+    /// Prévision du match vu de A : <see cref="ForecastRuns"/> parties sur des seeds fixes (même aperçu à chaque ouverture),
+    /// réduites en crans par phase. Ne donne jamais le pourcentage : l'aperçu dit où une équipe est forte, pas si elle gagne.
+    /// </summary>
+    public static MatchForecast Forecast(IReadOnlyList<BattleUnit> a, IReadOnlyList<BattleUnit> b, IReadOnlyDictionary<int, string> lineNames)
+    {
+        if (a.Count != TeamSize || b.Count != TeamSize) throw new ArgumentException($"Il faut {TeamSize} unités par équipe.");
+        var (ra, rb) = Analyze(a, b, lineNames);
+        int wins = 0, lanes = 0, objectives = 0, objectiveTotal = 0, early = 0, late = 0, lateTotal = 0;
+        for (var i = 0; i < ForecastRuns; i++)
+        {
+            var game = new Game([a, b], [ra, rb], new Random(i * 7919 + 17));
+            if (game.Play().Winner == BattleSide.A) wins++;
+            lanes += game.LanesWonByA;
+            objectives += game.Objectives[0];
+            objectiveTotal += game.Objectives[0] + game.Objectives[1];
+            if (game.FightWinners[0] == 0) early++;
+            foreach (var w in game.FightWinners.Skip(1)) { lateTotal++; if (w == 0) late++; }
+        }
+        static double Share(int n, int total) => total == 0 ? 0.5 : n / (double)total;
+        return new MatchForecast(Bucket(Share(wins, ForecastRuns)), Bucket(Share(lanes, 3 * ForecastRuns)), Bucket(Share(objectives, objectiveTotal)),
+            Bucket(Share(early, ForecastRuns)), Bucket(Share(late, lateTotal)), Keys(a, ra), Keys(b, rb));
+    }
+
+    /// <summary>Clés du match d'une équipe : ce qui la fait pencher et que la puissance n'affiche pas (3 au plus, des plus lourdes aux plus légères).</summary>
+    public static List<string> Keys(IReadOnlyList<BattleUnit> team, TeamReport report)
+    {
+        var keys = new List<(double Weight, string Text)>();
+        int Count(TalentEffect e) => report.Units.Count(u => u.Talent?.Effect == e);
+        string Who(TalentEffect e) => string.Join(", ", report.Units.Where(u => u.Talent?.Effect == e).Select(u => u.Champion));
+
+        var curve = team.Sum(u => ProfileOf(u)?.Curve switch { PowerCurve.EARLY => -1, PowerCurve.LATE => 1, _ => 0 });
+        if (curve >= 2) keys.Add((curve * 4, "Équipe late game : plus forte à chaque teamfight"));
+        if (curve <= -2) keys.Add((-curve * 4, "Équipe early game : doit prendre l'avance en lanes"));
+        if (Count(TalentEffect.SCALING) is var sc and > 0)
+            keys.Add((12 * sc, $"Scaling ({Who(TalentEffect.SCALING)}) : faible en lane, énorme au 3e teamfight"));
+        if (Count(TalentEffect.ENGAGE) is var en and > 0)
+            keys.Add((10 * en, $"Engage ({Who(TalentEffect.ENGAGE)}) : +10 % chacun au premier teamfight"));
+        if (Count(TalentEffect.PICK) > 0)
+            keys.Add((9, $"Attrape ({Who(TalentEffect.PICK)}) : peut sortir un adversaire avant le combat"));
+        if (Count(TalentEffect.REVIVE) > 0)
+            keys.Add((8, $"Résurrection ({Who(TalentEffect.REVIVE)}) : peut retourner un teamfight perdu"));
+        if (Count(TalentEffect.TEAMFIGHT) is var tf and >= 2) keys.Add((5 * tf, $"{tf} talents de teamfight : +5 % chacun à chaque combat"));
+        if (Count(TalentEffect.HYPERCARRY) > 0)
+            keys.Add((7, $"Hypercarry ({Who(TalentEffect.HYPERCARRY)}) : fait boule de neige après un teamfight gagné"));
+        if (Count(TalentEffect.GANK) > 0 || Count(TalentEffect.LANE_DOMINANCE) + Count(TalentEffect.GLOBAL) >= 2)
+            keys.Add((7, "Phase de lanes agressive : ganks, duels et renforts"));
+        if (Count(TalentEffect.SPLITPUSH) + (SplitPushers(team).Count >= 2 ? 1 : 0) is var sp and > 0)
+            keys.Add((4 * sp, "Pression en side lane : des tours en plus à chaque teamfight"));
+        var counters = report.Units.Sum(u => u.CounterPercent);
+        if (counters >= 10) keys.Add((counters / 2.0, $"Contres de classe : +{counters} % cumulés en teamfight"));
+        if (report.FightPercent <= -10) keys.Add((-report.FightPercent, $"Composition bancale : {report.FightPercent} % en teamfight"));
+        return keys.OrderByDescending(k => k.Weight).Take(3).Select(k => k.Text).ToList();
+    }
+
     /// <summary>État d'une partie en cours.</summary>
     private sealed class Game(IReadOnlyList<BattleUnit>[] teams, TeamReport[] reports, Random rng)
     {
@@ -234,6 +316,11 @@ public static class BattleRules
         private readonly List<BattleEvent> _events = [];
         private int _minute;
         private int? _lastFightWinner;
+
+        /// <summary>Statistiques pour la prévision : lanes gagnées par A, objectifs par camp, vainqueur de chaque teamfight.</summary>
+        public int LanesWonByA { get; private set; }
+        public int[] Objectives => _objectives;
+        public List<int> FightWinners { get; } = [];
 
         private double Power(int side, int role) => reports[side].Units[role].Power;
         private string Name(int side, int role) => teams[side][role].Champion;
@@ -286,6 +373,7 @@ public static class BattleRules
             {
                 _minute += rng.Next(1, 4);
                 lanesWon[lane] = PlayLane(lane, roams.Where(r => r.Lane == lane).ToList());
+                if (lanesWon[lane] == 0) LanesWonByA++;
             }
 
             _minute += rng.Next(2, 4);
@@ -321,6 +409,7 @@ public static class BattleRules
                 if (fightIndex == 2) Objective("le gardien ancien", 0.08, "ancient");
                 var winner = Teamfight(++fightIndex);
                 fights[winner]++;
+                FightWinners.Add(winner);
             }
             var champion = fights[0] == 2 ? 0 : 1;
             _minute += rng.Next(1, 3);

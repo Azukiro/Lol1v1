@@ -31,7 +31,14 @@ public sealed class BattleOptions
     public string TimeZone { get; set; } = "Europe/Paris";
     /// <summary>Compte de test : le battre ne vaut rien, perdre contre lui affiche une étiquette moqueuse (vide = désactivé).</summary>
     public string ShameAccount { get; set; } = "AmiTest";
+    /// <summary>
+    /// Exceptions : l'étiquette du joueur (nom d'affichage, casse ignorée) pour ses défaites de la saison donnée
+    /// reste affichée pendant la saison suivante. Sinon elle ne vaut que pour la saison du combat.
+    /// </summary>
+    public List<ShameCarryOver> ShameCarryOvers { get; set; } = [new("Antonio", "2026-11")];
 }
+
+public sealed record ShameCarryOver(string Player, string Season);
 
 /// <summary>
 /// Combats de reliques : roster contre roster, en asynchrone (le défenseur n'a pas besoin d'être là).
@@ -139,12 +146,13 @@ public sealed class BattleService(
         var catalog = await catalogs.GetAsync();
         var (mine, theirs) = await TeamsAsync(catalog, userId, opponentId, (await CurrentMetaAsync(catalog)).Changes);
         var (a, b) = BattleRules.Analyze(mine, theirs, LineNames(catalog));
+        var forecast = BattleRules.Forecast(mine, theirs, LineNames(catalog));
         var friend = await db.RelicFriends.AnyAsync(f => f.UserId == userId && f.FriendId == opponentId);
         var card = (await social.CardsAsync([opponentId], friend ? [opponentId] : [])).GetValueOrDefault(opponentId)
             ?? throw new AppException("Joueur introuvable.", 404);
         var rating = await db.BattleProfiles.Where(p => p.UserId == opponentId).Select(p => (int?)p.Rating).FirstOrDefaultAsync() ?? _o.StartRating;
         var recent = await RecentPairsAsync(userId, [opponentId], clock.GetUtcNow());
-        return new BattlePreviewDto(card, rating, a, b, Availability(userId, recent.GetValueOrDefault(opponentId)).AvailableAt);
+        return new BattlePreviewDto(card, rating, a, b, Availability(userId, recent.GetValueOrDefault(opponentId)).AvailableAt, forecast);
     }
 
     public async Task<BattleDto> AttackAsync(Guid userId, Guid opponentId)
@@ -254,7 +262,7 @@ public sealed class BattleService(
         var users = await db.Users.Include(u => u.RiotAccount).Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id);
         var titles = (await db.SeasonResults.Where(r => r.Rank == 1 && ids.Contains(r.UserId)).Select(r => new { r.UserId, r.SeasonId }).ToListAsync())
             .GroupBy(r => r.UserId).ToDictionary(g => g.Key, g => g.Select(r => Seasons.Number(r.SeasonId)).OrderBy(n => n).ToList());
-        var shamed = await ShamedThisSeasonAsync(ids);
+        var shamed = await ShamedAsync(ids);
         var legends = (await db.BattleProfiles.Where(p => p.Legend && ids.Contains(p.UserId)).Select(p => p.UserId).ToListAsync()).ToHashSet();
         LadderEntryDto Entry(BattleProfile p, int rank) =>
             new(rank, p.UserId, users.GetValueOrDefault(p.UserId)?.DisplayName ?? "?", users.GetValueOrDefault(p.UserId)?.RiotAccount?.ProfileIconId,
@@ -352,8 +360,9 @@ public sealed class BattleService(
 
         var form = battles.AsEnumerable().Reverse().Take(10).Select(b => (b.AttackerId == playerId) == b.AttackerWon).ToList();
         var shameId = await ShameIdAsync();
+        var shameSince = shameId is null ? default : (await ShameSinceAsync([playerId]))[playerId];
         var shameLosses = shameId is { } sid && sid != playerId
-            ? battles.Count(b => (b.AttackerId == sid && b.AttackerWon) || (b.DefenderId == sid && !b.AttackerWon))
+            ? battles.Count(b => b.CreatedAt >= shameSince && ((b.AttackerId == sid && b.AttackerWon) || (b.DefenderId == sid && !b.AttackerWon)))
             : 0;
         return new PlayerStatsDto(card, rating, Seasons.TierOf(rating), ranked ? await RankAsync(profile!) : null, rankedCount,
             profile?.Wins ?? 0, profile?.Losses ?? 0, profile?.PeakRating ?? rating, best,
@@ -376,18 +385,33 @@ public sealed class BattleService(
             : await db.Users.Where(u => u.DisplayName.Trim().ToLower() == _o.ShameAccount.Trim().ToLower())
                 .Select(u => (Guid?)u.Id).FirstOrDefaultAsync();
 
-    /// <summary>Joueurs (parmi <paramref name="ids"/>) battus par le compte de test depuis le début de la saison.</summary>
-    private async Task<HashSet<Guid>> ShamedThisSeasonAsync(List<Guid> ids)
+    /// <summary>Joueurs (parmi <paramref name="ids"/>) battus par le compte de test pendant leur fenêtre d'étiquette (voir <see cref="ShameSinceAsync"/>).</summary>
+    private async Task<HashSet<Guid>> ShamedAsync(List<Guid> ids)
     {
         if (await ShameIdAsync() is not { } sid) return [];
-        var tz = Zone;
-        var start = Seasons.StartOf(Local(clock.GetUtcNow()));
-        var since = new DateTimeOffset(start, tz.GetUtcOffset(start)).ToUniversalTime();
-        var losers = await db.RelicBattles
-            .Where(b => b.CreatedAt >= since && ((b.AttackerId == sid && b.AttackerWon && ids.Contains(b.DefenderId))
+        var since = await ShameSinceAsync(ids);
+        var earliest = since.Values.Min();
+        var losses = await db.RelicBattles
+            .Where(b => b.CreatedAt >= earliest && ((b.AttackerId == sid && b.AttackerWon && ids.Contains(b.DefenderId))
                 || (b.DefenderId == sid && !b.AttackerWon && ids.Contains(b.AttackerId))))
-            .Select(b => b.AttackerId == sid ? b.DefenderId : b.AttackerId).Distinct().ToListAsync();
-        return losers.ToHashSet();
+            .Select(b => new { Loser = b.AttackerId == sid ? b.DefenderId : b.AttackerId, b.CreatedAt }).ToListAsync();
+        return losses.Where(l => l.CreatedAt >= since[l.Loser]).Select(l => l.Loser).ToHashSet();
+    }
+
+    /// <summary>
+    /// Début (UTC) de la période où une défaite contre le compte de test donne l'étiquette : la saison en cours,
+    /// ou la saison précédente pour un joueur listé dans <see cref="BattleOptions.ShameCarryOvers"/> pour cette saison-là.
+    /// </summary>
+    private async Task<Dictionary<Guid, DateTimeOffset>> ShameSinceAsync(List<Guid> ids)
+    {
+        var start = Seasons.StartOf(Local(clock.GetUtcNow()));
+        var previous = Seasons.StartOf(start.AddDays(-1));
+        var carried = _o.ShameCarryOvers.Where(c => c.Season == Seasons.IdOf(previous))
+            .Select(c => c.Player.Trim().ToLower()).ToList();
+        var extended = carried.Count == 0 ? [] : (await db.Users
+            .Where(u => ids.Contains(u.Id) && carried.Contains(u.DisplayName.Trim().ToLower())).Select(u => u.Id).ToListAsync()).ToHashSet();
+        DateTimeOffset Utc(DateTime local) => new DateTimeOffset(local, Zone.GetUtcOffset(local)).ToUniversalTime();
+        return ids.Distinct().ToDictionary(id => id, id => Utc(extended.Contains(id) ? previous : start));
     }
 
     private async Task<int> RankAsync(BattleProfile p) =>

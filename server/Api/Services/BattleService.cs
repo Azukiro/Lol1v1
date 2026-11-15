@@ -36,9 +36,14 @@ public sealed class BattleOptions
     /// reste affichée pendant la saison suivante. Sinon elle ne vaut que pour la saison du combat.
     /// </summary>
     public List<ShameCarryOver> ShameCarryOvers { get; set; } = [new("Antonio", "2026-11")];
+    /// <summary>Étiquettes imposées à la main, même sans défaite enregistrée (Antonio jusqu'à la fin de la saison 3).</summary>
+    public List<ShameForced> ShameForced { get; set; } = [new("antonio", "2026-11-16")];
 }
 
 public sealed record ShameCarryOver(string Player, string Season);
+
+/// <summary>Étiquette imposée sans combat : tout joueur dont le nom contient <paramref name="Player"/> (casse ignorée) l'a jusqu'à la fin de la saison <paramref name="UntilSeason"/>.</summary>
+public sealed record ShameForced(string Player, string UntilSeason);
 
 /// <summary>
 /// Combats de reliques : roster contre roster, en asynchrone (le défenseur n'a pas besoin d'être là).
@@ -364,6 +369,7 @@ public sealed class BattleService(
         var shameLosses = shameId is { } sid && sid != playerId
             ? battles.Count(b => b.CreatedAt >= shameSince && ((b.AttackerId == sid && b.AttackerWon) || (b.DefenderId == sid && !b.AttackerWon)))
             : 0;
+        if (shameLosses == 0 && (await ForcedShameAsync([playerId])).Count > 0) shameLosses = 1;
         return new PlayerStatsDto(card, rating, Seasons.TierOf(rating), ranked ? await RankAsync(profile!) : null, rankedCount,
             profile?.Wins ?? 0, profile?.Losses ?? 0, profile?.PeakRating ?? rating, best,
             wins, battles.Count - wins, attackWins, attackLosses, defenseWins, defenseLosses,
@@ -374,7 +380,7 @@ public sealed class BattleService(
             seasons.Count == 0 ? null : seasons.Max(s => s.Tier), seasons.Count, seasons.Count(s => s.Rank <= 3), seasons.Count(s => s.Rank == 1),
             battles.Count == 0 ? null : battles[0].CreatedAt,
             seasons.Where(s => s.Rank == 1).Select(s => Seasons.Number(s.SeasonId)).OrderBy(n => n).ToList(),
-            shameLosses, shameLosses > 0 ? names.GetValueOrDefault(shameId!.Value, _o.ShameAccount) : null,
+            shameLosses, shameLosses > 0 ? (shameId is { } sId ? names.GetValueOrDefault(sId, _o.ShameAccount) : _o.ShameAccount) : null,
             seasons.Where(s => s.PassLevel >= SeasonPass.MaxLevel).Select(s => Seasons.Number(s.SeasonId)).OrderBy(n => n).ToList(),
             profile?.PassLevel ?? 0);
     }
@@ -388,14 +394,26 @@ public sealed class BattleService(
     /// <summary>Joueurs (parmi <paramref name="ids"/>) battus par le compte de test pendant leur fenêtre d'étiquette (voir <see cref="ShameSinceAsync"/>).</summary>
     private async Task<HashSet<Guid>> ShamedAsync(List<Guid> ids)
     {
-        if (await ShameIdAsync() is not { } sid) return [];
+        var forced = await ForcedShameAsync(ids);
+        if (await ShameIdAsync() is not { } sid) return forced;
         var since = await ShameSinceAsync(ids);
         var earliest = since.Values.Min();
         var losses = await db.RelicBattles
             .Where(b => b.CreatedAt >= earliest && ((b.AttackerId == sid && b.AttackerWon && ids.Contains(b.DefenderId))
                 || (b.DefenderId == sid && !b.AttackerWon && ids.Contains(b.AttackerId))))
             .Select(b => new { Loser = b.AttackerId == sid ? b.DefenderId : b.AttackerId, b.CreatedAt }).ToListAsync();
-        return losses.Where(l => l.CreatedAt >= since[l.Loser]).Select(l => l.Loser).ToHashSet();
+        return losses.Where(l => l.CreatedAt >= since[l.Loser]).Select(l => l.Loser).Concat(forced).ToHashSet();
+    }
+
+    /// <summary>Joueurs (parmi <paramref name="ids"/>) qui ont l'étiquette imposée par <see cref="BattleOptions.ShameForced"/> pour la saison en cours.</summary>
+    private async Task<HashSet<Guid>> ForcedShameAsync(List<Guid> ids)
+    {
+        var current = Seasons.Number(Seasons.IdOf(Local(clock.GetUtcNow())));
+        var names = _o.ShameForced.Where(f => current <= Seasons.Number(f.UntilSeason))
+            .Select(f => f.Player.Trim().ToLower()).Where(n => n.Length > 0).ToList();
+        if (names.Count == 0) return [];
+        var users = await db.Users.Where(u => ids.Contains(u.Id)).Select(u => new { u.Id, u.DisplayName }).ToListAsync();
+        return users.Where(u => names.Any(n => u.DisplayName.ToLower().Contains(n))).Select(u => u.Id).ToHashSet();
     }
 
     /// <summary>

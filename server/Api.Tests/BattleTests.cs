@@ -368,6 +368,29 @@ public class BattleFlowTests
     }
 
     [Fact]
+    public async Task Forced_shame_tag_shows_without_any_loss_until_its_season_ends()
+    {
+        await using var factory = new ApiFactory();
+        SeedCatalog(factory);
+        await Player(factory, "AmiTest");
+        var (antonio, antonioId) = await Player(factory, "Antonio");
+        var (_, otherId) = await Player(factory, "champC");
+        async Task<PlayerStatsDto> Stats(Guid id) =>
+            (await antonio.GetFromJsonAsync<PlayerStatsDto>($"/api/v1/capsules/players/{id}/stats", ApiJson.Options))!;
+
+        factory.Clock.Advance(new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero) - factory.Clock.GetUtcNow());
+        Assert.Equal(1, (await Stats(antonioId)).ShameLosses);
+        Assert.Equal("AmiTest", (await Stats(antonioId)).ShameAccount);
+        Assert.Equal(0, (await Stats(otherId)).ShameLosses);
+
+        factory.Clock.Advance(new DateTimeOffset(2026, 11, 25, 12, 0, 0, TimeSpan.Zero) - factory.Clock.GetUtcNow());
+        Assert.Equal(1, (await Stats(antonioId)).ShameLosses);
+
+        factory.Clock.Advance(new DateTimeOffset(2026, 12, 2, 12, 0, 0, TimeSpan.Zero) - factory.Clock.GetUtcNow());
+        Assert.Equal(0, (await Stats(antonioId)).ShameLosses);
+    }
+
+    [Fact]
     public async Task Test_account_shame_lasts_one_season_except_for_carried_over_players()
     {
         await using var factory = new ApiFactory();

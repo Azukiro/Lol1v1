@@ -16,7 +16,8 @@ public sealed record OpenCapsulesResponse(List<CapsuleDropDto> Drops, CapsuleSta
 public sealed record OwnedItemDto(CapsuleItemKind Kind, int ItemId, int Count, DateTimeOffset FirstObtainedAt);
 public sealed record CapsuleHistoryDto(CapsuleItemKind Kind, int ItemId, Rarity Rarity, bool IsNew, DateTimeOffset OpenedAt);
 public sealed record CollectionResponse(
-    List<OwnedItemDto> Items, List<CapsuleHistoryDto> Recent, List<RosterSlotDto?> Roster, List<TeamDto>? Teams = null, int ActiveTeam = 0);
+    List<OwnedItemDto> Items, List<CapsuleHistoryDto> Recent, List<RosterSlotDto?> Roster, List<TeamDto>? Teams = null, int ActiveTeam = 0,
+    RotationDto? Rotation = null);
 
 /// <summary>Équipe enregistrée : l'équipe active est le roster qui attaque et défend.</summary>
 public sealed record TeamDto(string Name, List<RosterSlotDto?> Slots);
@@ -24,7 +25,11 @@ public sealed record TeamsDto(List<TeamDto> Teams, int Active, List<RosterSlotDt
 public sealed record RenameTeamRequest(string Name);
 
 /// <summary>Objet placé à un poste du roster (TOP, JUNGLE, MID, BOT, SUPPORT dans cet ordre).</summary>
-public sealed record RosterSlotDto(CapsuleItemKind Kind, int ItemId);
+/// <summary>Loan = champion prêté par la rotation de la semaine (Kind CHAMPION, ItemId = champion), non possédé, rareté COMMON.</summary>
+public sealed record RosterSlotDto(CapsuleItemKind Kind, int ItemId, bool Loan = false);
+
+/// <summary>Rotation de la semaine : champions jouables par tous sans les posséder, jusqu'à EndsAt.</summary>
+public sealed record RotationDto(string WeekId, DateTimeOffset EndsAt, List<int> ChampionIds, Rarity Rarity);
 public sealed record RosterRequest(List<RosterSlotDto?> Slots);
 public sealed record PlayerCardDto(
     Guid UserId, string DisplayName, string? RiotId, int? ProfileIconId, int Owned, int TotalOpened, List<RosterSlotDto?> Roster, bool Added, int? AvatarChampionId = null,

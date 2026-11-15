@@ -17,6 +17,8 @@ public sealed class CapsuleOptions
     public int EssencePerCapsule { get; set; } = 150;
     public int EssencePerPremium { get; set; } = 600;
     public int MaxOpenAtOnce { get; set; } = 10;
+    /// <summary>Équipe de départ offerte à la création du portefeuille (un skin COMMON par poste).</summary>
+    public bool StarterTeam { get; set; } = true;
 
     public TimeSpan Interval => TimeSpan.FromMinutes(IntervalMinutes);
 }
@@ -41,7 +43,7 @@ public sealed class CapsuleLocks
 
 public sealed class CapsuleService(
     AppDbContext db, CapsuleCatalogService catalogs, CapsuleLocks locks, TimeProvider clock,
-    Microsoft.Extensions.Options.IOptions<CapsuleOptions> options)
+    Microsoft.Extensions.Options.IOptions<CapsuleOptions> options, RotationService rotation)
 {
     private readonly CapsuleOptions _o = options.Value;
 
@@ -149,7 +151,8 @@ public sealed class CapsuleService(
         return new CollectionResponse(
             items.Select(i => new OwnedItemDto(i.Kind, i.ItemId, i.Count, i.FirstObtainedAt)).ToList(),
             recent.Select(d => new CapsuleHistoryDto(d.Kind, d.ItemId, d.Rarity, d.IsNew, d.OpenedAt)).ToList(),
-            RelicSocialService.ParseRoster(wallet?.Roster), RelicSocialService.ParseTeams(wallet), wallet?.ActiveTeam ?? 0);
+            RelicSocialService.ParseRoster(wallet?.Roster), RelicSocialService.ParseTeams(wallet), wallet?.ActiveTeam ?? 0,
+            rotation.CurrentDto());
     }
 
     public CapsuleCatalogDto ToCatalogDto(CapsuleCatalog c)
@@ -197,7 +200,34 @@ public sealed class CapsuleService(
         if (!await db.Users.AnyAsync(u => u.Id == userId)) throw new AppException("Compte introuvable.", 401);
         wallet = new CapsuleWallet { UserId = userId, Stored = _o.WelcomeCapsules, AccrualAnchor = clock.GetUtcNow() };
         db.CapsuleWallets.Add(wallet);
+        if (_o.StarterTeam && await GrantStarterTeamAsync(wallet))
+            // Enregistrée tout de suite : une ouverture qui suit relit la collection en base (doublon d'une skin offerte).
+            await db.SaveChangesAsync();
         return wallet;
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions RosterJson =
+        new(System.Text.Json.JsonSerializerDefaults.Web) { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } };
+
+    /// <summary>
+    /// Équipe de départ (<see cref="Api.Domain.Battle.Newcomers.StarterTeam"/>) : un skin COMMON par poste, ajouté à la collection
+    /// et placé dans le roster, pour combattre dès l'arrivée. Ignorée si le catalogue n'est pas encore chargé.
+    /// </summary>
+    private async Task<bool> GrantStarterTeamAsync(CapsuleWallet wallet)
+    {
+        var catalog = catalogs.Current;
+        if (catalog.IsEmpty) return false;
+        var skins = catalog.Skins.Select(sk => new Api.Domain.Battle.NewcomerSkin(sk.Id, sk.ChampionId, sk.Rarity)).ToList();
+        var team = Api.Domain.Battle.Newcomers.StarterTeam(RotationService.Champions(catalog), skins, new Random(CryptoRandom.Instance.Next()));
+        if (team.All(t => t is null)) return false;
+        var owned = await db.CollectionItems.Where(c => c.UserId == wallet.UserId && c.Kind == CapsuleItemKind.SKIN)
+            .Select(c => c.ItemId).ToListAsync();
+        var now = clock.GetUtcNow();
+        foreach (var skin in team.OfType<Api.Domain.Battle.NewcomerSkin>().Where(sk => !owned.Contains(sk.Id)))
+            db.CollectionItems.Add(new CollectionItem { UserId = wallet.UserId, Kind = CapsuleItemKind.SKIN, ItemId = skin.Id, Count = 1, FirstObtainedAt = now });
+        wallet.Roster = System.Text.Json.JsonSerializer.Serialize(
+            team.Select(t => t is null ? null : new RosterSlotDto(CapsuleItemKind.SKIN, t.Id)).ToList(), RosterJson);
+        return true;
     }
 
     private void Normalize(CapsuleWallet wallet)

@@ -183,7 +183,17 @@ function item(kind, id) {
   return { key: `SKIN:${id}`, kind, id, name: s.name, sub: c.name, rarity: s.rarity, champ: c, legacy: s.legacy,
     art: `${DD}/loading/${c.alias}_${s.num}.jpg`, splash: `${DD}/splash/${c.alias}_${s.num}.jpg`, fb: s.load ? CD + s.load : null, lines: s.lines };
 }
-const fromKey = (key) => { const [k, id] = key.split(':'); return item(k, +id); };
+/** Champion prêté par la rotation de la semaine : jouable sans le posséder, rareté Commune (sans bonus de rareté). */
+function loanItem(id) {
+  const it = item('CHAMPION', id);
+  return it && { ...it, key: `LOAN:${id}`, loan: true, rarity: 'COMMON', sub: 'Prêt de la semaine' };
+}
+const fromKey = (key) => { const [k, id] = key.split(':'); return k === 'LOAN' ? loanItem(+id) : item(k, +id); };
+/** Objet d'un poste de roster (prêt compris). */
+const slotItem = (s) => (s ? (s.loan ? loanItem(s.itemId) : item(s.kind, s.itemId)) : null);
+const rotationIds = () => new Set(S.rotation?.championIds || []);
+/** Fin de la rotation (lundi minuit, heure de Paris) : « à la fin du dimanche 22 novembre ». */
+const fmtWeekEnd = (iso) => `à la fin du ${new Date(new Date(iso).getTime() - 1).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Paris' })}`;
 
 // Image de secours CommunityDragon quand Data Dragon n'a pas l'écran de chargement.
 document.addEventListener('error', (e) => {
@@ -696,7 +706,7 @@ function setType(type) {
 
 // ---------- Roster et amis ----------
 const ROLES = ['Top', 'Jungle', 'Mid', 'Bot', 'Support'];
-const keyOf = (slot) => (slot ? `${slot.kind}:${slot.itemId}` : null);
+const keyOf = (slot) => (slot ? (slot.loan ? `LOAN:${slot.itemId}` : `${slot.kind}:${slot.itemId}`) : null);
 
 function renderRoster() {
   const friend = S.friend;
@@ -708,11 +718,11 @@ function renderRoster() {
   $('#team-tabs').innerHTML = editable ? S.teams.map((t, i) => `<button type="button" role="tab" data-team="${i}" aria-selected="${i === S.activeTeam}"
     title="${i === S.activeTeam ? 'Équipe active (touche pour renommer)' : 'Jouer avec cette équipe'}">${esc(t.name)}</button>`).join('') : '';
   $('#roster').innerHTML = ROLES.map((role, i) => {
-    const it = slots[i] && item(slots[i].kind, slots[i].itemId);
+    const it = slotItem(slots[i]);
     const tag = editable ? 'button' : 'div';
     const fit = it ? fitOf(it.champ, i) : 0;
     return `<${tag} class="slot${it ? ` filled r-${it.rarity}` : ''}" ${editable ? `type="button" data-slot="${i}"` : ''} aria-label="${role}${it ? ` : ${esc(it.name)}, ${LABEL[it.rarity]}, ${fitLabel(fit).toLowerCase()}` : ''}">
-      ${it ? `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt=""><span class="shade"></span><b>${esc(it.name)}</b><span class="rar" title="${LABEL[it.rarity]}"></span>
+      ${it ? `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt=""><span class="shade"></span><b>${esc(it.name)}</b><span class="rar" title="${LABEL[it.rarity]}"></span>${it.loan ? '<span class="slot-loan" title="Champion prêté par la rotation de la semaine">Prêt</span>' : ''}
         ${it.champ.profile ? `<span class="slot-fit ${fit > 0 ? 'up' : 'down'}" title="${fitLabel(fit)}">${signed(fit)} %</span>` : ''}${metaTag(it.champ, 'slot-meta')}`
         : `<span class="plus">${editable ? '+' : '—'}</span>`}
       <span class="role">${role}</span></${tag}>`;
@@ -733,7 +743,7 @@ function metaOf(c) {
   return Math.round((m - 1) * 100);
 }
 const metaTag = (c, cls = 'meta-tag') => { const m = metaOf(c); return m ? `<span class="${cls} ${m > 0 ? 'up' : 'down'}" title="Patch de la semaine">${m > 0 ? '▲' : '▼'} ${signed(m)} %</span>` : ''; };
-const rosterItems = (slots) => slots.map((s) => (s ? item(s.kind, s.itemId) : null));
+const rosterItems = (slots) => slots.map(slotItem);
 
 /** Puissance comme au combat : rareté, poste, gamme commune et champion en double. */
 function teamPower(its) {
@@ -795,8 +805,10 @@ function coachHTML(slots) {
 function showSlotPicker(index) {
   const current = keyOf(S.roster[index]);
   const used = new Set(S.roster.map(keyOf).filter((k) => k && k !== current));
-  const taken = new Set(S.roster.map((s, i) => i !== index && s && item(s.kind, s.itemId)?.champ.id).filter(Boolean));
-  const items = [...S.owned.keys()].map(fromKey).filter((it) => it && !used.has(it.key))
+  const taken = new Set(S.roster.map((s, i) => i !== index && slotItem(s)?.champ.id).filter(Boolean));
+  // Rotation : champions prêtés, hors ceux déjà possédés (la version possédée est Exaltée).
+  const loans = [...rotationIds()].filter((id) => !S.owned.has(`CHAMPION:${id}`)).map(loanItem);
+  const items = [...S.owned.keys()].map(fromKey).concat(loans).filter((it) => it && !used.has(it.key))
     .sort((a, b) => fitOf(b.champ, index) - fitOf(a.champ, index) || rank(b.rarity) - rank(a.rarity) || a.name.localeCompare(b.name, 'fr'));
   const groups = [
     { fit: FIT.main, title: 'Poste principal', note: '+12 %' },
@@ -807,6 +819,7 @@ function showSlotPicker(index) {
   openSheet(`<div class="picker">
     <h2>Poste ${ROLES[index]}</h2>
     <p class="muted">Les champions faits pour ce poste d'abord. Tous les postes restent ouverts, avec un malus hors poste.</p>
+    ${S.rotation?.championIds.length ? `<p class="pick-rotation"><b>Rotation de la semaine</b> ${S.rotation.championIds.length} champions prêtés à tous, marqués « Prêt » : rareté Commune, sans bonus de rareté. Ils repartent ${fmtWeekEnd(S.rotation.endsAt)}.</p>` : ''}
     ${items.length ? `<input type="search" id="pick-search" placeholder="Rechercher dans ta collection" autocomplete="off">` : ''}
     ${current ? `<button class="btn ghost small" data-pick-clear="${index}">Retirer du poste</button>` : ''}
     ${items.length ? groups.map((g) => `<section class="pick-group">
@@ -826,7 +839,7 @@ function showSlotPicker(index) {
 
 function pickCard(it, index, { selected = false, best = false, dup = false } = {}) {
   const p = it.champ.profile;
-  const tags = `<span class="pick-tags">${best ? '<span class="pick-best">Conseillé</span>' : ''}${dup ? '<span class="pick-dup">Déjà pris</span>' : ''}${metaTag(it.champ)}
+  const tags = `<span class="pick-tags">${it.loan ? '<span class="pick-loan">Prêt</span>' : ''}${best ? '<span class="pick-best">Conseillé</span>' : ''}${dup ? '<span class="pick-dup">Déjà pris</span>' : ''}${metaTag(it.champ)}
     ${p ? `<span class="ptag" style="--pc:${CURVE[p.curve].color}">${CURVE[p.curve].label}</span><span class="ptag">${STYLE[p.style].label}</span>` : ''}</span>`;
   return cardHTML(it, { count: 0 }).replace('class="card ', `class="card pick${selected ? ' selected' : ''}${dup ? ' dup' : ''} `)
     .replace(`data-key="${it.key}"`, `data-key="${it.key}" data-pick="${it.key}" data-slot-index="${index}"`)
@@ -834,8 +847,8 @@ function pickCard(it, index, { selected = false, best = false, dup = false } = {
 }
 
 async function setSlot(index, key) {
-  const slots = S.roster.map((s) => (s ? { kind: s.kind, itemId: s.itemId } : null));
-  slots[index] = key ? (([kind, id]) => ({ kind, itemId: +id }))(key.split(':')) : null;
+  const slots = S.roster.map((s) => (s ? { kind: s.kind, itemId: s.itemId, loan: !!s.loan } : null));
+  slots[index] = key ? (([kind, id]) => (kind === 'LOAN' ? { kind: 'CHAMPION', itemId: +id, loan: true } : { kind, itemId: +id }))(key.split(':')) : null;
   await saveRoster(slots);
 }
 
@@ -940,7 +953,7 @@ function friendHTML(p) {
     <button class="friend-main" data-profile="${p.userId}" type="button">
       ${avatarHTML(p)}
       <span class="who"><b>${esc(p.displayName)}</b><span>${p.riotId ? esc(p.riotId) + ' · ' : ''}${p.owned} objets · ${pct}%</span></span>
-      <span class="mini-roster">${p.roster.map((s) => { const it = s && item(s.kind, s.itemId); return it ? `<img loading="lazy" class="r-${it.rarity}" src="${esc(it.art)}" alt="">` : '<i></i>'; }).join('')}</span>
+      <span class="mini-roster">${p.roster.map((s) => { const it = slotItem(s); return it ? `<img loading="lazy" class="r-${it.rarity}" src="${esc(it.art)}" alt="">` : '<i></i>'; }).join('')}</span>
     </button>
     ${p.added ? `<button class="icon-btn" data-unfriend="${p.userId}" aria-label="Retirer ${esc(p.displayName)}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`
       : `<button class="btn small" data-befriend="${p.userId}">Ajouter</button>`}
@@ -1136,7 +1149,7 @@ const clsIcon = (c, extra = '') => (CLASS[c]
   ? `<svg class="cls ${extra}" style="--cc:${CLASS[c].color}" viewBox="0 0 24 24" role="img" aria-label="${CLASS[c].label}"><use href="#cls-${c}"/></svg>` : '');
 const signed = (n) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0');
 const fitLabel = (f) => (f >= 10 ? 'Poste principal' : f > 0 ? 'Poste secondaire' : f < 0 ? 'Hors poste' : 'Neutre');
-const unitItem = (u) => (S.cat ? item(u.kind, u.itemId) : null);
+const unitItem = (u) => (!S.cat ? null : u.kind === 'CHAMPION' && u.rarity && u.rarity !== 'EXALTED' ? loanItem(u.itemId) : item(u.kind, u.itemId));
 const unitImg = (u) => { const it = unitItem(u); return it ? `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt="">` : ''; };
 
 function fmtWait(ms) {
@@ -1188,7 +1201,7 @@ function renderArenaHead() {
   const pct = s.nextTierAt ? Math.min(100, Math.max(0, ((a.rating - s.tierFloor) / span) * 100)) : 100;
   const next = Object.keys(TIER)[Object.keys(TIER).indexOf(s.tier) + 1];
   const extras = $('#arena-extras');
-  if (extras) extras.innerHTML = eventBanner(a.event) + passHTML(a.pass);
+  if (extras) extras.innerHTML = rookieBanner(a) + eventBanner(a.event) + passHTML(a.pass);
   $('#arena-season').innerHTML = `<div class="season-top">${S.user ? avatarHTML({ ...S.user, frame: a.frame, legend: a.legend }) : ''}${tierBadge(s.tier)}<span class="muted">Saison ${s.number} · fin dans ${daysLeft(s.endsAt)}</span></div>
     <div class="tier-bar" style="--tc:${TIER[s.tier].color}"><i style="width:${pct}%"></i></div>
     <span class="tier-next">${s.nextTierAt ? `${TIER[next].label} à ${s.nextTierAt} pts · encore ${s.nextTierAt - a.rating}` : 'Palier maximal atteint'}</span>`;
@@ -1197,13 +1210,25 @@ function renderArenaHead() {
   $('#reward-pips').innerHTML = Array.from({ length: a.rewardedPerDay }, (_, i) => `<i class="${i < a.rewardedToday ? 'on' : ''}${i % 2 ? ' pair' : ''}"></i>`).join('');
   const left = a.rewardedPerDay - a.rewardedToday;
   $('#reward-text').innerHTML = left > 0
-    ? `<b>+${a.winEssence}</b> essence par victoire · encore <b>${left}</b> aujourd'hui`
+    ? `<b>+${a.winEssence}</b> essence par victoire${a.catchUpPercent ? ` <span class="catchup" title="Bonus de rattrapage : ta collection est encore petite">dont +${a.catchUpPercent} % rattrapage</span>` : ''} · encore <b>${left}</b> aujourd'hui`
     : 'Essence du jour empochée · la cote compte toujours';
 }
 
 const fmtInt = (n) => Number(n || 0).toLocaleString('fr-FR');
 const rewardText = (r) => [r.essence && `${r.essence} essence`, r.standard && `${r.standard} relique${r.standard > 1 ? 's' : ''}`,
   r.premium && `${r.premium} prestige`, r.legend && 'cadre Légende'].filter(Boolean).join(' + ');
+
+// ---------- Arène des recrues ----------
+/** Bandeau des recrues : adversaires à collection proche, fin à la date ou au nombre d'attaques. */
+function rookieBanner(a) {
+  const r = a.rookie;
+  if (!r) return '';
+  const day = new Date(r.endsAt).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Paris' });
+  return `<div class="rookie-banner"><span class="kicker">Arène des recrues</span>
+    <b>Tu affrontes des joueurs à ta mesure</b>
+    <span>Hors amis, tes adversaires ont une collection proche de la tienne, et les joueurs confirmés ne peuvent pas te défier.
+    Fin ${day} ou dans ${r.battlesLeft} attaque${r.battlesLeft > 1 ? 's' : ''}, au premier des deux.</span></div>`;
+}
 
 // ---------- Événements du week-end ----------
 function eventBanner(e) {
@@ -1398,8 +1423,8 @@ function foeHTML(o) {
     : wait > 0 ? `<span class="cta wait">${fmtWait(wait)}</span>` : '<span class="cta">Défier</span>';
   return `<button class="foe${o.revenge ? ' hot' : ''}" data-foe="${p.userId}" type="button">
     ${avatarHTML(p)}
-    <span class="who"><b>${esc(p.displayName)}</b><span>${o.rating} pts${o.friend ? ' · ami' : ''}</span></span>
-    <span class="mini-roster">${p.roster.map((s) => { const it = s && S.cat && item(s.kind, s.itemId); return it ? `<img loading="lazy" class="r-${it.rarity}" src="${esc(it.art)}" alt="">` : '<i></i>'; }).join('')}</span>
+    <span class="who"><b>${esc(p.displayName)}${o.rookie ? ' <span class="foe-rookie">Recrue</span>' : ''}</b><span>${o.rating} pts${o.friend ? ' · ami' : ''}</span></span>
+    <span class="mini-roster">${p.roster.map((s) => { const it = S.cat && slotItem(s); return it ? `<img loading="lazy" class="r-${it.rarity}" src="${esc(it.art)}" alt="">` : '<i></i>'; }).join('')}</span>
     ${status}
   </button>`;
 }
@@ -2146,8 +2171,7 @@ const TUTO = [
 const tuto = { i: 0, x: 0 };
 
 function tutoRoster() {
-  const slots = S.arena?.team?.units ?? S.roster.map((s) => s && { kind: s.kind, itemId: s.itemId });
-  const arts = slots.map((s) => s && S.cat && item(s.kind, s.itemId));
+  const arts = S.arena?.team?.units ? S.arena.team.units.map(unitItem) : S.roster.map((s) => S.cat && slotItem(s));
   return `<div class="ta-roster">${ROLES.map((r, i) => `<span class="ta-card${arts[i] ? ` r-${arts[i].rarity}` : ''}" style="--i:${i}">
     ${arts[i] ? `<img src="${esc(arts[i].art)}" alt="">` : ''}<em>${r}</em></span>`).join('')}</div>
     <div class="ta-vs">VS</div>`;
@@ -2578,6 +2602,7 @@ function applyCollection(coll) {
   S.roster = coll.roster;
   S.teams = coll.teams || [];
   S.activeTeam = coll.activeTeam || 0;
+  S.rotation = coll.rotation || null;
 }
 
 function renderAll() {

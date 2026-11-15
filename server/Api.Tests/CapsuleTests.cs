@@ -90,6 +90,8 @@ public class CapsuleFlowTests
 
         var state = await http.GetFromJsonAsync<CapsuleStateDto>("/api/v1/capsules/state", ApiJson.Options);
         Assert.Equal(3, state!.Available);
+        // Équipe de départ offerte à la création du portefeuille (skins COMMON du catalogue de test).
+        var starter = (await http.GetFromJsonAsync<CollectionResponse>("/api/v1/capsules/collection", ApiJson.Options))!.Items.Sum(i => i.Count);
 
         var opened = await (await http.PostAsJsonAsync("/api/v1/capsules/open", new { count = 3 }))
             .EnsureSuccessStatusCode().Content.ReadFromJsonAsync<OpenCapsulesResponse>(ApiJson.Options);
@@ -102,7 +104,7 @@ public class CapsuleFlowTests
         Assert.Equal(1, state!.Available);
 
         var collection = await http.GetFromJsonAsync<CollectionResponse>("/api/v1/capsules/collection", ApiJson.Options);
-        Assert.Equal(3, collection!.Items.Sum(i => i.Count));
+        Assert.Equal(3 + starter, collection!.Items.Sum(i => i.Count));
         Assert.Equal(3, collection.Recent.Count);
     }
 
@@ -253,7 +255,9 @@ public class CapsuleFlowTests
         Assert.True(bobFriends![0].Added);
 
         var player = await alice.GetFromJsonAsync<PlayerCollectionDto>($"/api/v1/capsules/players/{card.UserId}", ApiJson.Options);
-        Assert.Equal(3, player!.Items.Sum(i => i.Count));
+        var bobCollection = (await bob.GetFromJsonAsync<CollectionResponse>("/api/v1/capsules/collection", ApiJson.Options))!;
+        Assert.Equal(3, bobCollection.Recent.Count);
+        Assert.Equal(bobCollection.Items.Sum(i => i.Count), player!.Items.Sum(i => i.Count));
         Assert.Equal(player.Items.Count, player.Player.Owned);
 
         (await alice.DeleteAsync($"/api/v1/capsules/friends/{card.UserId}")).EnsureSuccessStatusCode();

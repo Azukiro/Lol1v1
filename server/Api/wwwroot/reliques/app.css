@@ -481,6 +481,13 @@ button.slot:active { transform: scale(.97); }
 .pick-best, .pick-dup { font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 3px 6px; border-radius: 6px; }
 .pick-best { background: var(--cyan); color: #04121a; }
 .pick-dup { background: rgba(255, 51, 102, .85); color: #fff; }
+.pick-loan { font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 3px 6px; border-radius: 6px;
+  background: var(--violet); color: #0d0820; }
+.pick-rotation { margin: 0; padding: 10px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.45; color: var(--muted);
+  background: color-mix(in srgb, var(--violet) 10%, transparent); border: 1px solid color-mix(in srgb, var(--violet) 35%, transparent); }
+.pick-rotation b { display: block; color: var(--violet); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 2px; }
+.slot-loan { position: absolute; bottom: 36px; left: 50%; translate: -50% 0; z-index: 3; padding: 1px 6px; border-radius: 5px; font-size: 9px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; background: var(--violet); color: #0d0820; white-space: nowrap; }
 
 /* Éditeur d'équipe : bonus de poste et analyse de la compo */
 .slot-fit { position: absolute; top: 20px; left: 50%; translate: -50% 0; z-index: 3; padding: 1px 5px; border-radius: 5px; font-size: 9.5px; font-weight: 700;
@@ -1172,3 +1179,13 @@ button.lrow:hover, button.lrow:focus-visible { border-color: var(--line-2); }
 .pf-rival.down { border-color: rgba(255, 51, 102, .35); }
 .pf-actions { display: grid; gap: 8px; padding-top: 4px; }
 .preview > [data-profile] { justify-self: start; }
+
+/* Arène des recrues et rattrapage d'essence */
+.rookie-banner { display: grid; gap: 4px; padding: 12px 14px; border-radius: 12px; margin-bottom: 10px;
+  background: color-mix(in srgb, var(--green) 9%, transparent); border: 1px solid color-mix(in srgb, var(--green) 35%, transparent); }
+.rookie-banner .kicker { color: var(--green); }
+.rookie-banner b { font-size: 14px; }
+.rookie-banner span:last-child { font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.foe .who .foe-rookie { font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 2px 5px; border-radius: 5px;
+  background: var(--green); color: #04140b; vertical-align: 2px; margin-left: 4px; }
+.catchup { color: var(--green); font-weight: 600; }

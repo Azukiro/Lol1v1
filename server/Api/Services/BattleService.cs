@@ -28,6 +28,16 @@ public sealed class BattleOptions
     public int WinEssence { get; set; }
     /// <summary>Après une attaque, la même cible n'est réattaquable qu'après sa riposte ou ce délai.</summary>
     public int RematchHours { get; set; } = 24;
+    /// <summary>Arène des recrues : jours depuis l'inscription et attaques lancées avant de rejoindre l'arène commune.</summary>
+    public int RookieDays { get; set; } = 7;
+    public int RookieBattles { get; set; } = 20;
+    /// <summary>Une recrue n'affronte (hors amis) que des collections d'au plus ce nombre d'objets de plus que la sienne.</summary>
+    public int RookieCollectionGap { get; set; } = 30;
+    /// <summary>Rattrapage d'essence : ×CatchUpLowMult sous CatchUpLowShare du catalogue possédé, ×CatchUpMidMult sous CatchUpMidShare.</summary>
+    public double CatchUpLowShare { get; set; } = 0.05;
+    public double CatchUpLowMult { get; set; } = 2;
+    public double CatchUpMidShare { get; set; } = 0.10;
+    public double CatchUpMidMult { get; set; } = 1.5;
     public string TimeZone { get; set; } = "Europe/Paris";
     /// <summary>Compte de test : le battre ne vaut rien, perdre contre lui affiche une étiquette moqueuse (vide = désactivé).</summary>
     public string ShameAccount { get; set; } = "AmiTest";
@@ -51,7 +61,7 @@ public sealed record ShameForced(string Player, string UntilSeason);
 /// essence plafonnée à quelques victoires par jour ; la cote (Elo) compte toujours.
 /// </summary>
 public sealed class BattleService(
-    AppDbContext db, CapsuleCatalogService catalogs, CapsuleLocks locks, PushService push, RelicSocialService social, TimeProvider clock,
+    AppDbContext db, CapsuleCatalogService catalogs, CapsuleLocks locks, PushService push, RelicSocialService social, RotationService rotation, TimeProvider clock,
     Microsoft.Extensions.Options.IOptions<BattleOptions> options, Microsoft.Extensions.Options.IOptions<CapsuleOptions> capsuleOptions,
     ILogger<BattleService> logger)
 {
@@ -82,22 +92,34 @@ public sealed class BattleService(
         var ratings = await db.BattleProfiles.Where(p => ready.Contains(p.UserId)).ToDictionaryAsync(p => p.UserId, p => p.Rating);
         int RatingOf(Guid id) => ratings.GetValueOrDefault(id, _o.StartRating);
         var friendSet = friends.ToHashSet();
-        var ids = ready.Where(friendSet.Contains)
-            .Concat(ready.Where(id => !friendSet.Contains(id)).OrderBy(id => Math.Abs(RatingOf(id) - rating)).Take(SuggestionCount))
-            .ToList();
+        // Arène des recrues : une recrue affronte des collections proches de la sienne ; un vétéran ne voit pas les recrues (hors amis).
+        var rookies = await RookiesAsync([.. ready, userId], now);
+        var amRookie = rookies.Contains(userId);
+        var owned = await OwnedCountsAsync([.. ready, userId]);
+        int OwnedOf(Guid id) => owned.GetValueOrDefault(id);
+        bool InReach(Guid id) => Newcomers.RookieMatch(OwnedOf(userId), OwnedOf(id), _o.RookieCollectionGap);
+        var strangers = ready.Where(id => !friendSet.Contains(id)).ToList();
+        IEnumerable<Guid> suggested = amRookie
+            ? strangers.Where(InReach)
+                .OrderBy(id => Math.Abs(OwnedOf(id) - OwnedOf(userId))).ThenBy(id => Math.Abs(RatingOf(id) - rating))
+                // Arène des recrues trop vide : complétée par les plus petites collections.
+                .Concat(strangers.Where(id => !InReach(id)).OrderBy(OwnedOf))
+            : strangers.Where(id => !rookies.Contains(id)).OrderBy(id => Math.Abs(RatingOf(id) - rating));
+        var ids = ready.Where(friendSet.Contains).Concat(suggested.Take(SuggestionCount)).ToList();
 
         var cards = await social.CardsAsync(ids, friendSet);
         var recent = await RecentPairsAsync(userId, ids, now);
         var opponents = ids.Where(cards.ContainsKey).Select(id =>
         {
             var (availableAt, revenge) = Availability(userId, recent.GetValueOrDefault(id));
-            return new ArenaOpponentDto(cards[id], RatingOf(id), friendSet.Contains(id), revenge, availableAt);
+            return new ArenaOpponentDto(cards[id], RatingOf(id), friendSet.Contains(id), revenge, availableAt, rookies.Contains(id));
         })
             .OrderByDescending(o => o.Revenge).ThenBy(o => o.AvailableAt is not null).ThenByDescending(o => o.Friend).ThenByDescending(o => o.Rating)
             .ToList();
 
         var (dayStart, dayEnd) = Today(now);
         var rewarded = await db.RelicBattles.CountAsync(b => b.AttackerId == userId && b.Essence > 0 && b.CreatedAt >= dayStart);
+        var catchUp = CatchUp(catalog, OwnedOf(userId));
         var ranked = profile is { } p && p.Wins + p.Losses > 0;
         var last = await db.SeasonResults.Where(r => r.UserId == userId && !r.Seen).OrderByDescending(r => r.SeasonId).FirstOrDefaultAsync();
         var seasonId = SeasonId(now);
@@ -105,14 +127,48 @@ public sealed class BattleService(
         BossResultDto? lastBoss = boss is null ? null : new(boss.WeekId, Boss.NameOf(boss.WeekId), boss.Rank,
             await db.BossScores.CountAsync(b => b.WeekId == boss.WeekId), boss.Best, boss.RewardStandard, boss.RewardPremium);
         return new ArenaDto(rating, profile?.Wins ?? 0, profile?.Losses ?? 0, ranked ? await RankAsync(profile!) : null,
-            rewarded, _o.RewardedWinsPerDay, WinEssence * (ev?.EssenceMultiplier ?? 1), dayEnd, _o.RematchHours,
+            rewarded, _o.RewardedWinsPerDay, WinEssenceFor(ev, catchUp), dayEnd, _o.RematchHours,
             team is not null, team is null ? null : BattleRules.Analyze(team, LineNames(catalog)), opponents,
             new SeasonDto(seasonId, Seasons.Number(seasonId), SeasonEnd(now), Seasons.TierOf(rating), Seasons.Floor(rating), Seasons.NextThreshold(rating),
                 profile?.PeakRating ?? rating),
             last is null ? null : ToDto(last) with { Players = await db.SeasonResults.CountAsync(r => r.SeasonId == last.SeasonId) },
             profile?.SeasonTier, PassOf(profile), EventDto(ArenaEvents.CurrentOrNext(Local(now))),
-            profile?.Legend ?? false, lastBoss);
+            profile?.Legend ?? false, lastBoss,
+            amRookie ? await RookieDtoAsync(userId, now) : null, (int)Math.Round((catchUp - 1) * 100));
     }
+
+    // ---------- Accueil des nouveaux : arène des recrues et rattrapage d'essence ----------
+
+    /// <summary>Recrues parmi <paramref name="ids"/> (<see cref="Newcomers.IsRookie"/>).</summary>
+    private async Task<HashSet<Guid>> RookiesAsync(List<Guid> ids, DateTimeOffset now)
+    {
+        var since = now - TimeSpan.FromDays(_o.RookieDays);
+        var fresh = await db.Users.Where(u => ids.Contains(u.Id) && u.CreatedAt > since).Select(u => new { u.Id, u.CreatedAt }).ToListAsync();
+        if (fresh.Count == 0) return [];
+        var freshIds = fresh.Select(u => u.Id).ToList();
+        var attacks = await db.RelicBattles.Where(b => freshIds.Contains(b.AttackerId)).GroupBy(b => b.AttackerId)
+            .Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count);
+        return fresh.Where(u => Newcomers.IsRookie(u.CreatedAt, attacks.GetValueOrDefault(u.Id), now, _o.RookieDays, _o.RookieBattles))
+            .Select(u => u.Id).ToHashSet();
+    }
+
+    private async Task<RookieDto> RookieDtoAsync(Guid userId, DateTimeOffset now)
+    {
+        var createdAt = await db.Users.Where(u => u.Id == userId).Select(u => u.CreatedAt).FirstAsync();
+        var attacks = await db.RelicBattles.CountAsync(b => b.AttackerId == userId);
+        return new RookieDto(createdAt + TimeSpan.FromDays(_o.RookieDays), Math.Max(0, _o.RookieBattles - attacks), _o.RookieCollectionGap);
+    }
+
+    private async Task<Dictionary<Guid, int>> OwnedCountsAsync(List<Guid> ids) =>
+        await db.CollectionItems.Where(c => ids.Contains(c.UserId)).GroupBy(c => c.UserId)
+            .Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count);
+
+    /// <summary>Multiplicateur de rattrapage (<see cref="Newcomers.CatchUp"/>) : part du catalogue (champions et skins) possédée.</summary>
+    private double CatchUp(CapsuleCatalog catalog, int owned) => Newcomers.CatchUp(owned, catalog.Champions.Count + catalog.Skins.Count,
+        _o.CatchUpLowShare, _o.CatchUpLowMult, _o.CatchUpMidShare, _o.CatchUpMidMult);
+
+    /// <summary>Essence d'une victoire payée : base, événement du week-end, puis rattrapage.</summary>
+    private int WinEssenceFor(ArenaEvent? ev, double catchUp) => (int)Math.Round(WinEssence * (ev?.EssenceMultiplier ?? 1) * catchUp);
 
     private static PassDto PassOf(BattleProfile? p) => new(p?.PassXp ?? 0, p?.PassLevel ?? 0, SeasonPass.XpPerLevel, SeasonPass.MaxLevel,
         SeasonPass.Rewards, SeasonPass.AttackWinXp, SeasonPass.AttackLossXp, SeasonPass.DefenseWinXp, SeasonPass.BossXp);
@@ -172,9 +228,14 @@ public sealed class BattleService(
 
         var (mine, theirs) = await TeamsAsync(catalog, userId, opponentId, (await CurrentMetaAsync(catalog)).Changes);
         var now = clock.GetUtcNow();
-        var (availableAt, _) = Availability(userId, (await RecentPairsAsync(userId, [opponentId], now)).GetValueOrDefault(opponentId));
+        var (availableAt, revenge) = Availability(userId, (await RecentPairsAsync(userId, [opponentId], now)).GetValueOrDefault(opponentId));
         if (availableAt is { } at)
             throw new AppException($"Tu as déjà attaqué ce joueur : attends sa riposte, ou {Wait(at - now)}.", 409);
+        // Arène des recrues : un vétéran n'attaque une recrue que si elle est son amie, ou pour riposter.
+        var rookies = await RookiesAsync([userId, opponentId], now);
+        if (rookies.Contains(opponentId) && !rookies.Contains(userId) && !revenge
+            && !await db.RelicFriends.AnyAsync(f => f.UserId == userId && f.FriendId == opponentId))
+            throw new AppException("Ce joueur est encore une recrue : seuls ses amis peuvent le défier.", 409);
 
         var attacker = await GetOrCreateProfileAsync(userId, now);
         var defender = await GetOrCreateProfileAsync(opponentId, now);
@@ -207,7 +268,7 @@ public sealed class BattleService(
             var rewarded = await db.RelicBattles.CountAsync(b => b.AttackerId == userId && b.Essence > 0 && b.CreatedAt >= dayStart);
             if (rewarded < _o.RewardedWinsPerDay && wallet is not null)
             {
-                battle.Essence = WinEssence * (ev?.EssenceMultiplier ?? 1);
+                battle.Essence = WinEssenceFor(ev, CatchUp(catalog, await db.CollectionItems.CountAsync(c => c.UserId == userId)));
                 wallet.Essence += battle.Essence;
             }
         }
@@ -460,8 +521,11 @@ public sealed class BattleService(
         return (mine, theirs);
     }
 
-    /// <summary>Roster → unités de combat, bonus de méta compris ; null si un poste est vide ou un objet absent du catalogue.</summary>
-    private static List<BattleUnit>? Units(CapsuleCatalog catalog, List<RosterSlotDto?> roster, IReadOnlyList<MetaChange> meta)
+    /// <summary>Roster → unités de combat avec la rotation en cours (un prêt sorti de la rotation laisse le poste vide).</summary>
+    private List<BattleUnit>? Units(CapsuleCatalog catalog, List<RosterSlotDto?> roster, IReadOnlyList<MetaChange> meta) =>
+        Units(catalog, roster, meta, rotation.CurrentIds());
+
+    private static List<BattleUnit>? Units(CapsuleCatalog catalog, List<RosterSlotDto?> roster, IReadOnlyList<MetaChange> meta, IReadOnlySet<int> loans)
     {
         var units = new List<BattleUnit>();
         foreach (var slot in roster)
@@ -470,7 +534,12 @@ public sealed class BattleService(
             int championId;
             Rarity rarity;
             int[] lines = [];
-            if (slot.Kind == CapsuleItemKind.CHAMPION) { championId = slot.ItemId; rarity = CapsuleRules.ChampionRarity; }
+            if (slot.Loan)
+            {
+                if (slot.Kind != CapsuleItemKind.CHAMPION || !loans.Contains(slot.ItemId)) return null;
+                (championId, rarity) = (slot.ItemId, Newcomers.LoanRarity);
+            }
+            else if (slot.Kind == CapsuleItemKind.CHAMPION) { championId = slot.ItemId; rarity = CapsuleRules.ChampionRarity; }
             else
             {
                 if (!catalog.SkinById.TryGetValue(slot.ItemId, out var skin)) return null;

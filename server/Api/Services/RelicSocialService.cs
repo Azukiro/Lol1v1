@@ -11,7 +11,7 @@ namespace Api.Services;
 /// Côté social des reliques : roster mis en avant (5 postes), amis suivis et collection d'un autre joueur.
 /// Les collections sont visibles par tout joueur connecté ; la liste d'amis (réciproque) sert de raccourci.
 /// </summary>
-public sealed class RelicSocialService(AppDbContext db)
+public sealed class RelicSocialService(AppDbContext db, RotationService rotation)
 {
     public const int RosterSize = 5;
     public const int MaxFriends = 100;
@@ -47,6 +47,10 @@ public sealed class RelicSocialService(AppDbContext db)
         (await db.CollectionItems.Where(c => c.UserId == userId).Select(c => new { c.Kind, c.ItemId }).ToListAsync())
             .Select(c => (c.Kind, c.ItemId)).ToHashSet();
 
+    /// <summary>Objet possédé, ou champion prêté encore dans la rotation de la semaine.</summary>
+    private bool Allowed(RosterSlotDto s, HashSet<(CapsuleItemKind, int)> owned) =>
+        s.Loan ? s.Kind == CapsuleItemKind.CHAMPION && rotation.CurrentIds().Contains(s.ItemId) : owned.Contains((s.Kind, s.ItemId));
+
     private async Task<CapsuleWallet> WalletAsync(Guid userId) =>
         await db.CapsuleWallets.FirstOrDefaultAsync(w => w.UserId == userId) ?? throw new AppException("Ouvre d'abord une relique.", 409);
 
@@ -61,7 +65,7 @@ public sealed class RelicSocialService(AppDbContext db)
         var owned = await OwnedAsync(userId);
         wallet.Teams = JsonSerializer.Serialize(teams, Json);
         wallet.ActiveTeam = index;
-        wallet.Roster = JsonSerializer.Serialize(teams[index].Slots.Select(s => s is not null && owned.Contains((s.Kind, s.ItemId)) ? s : null).ToList(), Json);
+        wallet.Roster = JsonSerializer.Serialize(teams[index].Slots.Select(s => s is not null && Allowed(s, owned) ? s : null).ToList(), Json);
         await db.SaveChangesAsync();
         return ToDto(wallet);
     }
@@ -86,10 +90,14 @@ public sealed class RelicSocialService(AppDbContext db)
     public async Task<List<RosterSlotDto?>> SetRosterAsync(Guid userId, List<RosterSlotDto?>? slots)
     {
         if (slots is null || slots.Count != RosterSize) throw new AppException($"Le roster compte {RosterSize} postes.");
-        var picked = slots.Where(s => s is not null).Select(s => (s!.Kind, s.ItemId)).ToList();
+        var picked = slots.OfType<RosterSlotDto>().ToList();
         if (picked.Distinct().Count() != picked.Count) throw new AppException("Un même objet ne peut occuper deux postes.");
+        if (picked.Any(s => s.Loan && s.Kind != CapsuleItemKind.CHAMPION)) throw new AppException("Seuls des champions peuvent être prêtés.");
+        if (picked.Any(s => s.Loan && !rotation.CurrentIds().Contains(s.ItemId)))
+            throw new AppException("Ce champion n'est pas (ou plus) dans la rotation de la semaine.");
         var owned = await OwnedAsync(userId);
-        if (picked.Any(p => !owned.Contains(p))) throw new AppException("Seuls les objets de ta collection peuvent aller dans ton roster.");
+        if (picked.Any(s => !Allowed(s, owned)))
+            throw new AppException("Seuls les objets de ta collection (ou les champions de la rotation) peuvent aller dans ton roster.");
 
         var wallet = await WalletAsync(userId);
         var teams = ParseTeams(wallet);

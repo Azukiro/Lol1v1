@@ -6,13 +6,17 @@ namespace Api.Dtos;
 public sealed record AttackRequest(Guid OpponentId);
 
 /// <summary>Adversaire proposé : AvailableAt non nul = déjà attaqué, en attente de sa riposte ou du délai.</summary>
-public sealed record ArenaOpponentDto(PlayerCardDto Player, int Rating, bool Friend, bool Revenge, DateTimeOffset? AvailableAt);
+public sealed record ArenaOpponentDto(PlayerCardDto Player, int Rating, bool Friend, bool Revenge, DateTimeOffset? AvailableAt, bool Rookie = false);
 
 /// <summary>Arène : cote, récompenses du jour, analyse de son roster et adversaires.</summary>
 public sealed record ArenaDto(
     int Rating, int Wins, int Losses, int? Rank, int RewardedToday, int RewardedPerDay, int WinEssence, DateTimeOffset ResetAt,
     int RematchHours, bool RosterReady, TeamReport? Team, List<ArenaOpponentDto> Opponents, SeasonDto Season, SeasonResultDto? LastSeason,
-    Tier? Frame = null, PassDto? Pass = null, ArenaEventDto? Event = null, bool Legend = false, BossResultDto? LastBoss = null);
+    Tier? Frame = null, PassDto? Pass = null, ArenaEventDto? Event = null, bool Legend = false, BossResultDto? LastBoss = null,
+    RookieDto? Rookie = null, int CatchUpPercent = 0);
+
+/// <summary>Arène des recrues : jusqu'à EndsAt au plus tard ou BattlesLeft attaques ; adversaires à au plus CollectionGap objets de plus.</summary>
+public sealed record RookieDto(DateTimeOffset EndsAt, int BattlesLeft, int CollectionGap);
 
 /// <summary>Pass de saison : XP, niveau atteint et récompenses de chaque niveau.</summary>
 public sealed record PassDto(int Xp, int Level, int XpPerLevel, int MaxLevel, IReadOnlyList<PassReward> Rewards,

@@ -12,6 +12,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 
+// Commande d'administration : dotnet run -- reset-password <email> (pas de serveur web).
+if (args is ["reset-password", var resetEmail])
+    return await AdminCommands.ResetPassword(resetEmail);
+// dotnet run -- delete-account <email> : supprime un compte (de test) après confirmation.
+if (args is ["delete-account", var deleteEmail])
+    return await AdminCommands.DeleteAccount(deleteEmail);
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Render fournit le port d'écoute dans PORT.
@@ -76,6 +83,7 @@ builder.Services.AddSingleton<CapsuleCatalogService>();
 builder.Services.AddSingleton<CapsuleLocks>();
 builder.Services.AddSingleton<PushService>();
 builder.Services.AddScoped<CapsuleService>();
+builder.Services.AddSingleton<RotationService>();
 builder.Services.AddScoped<RelicSocialService>();
 builder.Services.Configure<BattleOptions>(builder.Configuration.GetSection("Battles"));
 builder.Services.AddScoped<BattleService>();
@@ -211,5 +219,6 @@ app.MapControllers();
 app.MapHub<SeriesHub>("/hubs/series");
 
 app.Run();
+return 0;
 
 public partial class Program;

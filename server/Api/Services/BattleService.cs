@@ -311,12 +311,14 @@ public sealed class BattleService(
             seasons.Count == 0 ? null : seasons.Max(s => s.Tier), seasons.Count, seasons.Count(s => s.Rank <= 3), seasons.Count(s => s.Rank == 1),
             battles.Count == 0 ? null : battles[0].CreatedAt,
             seasons.Where(s => s.Rank == 1).Select(s => Seasons.Number(s.SeasonId)).OrderBy(n => n).ToList(),
-            shameLosses, shameLosses > 0 ? _o.ShameAccount : null);
+            shameLosses, shameLosses > 0 ? names.GetValueOrDefault(shameId!.Value, _o.ShameAccount) : null);
     }
 
     private async Task<Guid?> ShameIdAsync() =>
         string.IsNullOrWhiteSpace(_o.ShameAccount) ? null
-            : await db.Users.Where(u => u.DisplayName == _o.ShameAccount).Select(u => (Guid?)u.Id).FirstOrDefaultAsync();
+            // Insensible à la casse et aux espaces : « Amitest » ou « AmiTest » désignent le même compte de test.
+            : await db.Users.Where(u => u.DisplayName.Trim().ToLower() == _o.ShameAccount.Trim().ToLower())
+                .Select(u => (Guid?)u.Id).FirstOrDefaultAsync();
 
     /// <summary>Joueurs (parmi <paramref name="ids"/>) battus par le compte de test depuis le début de la saison.</summary>
     private async Task<HashSet<Guid>> ShamedThisSeasonAsync(List<Guid> ids)

@@ -281,6 +281,12 @@ public class BattleProfile
     public int PeakRating { get; set; }
     /// <summary>Palier final de la saison précédente (cadre de l'icône), relevé à la bascule de saison ; null = pas classé.</summary>
     public Api.Domain.Battle.Tier? SeasonTier { get; set; }
+    /// <summary>XP du pass de la saison en cours.</summary>
+    public int PassXp { get; set; }
+    /// <summary>Dernier niveau du pass dont la récompense a été versée.</summary>
+    public int PassLevel { get; set; }
+    /// <summary>Pass terminé : cadre animé « Légende », de la fin du pass jusqu'à la fin de la saison suivante.</summary>
+    public bool Legend { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
@@ -297,8 +303,37 @@ public class SeasonResult
     public Api.Domain.Battle.Tier Tier { get; set; }
     public int RewardStandard { get; set; }
     public int RewardPremium { get; set; }
+    /// <summary>Niveau du pass atteint pendant la saison.</summary>
+    public int PassLevel { get; set; }
     /// <summary>Bilan déjà montré au joueur.</summary>
     public bool Seen { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>Meilleur score d'un joueur contre le boss d'une semaine, puis récompense versée à la fin de la semaine.</summary>
+public class BossScore
+{
+    /// <summary>Semaine ISO du boss, « 2026-W47 ».</summary>
+    public string WeekId { get; set; } = "";
+    public Guid UserId { get; set; }
+    public int Best { get; set; }
+    public int Attempts { get; set; }
+    /// <summary>Jour local (« 2026-11-16 ») des tentatives comptées dans <see cref="DayAttempts"/>.</summary>
+    public string Day { get; set; } = "";
+    public int DayAttempts { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public bool Paid { get; set; }
+    public int Rank { get; set; }
+    public int RewardStandard { get; set; }
+    public int RewardPremium { get; set; }
+    /// <summary>Résultat de fin de semaine déjà montré au joueur.</summary>
+    public bool Seen { get; set; }
+}
+
+/// <summary>Notification déjà envoyée (clé unique : « event:2026-W47 », « revenge:{id} »…), pour ne l'envoyer qu'une fois.</summary>
+public class PushLog
+{
+    public string Key { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; }
 }
 

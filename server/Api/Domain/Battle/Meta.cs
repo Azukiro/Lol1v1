@@ -54,13 +54,16 @@ public static class Meta
         return changes;
     }
 
-    /// <summary>Bonus de méta d'un champion (multiplicateur − 1) : son changement et celui de sa classe principale se cumulent.</summary>
-    public static double Bonus(int championId, ChampionClass? primary, IReadOnlyList<MetaChange> changes)
-    {
-        var champ = changes.FirstOrDefault(c => c.Target == MetaTarget.CHAMPION && c.ChampionId == championId)?.Percent ?? 0;
-        var cls = primary is null ? 0 : changes.FirstOrDefault(c => c.Target == MetaTarget.CLASS && c.Class == primary)?.Percent ?? 0;
-        return (1 + champ / 100.0) * (1 + cls / 100.0) - 1;
-    }
+    /// <summary>
+    /// Bonus de méta d'un champion (multiplicateur − 1) : ses changements et ceux de sa classe principale se cumulent
+    /// (patch de la semaine et événement du week-end).
+    /// </summary>
+    public static double Bonus(int championId, ChampionClass? primary, IReadOnlyList<MetaChange> changes) =>
+        changes.Where(c => (c.Target == MetaTarget.CHAMPION && c.ChampionId == championId) || (c.Target == MetaTarget.CLASS && primary is not null && c.Class == primary))
+            .Aggregate(1.0, (m, c) => m * (1 + c.Percent / 100.0)) - 1;
+
+    /// <summary>Seed stable d'un identifiant (string.GetHashCode change à chaque démarrage).</summary>
+    public static int StableSeed(string s) => s.Aggregate(17, (h, c) => unchecked(h * 31 + c));
 
     public static string ClassName(ChampionClass c) => c switch
     {

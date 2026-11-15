@@ -28,7 +28,7 @@ public sealed record RosterSlotDto(CapsuleItemKind Kind, int ItemId);
 public sealed record RosterRequest(List<RosterSlotDto?> Slots);
 public sealed record PlayerCardDto(
     Guid UserId, string DisplayName, string? RiotId, int? ProfileIconId, int Owned, int TotalOpened, List<RosterSlotDto?> Roster, bool Added, int? AvatarChampionId = null,
-    Api.Domain.Battle.Tier? Frame = null);
+    Api.Domain.Battle.Tier? Frame = null, bool Legend = false);
 public sealed record PlayerCollectionDto(PlayerCardDto Player, List<OwnedItemDto> Items);
 /// <summary>Riot ID / pseudo saisi, ou identifiant d'un joueur déjà affiché (suggestion).</summary>
 public sealed record AddFriendRequest(string? Query, Guid? UserId = null);

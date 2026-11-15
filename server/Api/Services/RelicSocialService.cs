@@ -177,13 +177,14 @@ public sealed class RelicSocialService(AppDbContext db)
         var wallets = await db.CapsuleWallets.Where(w => ids.Contains(w.UserId)).ToDictionaryAsync(w => w.UserId);
         var owned = await db.CollectionItems.Where(c => ids.Contains(c.UserId)).GroupBy(c => c.UserId)
             .Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count);
-        var frames = await db.BattleProfiles.Where(p => ids.Contains(p.UserId) && p.SeasonTier != null).ToDictionaryAsync(p => p.UserId, p => p.SeasonTier);
+        var frames = await db.BattleProfiles.Where(p => ids.Contains(p.UserId) && (p.SeasonTier != null || p.Legend))
+            .ToDictionaryAsync(p => p.UserId, p => new { p.SeasonTier, p.Legend });
         return users.ToDictionary(u => u.Id, u =>
         {
             wallets.TryGetValue(u.Id, out var w);
             return new PlayerCardDto(u.Id, u.DisplayName, u.RiotAccount?.RiotId, u.RiotAccount?.ProfileIconId,
                 owned.GetValueOrDefault(u.Id), w?.TotalOpened ?? 0, ParseRoster(w?.Roster), added.Contains(u.Id), u.AvatarChampionId,
-                frames.GetValueOrDefault(u.Id));
+                frames.GetValueOrDefault(u.Id)?.SeasonTier, frames.GetValueOrDefault(u.Id)?.Legend ?? false);
         });
     }
 }

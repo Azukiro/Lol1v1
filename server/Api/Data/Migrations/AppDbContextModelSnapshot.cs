@@ -65,9 +65,21 @@ namespace Api.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("user_id");
 
+                    b.Property<bool>("Legend")
+                        .HasColumnType("boolean")
+                        .HasColumnName("legend");
+
                     b.Property<int>("Losses")
                         .HasColumnType("integer")
                         .HasColumnName("losses");
+
+                    b.Property<int>("PassLevel")
+                        .HasColumnType("integer")
+                        .HasColumnName("pass_level");
+
+                    b.Property<int>("PassXp")
+                        .HasColumnType("integer")
+                        .HasColumnName("pass_xp");
 
                     b.Property<int>("PeakRating")
                         .HasColumnType("integer")
@@ -106,6 +118,71 @@ namespace Api.Data.Migrations
                         {
                             t.HasCheckConstraint("ck_battle_profile_counts", "rating >= 0 AND wins >= 0 AND losses >= 0");
                         });
+                });
+
+            modelBuilder.Entity("Api.Data.BossScore", b =>
+                {
+                    b.Property<string>("WeekId")
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasColumnName("week_id");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<int>("Best")
+                        .HasColumnType("integer")
+                        .HasColumnName("best");
+
+                    b.Property<string>("Day")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("day");
+
+                    b.Property<int>("DayAttempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("day_attempts");
+
+                    b.Property<bool>("Paid")
+                        .HasColumnType("boolean")
+                        .HasColumnName("paid");
+
+                    b.Property<int>("Rank")
+                        .HasColumnType("integer")
+                        .HasColumnName("rank");
+
+                    b.Property<int>("RewardPremium")
+                        .HasColumnType("integer")
+                        .HasColumnName("reward_premium");
+
+                    b.Property<int>("RewardStandard")
+                        .HasColumnType("integer")
+                        .HasColumnName("reward_standard");
+
+                    b.Property<bool>("Seen")
+                        .HasColumnType("boolean")
+                        .HasColumnName("seen");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("WeekId", "UserId")
+                        .HasName("pk_boss_score");
+
+                    b.HasIndex("Paid")
+                        .HasDatabaseName("ix_boss_score_paid");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_boss_score_user_id");
+
+                    b.ToTable("boss_score", (string)null);
                 });
 
             modelBuilder.Entity("Api.Data.CapsuleDrop", b =>
@@ -424,6 +501,23 @@ namespace Api.Data.Migrations
                         .HasDatabaseName("ix_observation_round_id_reported_by_player_id_type_event_id");
 
                     b.ToTable("observation", (string)null);
+                });
+
+            modelBuilder.Entity("Api.Data.PushLog", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("key");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.HasKey("Key")
+                        .HasName("pk_push_log");
+
+                    b.ToTable("push_log", (string)null);
                 });
 
             modelBuilder.Entity("Api.Data.PushSubscriptionEntity", b =>
@@ -792,6 +886,10 @@ namespace Api.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("losses");
 
+                    b.Property<int>("PassLevel")
+                        .HasColumnType("integer")
+                        .HasColumnName("pass_level");
+
                     b.Property<int>("PeakRating")
                         .HasColumnType("integer")
                         .HasColumnName("peak_rating");
@@ -1086,6 +1184,16 @@ namespace Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_battle_profile_user_user_id");
+                });
+
+            modelBuilder.Entity("Api.Data.BossScore", b =>
+                {
+                    b.HasOne("Api.Data.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_boss_score_user_user_id");
                 });
 
             modelBuilder.Entity("Api.Data.CapsuleDrop", b =>

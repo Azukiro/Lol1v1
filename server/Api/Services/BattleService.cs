@@ -53,8 +53,10 @@ public sealed class BattleService(
     public async Task<ArenaDto> GetArenaAsync(Guid userId)
     {
         await EnsureSeasonAsync();
+        await EnsureBossPayoutAsync();
         var catalog = await catalogs.GetAsync();
         var now = clock.GetUtcNow();
+        var ev = ArenaEvents.Current(Local(now));
         var profile = await db.BattleProfiles.FirstOrDefaultAsync(p => p.UserId == userId);
         var rating = profile?.Rating ?? _o.StartRating;
         var meta = await CurrentMetaAsync(catalog);
@@ -87,12 +89,49 @@ public sealed class BattleService(
         var ranked = profile is { } p && p.Wins + p.Losses > 0;
         var last = await db.SeasonResults.Where(r => r.UserId == userId && !r.Seen).OrderByDescending(r => r.SeasonId).FirstOrDefaultAsync();
         var seasonId = SeasonId(now);
+        var boss = await db.BossScores.Where(b => b.UserId == userId && b.Paid && !b.Seen).OrderByDescending(b => b.WeekId).FirstOrDefaultAsync();
+        BossResultDto? lastBoss = boss is null ? null : new(boss.WeekId, Boss.NameOf(boss.WeekId), boss.Rank,
+            await db.BossScores.CountAsync(b => b.WeekId == boss.WeekId), boss.Best, boss.RewardStandard, boss.RewardPremium);
         return new ArenaDto(rating, profile?.Wins ?? 0, profile?.Losses ?? 0, ranked ? await RankAsync(profile!) : null,
-            rewarded, _o.RewardedWinsPerDay, WinEssence, dayEnd, _o.RematchHours,
+            rewarded, _o.RewardedWinsPerDay, WinEssence * (ev?.EssenceMultiplier ?? 1), dayEnd, _o.RematchHours,
             team is not null, team is null ? null : BattleRules.Analyze(team, LineNames(catalog)), opponents,
             new SeasonDto(seasonId, Seasons.Number(seasonId), SeasonEnd(now), Seasons.TierOf(rating), Seasons.Floor(rating), Seasons.NextThreshold(rating),
                 profile?.PeakRating ?? rating),
-            last is null ? null : ToDto(last), profile?.SeasonTier);
+            last is null ? null : ToDto(last) with { Players = await db.SeasonResults.CountAsync(r => r.SeasonId == last.SeasonId) },
+            profile?.SeasonTier, PassOf(profile), EventDto(ArenaEvents.CurrentOrNext(Local(now))),
+            profile?.Legend ?? false, lastBoss);
+    }
+
+    private static PassDto PassOf(BattleProfile? p) => new(p?.PassXp ?? 0, p?.PassLevel ?? 0, SeasonPass.XpPerLevel, SeasonPass.MaxLevel,
+        SeasonPass.Rewards, SeasonPass.AttackWinXp, SeasonPass.AttackLossXp, SeasonPass.DefenseWinXp, SeasonPass.BossXp);
+
+    private ArenaEventDto EventDto(ArenaEvent e)
+    {
+        var tz = Zone;
+        DateTimeOffset At(DateTime d) => new DateTimeOffset(d, tz.GetUtcOffset(d)).ToUniversalTime();
+        var local = Local(clock.GetUtcNow());
+        return new(e.Id, e.Kind, e.Title, e.Text, At(e.StartsLocal), At(e.EndsLocal), local >= e.StartsLocal && local < e.EndsLocal);
+    }
+
+    /// <summary>
+    /// Verse l'XP du pass et les récompenses des niveaux franchis (dans le portefeuille). Sans portefeuille, rien n'est versé
+    /// et le niveau n'avance pas : les récompenses arriveront au prochain gain.
+    /// </summary>
+    public static List<PassReward> GrantPassXp(BattleProfile p, CapsuleWallet? wallet, int xp)
+    {
+        p.PassXp += xp;
+        if (wallet is null) return [];
+        var level = SeasonPass.LevelOf(p.PassXp);
+        var reached = SeasonPass.Rewards.Where(r => r.Level > p.PassLevel && r.Level <= level).ToList();
+        foreach (var r in reached)
+        {
+            wallet.Essence += r.Essence;
+            wallet.Stored += r.Standard;
+            wallet.PremiumStored += r.Premium;
+            if (r.Legend) p.Legend = true;
+        }
+        p.PassLevel = Math.Max(p.PassLevel, level);
+        return reached;
     }
 
     public async Task<BattlePreviewDto> PreviewAsync(Guid userId, Guid opponentId)
@@ -126,6 +165,8 @@ public sealed class BattleService(
 
         var attacker = await GetOrCreateProfileAsync(userId, now);
         var defender = await GetOrCreateProfileAsync(opponentId, now);
+        var ev = ArenaEvents.Current(Local(now));
+        var wallets = await db.CapsuleWallets.Where(w => w.UserId == userId || w.UserId == opponentId).ToDictionaryAsync(w => w.UserId);
         var seed = CryptoRandom.Instance.Next();
         var outcome = BattleRules.Simulate(mine, theirs, seed, LineNames(catalog));
         var won = outcome.Winner == BattleSide.A;
@@ -146,23 +187,35 @@ public sealed class BattleService(
         battle.AttackerRatingAfter = attacker.Rating;
         battle.DefenderRatingAfter = defender.Rating;
 
+        var wallet = wallets.GetValueOrDefault(userId);
         if (won)
         {
             var (dayStart, _) = Today(now);
             var rewarded = await db.RelicBattles.CountAsync(b => b.AttackerId == userId && b.Essence > 0 && b.CreatedAt >= dayStart);
-            var wallet = await db.CapsuleWallets.FirstOrDefaultAsync(w => w.UserId == userId);
             if (rewarded < _o.RewardedWinsPerDay && wallet is not null)
             {
-                battle.Essence = WinEssence;
-                wallet.Essence += WinEssence;
+                battle.Essence = WinEssence * (ev?.EssenceMultiplier ?? 1);
+                wallet.Essence += battle.Essence;
             }
         }
+        var xp = (won ? SeasonPass.AttackWinXp : SeasonPass.AttackLossXp) * (ev?.XpMultiplier ?? 1);
+        var passRewards = GrantPassXp(attacker, wallet, xp);
+        if (!won) GrantPassXp(defender, wallets.GetValueOrDefault(opponentId), SeasonPass.DefenseWinXp * (ev?.XpMultiplier ?? 1));
+        // Joueurs classés que l'attaquant vient de dépasser (prévenus pour qu'ils reviennent reprendre leur place).
+        var overtaken = attacker.Rating > battle.AttackerRatingBefore
+            ? await db.BattleProfiles.Where(p => p.Wins + p.Losses > 0 && p.UserId != userId && p.UserId != opponentId
+                    && p.Rating >= battle.AttackerRatingBefore && p.Rating < attacker.Rating)
+                .OrderByDescending(p => p.Rating).Take(5).Select(p => new { p.UserId, p.Rating }).ToListAsync()
+            : [];
         db.RelicBattles.Add(battle);
         await db.SaveChangesAsync();
 
         var names = await db.Users.Where(u => u.Id == userId || u.Id == opponentId).ToDictionaryAsync(u => u.Id, u => u.DisplayName);
-        await NotifyDefenderAsync(opponentId, names.GetValueOrDefault(userId, "Un joueur"), !won, battle.DefenderRatingAfter - battle.DefenderRatingBefore);
-        return await ToDtoAsync(battle, outcome);
+        var me = names.GetValueOrDefault(userId, "Un joueur");
+        await NotifyDefenderAsync(opponentId, me, !won, battle.DefenderRatingAfter - battle.DefenderRatingBefore);
+        foreach (var o in overtaken)
+            await NotifyAsync(o.UserId, $"{me} vient de te passer devant", $"Il a {attacker.Rating} pts, toi {o.Rating}. Va lui reprendre ta place !", "overtake");
+        return (await ToDtoAsync(battle, outcome)) with { PassXp = xp, PassRewards = passRewards };
     }
 
     public async Task<List<BattleSummaryDto>> HistoryAsync(Guid userId)
@@ -202,10 +255,11 @@ public sealed class BattleService(
         var titles = (await db.SeasonResults.Where(r => r.Rank == 1 && ids.Contains(r.UserId)).Select(r => new { r.UserId, r.SeasonId }).ToListAsync())
             .GroupBy(r => r.UserId).ToDictionary(g => g.Key, g => g.Select(r => Seasons.Number(r.SeasonId)).OrderBy(n => n).ToList());
         var shamed = await ShamedThisSeasonAsync(ids);
+        var legends = (await db.BattleProfiles.Where(p => p.Legend && ids.Contains(p.UserId)).Select(p => p.UserId).ToListAsync()).ToHashSet();
         LadderEntryDto Entry(BattleProfile p, int rank) =>
             new(rank, p.UserId, users.GetValueOrDefault(p.UserId)?.DisplayName ?? "?", users.GetValueOrDefault(p.UserId)?.RiotAccount?.ProfileIconId,
                 p.Rating, p.Wins, p.Losses, users.GetValueOrDefault(p.UserId)?.AvatarChampionId, p.SeasonTier, titles.GetValueOrDefault(p.UserId),
-                shamed.Contains(p.UserId));
+                shamed.Contains(p.UserId), legends.Contains(p.UserId));
 
         var entries = new List<LadderEntryDto>();
         for (var i = 0; i < top.Count; i++)
@@ -311,7 +365,9 @@ public sealed class BattleService(
             seasons.Count == 0 ? null : seasons.Max(s => s.Tier), seasons.Count, seasons.Count(s => s.Rank <= 3), seasons.Count(s => s.Rank == 1),
             battles.Count == 0 ? null : battles[0].CreatedAt,
             seasons.Where(s => s.Rank == 1).Select(s => Seasons.Number(s.SeasonId)).OrderBy(n => n).ToList(),
-            shameLosses, shameLosses > 0 ? names.GetValueOrDefault(shameId!.Value, _o.ShameAccount) : null);
+            shameLosses, shameLosses > 0 ? names.GetValueOrDefault(shameId!.Value, _o.ShameAccount) : null,
+            seasons.Where(s => s.PassLevel >= SeasonPass.MaxLevel).Select(s => Seasons.Number(s.SeasonId)).OrderBy(n => n).ToList(),
+            profile?.PassLevel ?? 0);
     }
 
     private async Task<Guid?> ShameIdAsync() =>
@@ -340,10 +396,11 @@ public sealed class BattleService(
     private async Task<BattleDto> ToDtoAsync(RelicBattle b, BattleOutcome o)
     {
         var users = await db.Users.Include(u => u.RiotAccount).Where(u => u.Id == b.AttackerId || u.Id == b.DefenderId).ToDictionaryAsync(u => u.Id);
-        var frames = await db.BattleProfiles.Where(p => p.UserId == b.AttackerId || p.UserId == b.DefenderId).ToDictionaryAsync(p => p.UserId, p => p.SeasonTier);
+        var frames = await db.BattleProfiles.Where(p => p.UserId == b.AttackerId || p.UserId == b.DefenderId)
+            .ToDictionaryAsync(p => p.UserId, p => new { p.SeasonTier, p.Legend });
         BattlePlayerDto Player(Guid id, int before, int after) =>
             new(id, users.GetValueOrDefault(id)?.DisplayName ?? "Joueur supprimé", users.GetValueOrDefault(id)?.RiotAccount?.ProfileIconId, before, after,
-                users.GetValueOrDefault(id)?.AvatarChampionId, frames.GetValueOrDefault(id));
+                users.GetValueOrDefault(id)?.AvatarChampionId, frames.GetValueOrDefault(id)?.SeasonTier, frames.GetValueOrDefault(id)?.Legend ?? false);
         return new BattleDto(b.Id, b.CreatedAt,
             Player(b.AttackerId, b.AttackerRatingBefore, b.AttackerRatingAfter), Player(b.DefenderId, b.DefenderRatingBefore, b.DefenderRatingAfter),
             b.AttackerWon, b.Essence, o.Minutes, o.A, o.B, o.Events);
@@ -495,12 +552,15 @@ public sealed class BattleService(
                     {
                         UserId = p.UserId, SeasonId = season.Key, Rating = p.Rating, PeakRating = Math.Max(p.PeakRating, p.Rating),
                         Wins = p.Wins, Losses = p.Losses, Rank = i + 1, Tier = tier, RewardStandard = standard, RewardPremium = premium, CreatedAt = now,
+                        PassLevel = p.PassLevel,
                     });
                     if (wallets.TryGetValue(p.UserId, out var w)) { w.Stored += standard; w.PremiumStored += premium; }
                 }
                 foreach (var p in season)
                 {
                     p.SeasonTier = season.Key == previous && p.Wins + p.Losses > 0 ? Seasons.TierOf(p.Rating) : null;
+                    p.Legend = season.Key == previous && p.PassLevel >= SeasonPass.MaxLevel;
+                    p.PassXp = p.PassLevel = 0;
                     p.Rating = Seasons.SoftReset(p.Rating, _o.StartRating);
                     p.PeakRating = p.Rating;
                     p.Wins = p.Losses = 0;
@@ -521,7 +581,8 @@ public sealed class BattleService(
     private static readonly SemaphoreSlim MetaGate = new(1, 1);
 
     /// <summary>Patch de méta de la semaine (notes de patch).</summary>
-    public async Task<MetaDto> GetMetaAsync() => ToDto(await CurrentMetaAsync(await catalogs.GetAsync()));
+    public async Task<MetaDto> GetMetaAsync() =>
+        ToDto(await CurrentMetaAsync(await catalogs.GetAsync())) with { Event = EventDto(ArenaEvents.CurrentOrNext(Local(clock.GetUtcNow()))) };
 
     /// <summary>
     /// Patch de la semaine en cours, créé au premier passage de la semaine à partir des rosters complets du moment
@@ -548,7 +609,10 @@ public sealed class BattleService(
             }
             finally { MetaGate.Release(); }
         }
-        return patch is null ? (new MetaPatch { Id = id }, []) : (patch, JsonSerializer.Deserialize<List<MetaChange>>(patch.Changes, Json) ?? []);
+        // Méta folle du week-end : ses changements s'ajoutent au patch (sans être enregistrés avec lui).
+        var extra = ArenaEvents.Current(local)?.Changes ?? [];
+        return patch is null ? (new MetaPatch { Id = id }, [.. extra])
+            : (patch, [.. JsonSerializer.Deserialize<List<MetaChange>>(patch.Changes, Json) ?? [], .. extra]);
     }
 
     private async Task<MetaPatch> CreateMetaAsync(CapsuleCatalog catalog, string id, DateTime local, TimeZoneInfo tz)
@@ -575,8 +639,7 @@ public sealed class BattleService(
         return patch;
     }
 
-    /// <summary>Seed stable d'un identifiant (string.GetHashCode change à chaque démarrage).</summary>
-    private static int StableSeed(string s) => s.Aggregate(17, (h, c) => unchecked(h * 31 + c));
+    private static int StableSeed(string s) => Meta.StableSeed(s);
 
     private static MetaDto ToDto((MetaPatch Patch, List<MetaChange> Changes) m) =>
         new(m.Patch.Id, m.Patch.Number, m.Patch.StartsAt, m.Patch.EndsAt, m.Changes);
@@ -591,7 +654,7 @@ public sealed class BattleService(
     }
 
     private static SeasonResultDto ToDto(SeasonResult r) =>
-        new(r.SeasonId, Seasons.Number(r.SeasonId), r.Rating, r.PeakRating, r.Wins, r.Losses, r.Rank, r.Tier, r.RewardStandard, r.RewardPremium);
+        new(r.SeasonId, Seasons.Number(r.SeasonId), r.Rating, r.PeakRating, r.Wins, r.Losses, r.Rank, r.Tier, r.RewardStandard, r.RewardPremium, r.PassLevel);
 
     private const string ShareAlphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -616,8 +679,201 @@ public sealed class BattleService(
         return await ToDtoAsync(battle, JsonSerializer.Deserialize<BattleOutcome>(battle.Result, Json)!);
     }
 
+    // ---------- Boss de la semaine ----------
+
+    private string WeekId(DateTimeOffset now) => Meta.IdOf(Local(now));
+
+    private DateTimeOffset WeekEnd(DateTimeOffset now)
+    {
+        var tz = Zone;
+        var end = Meta.WeekStart(Local(now)).AddDays(7);
+        return new DateTimeOffset(end, tz.GetUtcOffset(end)).ToUniversalTime();
+    }
+
+    /// <summary>
+    /// Équipe du boss : un champion par poste (poste principal, tiré au sort avec le seed de la semaine), rareté maximale,
+    /// bonus de puissance <see cref="Boss.PowerBonus"/> en plus de la méta.
+    /// </summary>
+    private static List<BattleUnit>? BossUnits(CapsuleCatalog catalog, string weekId, IReadOnlyList<MetaChange> meta)
+    {
+        var rng = new Random(StableSeed(weekId + ":boss-team"));
+        var pool = catalog.Champions.OrderBy(c => c.Id).Select(c =>
+        {
+            var classes = (c.Roles ?? []).Select(BattleRules.ParseClass).OfType<ChampionClass>().ToArray();
+            return (Champ: c, Classes: classes, Profile: Profiles.For(c.Alias, classes));
+        }).OrderBy(_ => rng.Next()).ToList();
+        var units = new List<BattleUnit>();
+        for (var role = 0; role < BattleRules.TeamSize; role++)
+        {
+            var pick = pool.FirstOrDefault(c => c.Profile?.Main == role && units.All(u => u.ChampionId != c.Champ.Id));
+            if (pick.Champ is null) pick = pool.FirstOrDefault(c => units.All(u => u.ChampionId != c.Champ.Id));
+            if (pick.Champ is null) return null;
+            var talent = Talents.For(pick.Champ.Alias, pick.Classes, pick.Champ.Spells?.Select(sp => (sp.Name, sp.Icon)).ToList());
+            var bonus = (1 + Meta.Bonus(pick.Champ.Id, pick.Classes.Length > 0 ? pick.Classes[0] : null, meta)) * (1 + Boss.PowerBonus) - 1;
+            units.Add(new BattleUnit(CapsuleItemKind.CHAMPION, pick.Champ.Id, pick.Champ.Name, pick.Champ.Id, Rarity.EXALTED, pick.Classes, [], talent,
+                pick.Profile, bonus));
+        }
+        return units;
+    }
+
+    public async Task<BossDto> GetBossAsync(Guid userId)
+    {
+        await EnsureBossPayoutAsync();
+        var catalog = await catalogs.GetAsync();
+        var now = clock.GetUtcNow();
+        var weekId = WeekId(now);
+        var meta = (await CurrentMetaAsync(catalog)).Changes;
+        var boss = BossUnits(catalog, weekId, meta) ?? throw new AppException("Le boss se prépare, reviens dans un instant.", 503);
+        var mine = Units(catalog, await social.GetRosterAsync(userId), meta);
+        var names = LineNames(catalog);
+        var (mineReport, bossReport) = mine is null ? (null, BattleRules.Analyze(boss, names)) : BattleRules.Analyze(mine, boss, names);
+
+        var scores = await db.BossScores.Where(b => b.WeekId == weekId).OrderByDescending(b => b.Best).ThenBy(b => b.UpdatedAt).ToListAsync();
+        var ids = scores.Take(20).Select(b => b.UserId).ToList();
+        var users = await db.Users.Include(u => u.RiotAccount).Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id);
+        var top = scores.Take(20).Select((b, i) => new BossEntryDto(i + 1, b.UserId, users.GetValueOrDefault(b.UserId)?.DisplayName ?? "?",
+            users.GetValueOrDefault(b.UserId)?.RiotAccount?.ProfileIconId, users.GetValueOrDefault(b.UserId)?.AvatarChampionId, b.Best, b.Attempts)).ToList();
+        var mineScore = scores.FirstOrDefault(b => b.UserId == userId);
+        var today = Local(now).ToString("yyyy-MM-dd");
+        var used = mineScore is { } m && m.Day == today ? m.DayAttempts : 0;
+        return new BossDto(weekId, Boss.NameOf(weekId), WeekEnd(now), bossReport, mineReport, Math.Max(0, Boss.AttemptsPerDay - used), Boss.AttemptsPerDay,
+            Today(now).End, mineScore?.Best, mineScore is null ? null : scores.IndexOf(mineScore) + 1, top, Boss.KillPoints, Boss.TowerPoints, Boss.WinPoints);
+    }
+
+    /// <summary>Tentative contre le boss : ne compte pas pour la cote ; le meilleur score de la semaine est gardé, XP de pass à la clé.</summary>
+    public async Task<BattleDto> AttackBossAsync(Guid userId)
+    {
+        await EnsureBossPayoutAsync();
+        var catalog = await catalogs.GetAsync();
+        using var l = await locks.AcquireAsync(userId);
+        var now = clock.GetUtcNow();
+        var weekId = WeekId(now);
+        var meta = (await CurrentMetaAsync(catalog)).Changes;
+        var boss = BossUnits(catalog, weekId, meta) ?? throw new AppException("Le boss se prépare, reviens dans un instant.", 503);
+        var mine = Units(catalog, await social.GetRosterAsync(userId), meta)
+            ?? throw new AppException("Complète ton roster (5 postes) pour affronter le boss.", 409);
+
+        var today = Local(now).ToString("yyyy-MM-dd");
+        var score = await db.BossScores.FirstOrDefaultAsync(b => b.WeekId == weekId && b.UserId == userId);
+        if (score is null) db.BossScores.Add(score = new BossScore { WeekId = weekId, UserId = userId, Day = today });
+        if (score.Day != today) (score.Day, score.DayAttempts) = (today, 0);
+        if (score.DayAttempts >= Boss.AttemptsPerDay)
+            throw new AppException($"Plus de tentative aujourd'hui ({Boss.AttemptsPerDay} par jour) : reviens demain.", 409);
+
+        var seed = CryptoRandom.Instance.Next();
+        var outcome = BattleRules.Simulate(mine, boss, seed, LineNames(catalog));
+        var points = Boss.Score(outcome);
+        score.DayAttempts++;
+        score.Attempts++;
+        if (points > score.Best) (score.Best, score.UpdatedAt) = (points, now);
+        else if (score.UpdatedAt == default) score.UpdatedAt = now;
+
+        var profile = await GetOrCreateProfileAsync(userId, now);
+        var ev = ArenaEvents.Current(Local(now));
+        var xp = SeasonPass.BossXp * (ev?.XpMultiplier ?? 1);
+        var rewards = GrantPassXp(profile, await db.CapsuleWallets.FirstOrDefaultAsync(w => w.UserId == userId), xp);
+        await db.SaveChangesAsync();
+
+        var user = await db.Users.Include(u => u.RiotAccount).FirstAsync(u => u.Id == userId);
+        var me = new BattlePlayerDto(userId, user.DisplayName, user.RiotAccount?.ProfileIconId, profile.Rating, profile.Rating, user.AvatarChampionId,
+            profile.SeasonTier, profile.Legend);
+        var them = new BattlePlayerDto(Guid.Empty, Boss.NameOf(weekId), null, 0, 0, boss[BattleRules.Mid].ChampionId);
+        return new BattleDto(Guid.NewGuid(), now, me, them, outcome.Winner == BattleSide.A, 0, outcome.Minutes, outcome.A, outcome.B, outcome.Events,
+            xp, rewards, true, points, score.Best);
+    }
+
+    public async Task MarkBossSeenAsync(Guid userId, string weekId)
+    {
+        var row = await db.BossScores.FirstOrDefaultAsync(b => b.UserId == userId && b.WeekId == weekId);
+        if (row is null) return;
+        row.Seen = true;
+        await db.SaveChangesAsync();
+    }
+
+    private static readonly SemaphoreSlim BossGate = new(1, 1);
+
+    /// <summary>Fin de semaine du boss : classement des scores des semaines passées, reliques versées une seule fois.</summary>
+    public async Task EnsureBossPayoutAsync()
+    {
+        var current = WeekId(clock.GetUtcNow());
+        if (!await db.BossScores.AnyAsync(b => !b.Paid && b.WeekId != current)) return;
+        await BossGate.WaitAsync();
+        try
+        {
+            var due = await db.BossScores.Where(b => !b.Paid && b.WeekId != current).ToListAsync();
+            foreach (var week in due.GroupBy(b => b.WeekId))
+            {
+                var all = await db.BossScores.Where(b => b.WeekId == week.Key).OrderByDescending(b => b.Best).ThenBy(b => b.UpdatedAt).ToListAsync();
+                var ids = all.Select(b => b.UserId).ToList();
+                var wallets = await db.CapsuleWallets.Where(w => ids.Contains(w.UserId)).ToDictionaryAsync(w => w.UserId);
+                for (var i = 0; i < all.Count; i++)
+                {
+                    var row = all[i];
+                    if (row.Paid) continue;
+                    var (standard, premium) = Boss.Reward(i + 1);
+                    (row.Rank, row.RewardStandard, row.RewardPremium, row.Paid) = (i + 1, standard, premium, true);
+                    if (wallets.TryGetValue(row.UserId, out var w)) { w.Stored += standard; w.PremiumStored += premium; }
+                }
+            }
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException e)
+        {
+            logger.LogWarning(e, "Récompenses du boss reportées");
+            db.ChangeTracker.Clear();
+        }
+        finally { BossGate.Release(); }
+    }
+
+    // ---------- Notifications planifiées (appelées par CapsuleNotifier) ----------
+
+    /// <summary>Marque une notification comme envoyée ; false si elle l'était déjà.</summary>
+    private async Task<bool> ClaimPushAsync(string key, DateTimeOffset now)
+    {
+        if (await db.PushLogs.AnyAsync(p => p.Key == key)) return false;
+        db.PushLogs.Add(new PushLog { Key = key, CreatedAt = now });
+        try { await db.SaveChangesAsync(); return true; }
+        catch (DbUpdateException) { db.ChangeTracker.Clear(); return false; }
+    }
+
+    /// <summary>
+    /// Début d'événement et nouveau boss (une fois, à partir de 10 h), revanches qui expirent dans moins de 2 h.
+    /// </summary>
+    public async Task NotifyTickAsync(CancellationToken ct = default)
+    {
+        var now = clock.GetUtcNow();
+        var local = Local(now);
+        var subscribed = await db.PushSubscriptions.Select(s => s.UserId).Distinct().ToListAsync(ct);
+
+        if (local.Hour >= 10 && ArenaEvents.Current(local) is { } ev && await ClaimPushAsync($"event:{ev.Id}", now))
+            foreach (var id in subscribed) await NotifyAsync(id, $"{ev.Title} !", ev.Text, "event");
+
+        var week = Meta.IdOf(local);
+        if (local.Hour >= 10 && await ClaimPushAsync($"boss:{week}", now))
+            foreach (var id in subscribed)
+                await NotifyAsync(id, $"Nouveau boss : {Boss.NameOf(week)}", $"{Boss.AttemptsPerDay} tentatives par jour, les meilleurs dégâts de la semaine gagnent des reliques prestige.", "boss",
+                    "/reliques/?view=arena&tab=boss");
+
+        // Revanches : défenseur battu, sans riposte, fenêtre qui se ferme dans moins de 2 h.
+        var (from, to) = (now - Rematch, now - Rematch + TimeSpan.FromHours(2));
+        var pending = await db.RelicBattles.Where(b => b.AttackerWon && b.CreatedAt > from && b.CreatedAt <= to && subscribed.Contains(b.DefenderId)
+                && !db.RelicBattles.Any(r => r.AttackerId == b.DefenderId && r.DefenderId == b.AttackerId && r.CreatedAt > b.CreatedAt))
+            .Select(b => new { b.Id, b.AttackerId, b.DefenderId }).ToListAsync(ct);
+        var names = await db.Users.Where(u => pending.Select(p => p.AttackerId).Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct);
+        foreach (var b in pending)
+            if (await ClaimPushAsync($"revenge:{b.Id}", now))
+                await NotifyAsync(b.DefenderId, $"Ta revanche contre {names.GetValueOrDefault(b.AttackerId, "ton agresseur")} expire bientôt",
+                    "Moins de 2 h pour lui rendre la monnaie de sa pièce.", "revenge");
+    }
+
     private static string Wait(TimeSpan left) =>
         left.TotalHours >= 1 ? $"reviens dans {Math.Ceiling(left.TotalHours)} h" : $"reviens dans {Math.Max(1, Math.Ceiling(left.TotalMinutes))} min";
+
+    private async Task NotifyAsync(Guid userId, string title, string body, string tag, string url = "/reliques/?view=arena")
+    {
+        try { await push.SendAsync(db, userId, new { title, body, tag, url }); }
+        catch (Exception e) { logger.LogWarning(e, "Notification {Tag} non envoyée", tag); }
+    }
 
     private async Task NotifyDefenderAsync(Guid defenderId, string attackerName, bool defended, int delta)
     {

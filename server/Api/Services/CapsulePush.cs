@@ -88,5 +88,9 @@ public sealed class CapsuleNotifier(IServiceScopeFactory scopes, PushService pus
             }, ct);
         }
         await db.SaveChangesAsync(ct);
+
+        // Arène : événements, nouveau boss, revanches qui expirent.
+        try { await scope.ServiceProvider.GetRequiredService<BattleService>().NotifyTickAsync(ct); }
+        catch (Exception e) when (e is not OperationCanceledException) { logger.LogWarning(e, "Notifications d'arène en échec"); }
     }
 }

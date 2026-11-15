@@ -437,7 +437,7 @@ public class BattleFlowTests
         var battle = await Attack(a, bId);
         Assert.Equal(1000, battle.Attacker.RatingBefore);
         Assert.Equal(battle.AttackerWon ? 16 : -16, battle.Attacker.RatingAfter - 1000);
-        Assert.Equal(battle.AttackerWon ? -8 : 16, battle.Defender.RatingAfter - 1000);
+        Assert.Equal(battle.AttackerWon ? -12 : 16, battle.Defender.RatingAfter - 1000);
         Assert.Equal(battle.AttackerWon ? 75 : 0, battle.Essence);
 
         // Deuxième attaque sur la même cible : refusée tant que B n'a pas riposté.
@@ -494,7 +494,9 @@ public class BattleFlowTests
         var arena = await a.GetFromJsonAsync<ArenaDto>("/api/v1/capsules/arena", ApiJson.Options);
         Assert.Equal(paid.Count, arena!.RewardedToday);
         var state = await a.GetFromJsonAsync<CapsuleStateDto>("/api/v1/capsules/state", ApiJson.Options);
-        Assert.Equal(paid.Count * 75, state!.Essence);
+        // Plus l'essence des niveaux du pass de saison franchis.
+        var passEssence = SeasonPass.Rewards.Where(r => r.Level <= arena.Pass!.Level).Sum(r => r.Essence);
+        Assert.Equal(paid.Count * 75 + passEssence, state!.Essence);
     }
 }
 

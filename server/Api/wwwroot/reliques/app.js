@@ -727,10 +727,10 @@ const primaryClass = (c) => c?.roles?.[0];
 
 /** Bonus de méta d'un champion en % (patch de la semaine, miroir de Meta.Bonus) : son changement et celui de sa classe principale. */
 function metaOf(c) {
-  const changes = S.meta?.changes || [];
-  const champ = changes.find((m) => m.target === 'CHAMPION' && m.championId === c?.id)?.percent || 0;
-  const cls = changes.find((m) => m.target === 'CLASS' && m.class === primaryClass(c)?.toUpperCase())?.percent || 0;
-  return Math.round(((1 + champ / 100) * (1 + cls / 100) - 1) * 100);
+  const cls = primaryClass(c)?.toUpperCase();
+  const m = (S.meta?.changes || []).filter((x) => (x.target === 'CHAMPION' && x.championId === c?.id) || (x.target === 'CLASS' && x.class === cls))
+    .reduce((acc, x) => acc * (1 + x.percent / 100), 1);
+  return Math.round((m - 1) * 100);
 }
 const metaTag = (c, cls = 'meta-tag') => { const m = metaOf(c); return m ? `<span class="${cls} ${m > 0 ? 'up' : 'down'}" title="Patch de la semaine">${m > 0 ? '▲' : '▼'} ${signed(m)} %</span>` : ''; };
 const rosterItems = (slots) => slots.map((s) => (s ? item(s.kind, s.itemId) : null));
@@ -877,14 +877,17 @@ function renameTeam(i) {
 }
 
 function avatarHTML(p) {
-  return `<span class="avatar${p.frame ? ' framed' : ''}"${frameAttrs(p.frame)}>${avatarInner(p)}</span>`;
+  return `<span class="avatar${p.frame || p.legend ? ' framed' : ''}${p.legend ? ' legend' : ''}"${frameAttrs(p.frame, p.legend)}>${avatarInner(p)}</span>`;
 }
 
-/** Cadre de l'icône : palier final du joueur à la saison passée. */
-const frameAttrs = (tier) => (tier ? ` style="--fc:${TIER[tier].color}" title="${TIER[tier].label} la saison passée"` : '');
-function setFrame(el, tier) {
-  el.classList.toggle('framed', !!tier);
-  if (tier) { el.style.setProperty('--fc', TIER[tier].color); el.title = `${TIER[tier].label} la saison passée`; } else { el.style.removeProperty('--fc'); el.removeAttribute('title'); }
+/** Cadre de l'icône : palier final du joueur à la saison passée ; Légende = pass de saison terminé (cadre animé). */
+const LEGEND_COLOR = '#ffd36b';
+const frameTitle = (tier, legend) => [tier && `${TIER[tier].label} la saison passée`, legend && 'Légende : pass de saison terminé'].filter(Boolean).join(' · ');
+const frameAttrs = (tier, legend = false) => (tier || legend ? ` style="--fc:${tier ? TIER[tier].color : LEGEND_COLOR}" title="${frameTitle(tier, legend)}"` : '');
+function setFrame(el, tier, legend = false) {
+  el.classList.toggle('framed', !!(tier || legend));
+  el.classList.toggle('legend', !!legend);
+  if (tier || legend) { el.style.setProperty('--fc', tier ? TIER[tier].color : LEGEND_COLOR); el.title = frameTitle(tier, legend); } else { el.style.removeProperty('--fc'); el.removeAttribute('title'); }
 }
 
 // ---------- Icône de profil : un champion au choix ----------
@@ -986,6 +989,7 @@ function profileTitles(s, collPct) {
   const top = s.rank ? Math.ceil((s.rank / s.ranked) * 100) : null;
   return [
     s.titles && [`Champion de saison ${(s.titleSeasons || []).map((n) => `S${n}`).join(' · ')}`.trim(), 'gold'],
+    s.legendSeasons?.length && [`Légende ${s.legendSeasons.map((n) => `S${n}`).join(' · ')}`, 'gold'],
     s.rank === 1 && ['Numéro 1 du classement', 'gold'],
     s.podiums > s.titles && ['Habitué des podiums', 'gold'],
     top && top <= 10 && s.ranked >= 5 && [`Top ${top} % des joueurs`, 'gold'],
@@ -1002,6 +1006,10 @@ function profileTitles(s, collPct) {
     collPct >= 30 && ['Grand collectionneur', ''],
     games >= 50 && ['Vétéran de l\'arène', ''],
     s.shameLosses && [shameTitle(s.shameAccount, s.shameLosses), 'shame'],
+    s.rank && s.ranked >= 4 && s.rank === s.ranked && ['Lanterne rouge', 'shame'],
+    s.defenseLosses >= 5 && !s.defenseWins && ['Passoire : 0 défense tenue', 'shame'],
+    s.streak <= -5 && [`Série noire (${-s.streak} D)`, 'shame'],
+    games >= 20 && pctOf(s.wins, s.losses) < 35 && ['Abonné aux défaites', 'shame'],
   ].filter(Boolean).concat(games ? [] : [['Talent en devenir', '']]);
 }
 
@@ -1050,7 +1058,7 @@ async function showProfile(userId) {
       ${s.victim || s.nemesis ? sec('Rivalités', `<div class="pf-pair">${rival(s.victim, 'Victime préférée', (r) => `battu ${r.count} fois`, 'up')}
         ${rival(s.nemesis, 'Bête noire', (r) => `${r.count} défaite${r.count > 1 ? 's' : ''} contre`, 'down')}</div>`) : ''}
       ` : `<p class="empty-note">${me ? 'Lance ton premier combat dans l\'arène pour remplir ton palmarès.' : `${esc(p.displayName)} n'a pas encore combattu.`}</p>`}
-      ${sec('Saisons', `<div class="facts">${fact(s.bestTier ? TIER[s.bestTier].label : '—', 'Meilleur palier')}${fact(s.seasonsPlayed, 'Saisons jouées')}${fact(s.podiums, 'Podiums')}
+      ${sec('Saisons', `<div class="facts">${fact(s.bestTier ? TIER[s.bestTier].label : '—', 'Meilleur palier')}${fact(s.seasonsPlayed, 'Saisons jouées')}${fact(s.podiums, 'Podiums')}${fact(`Niv. ${s.passLevel}`, 'Pass de saison')}
         ${fact(`${s.seasonWins} V · ${s.seasonLosses} D`, 'Cette saison')}${fact(s.seasonPeak, 'Pic de la saison')}${fact(s.firstBattleAt ? new Date(s.firstBattleAt).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' }) : '—', 'Dans l\'arène depuis')}</div>`)}
       ${sec('Collection', `<div class="facts">${fact(p.owned, 'Objets')}${fact(`${String(collPct).replace('.', ',')} %`, 'Du catalogue')}${fact(p.totalOpened, 'Reliques ouvertes')}</div>
         ${gem ? `<div class="pf-champ">${`<img loading="lazy" class="r-${gem.rarity}" src="${esc(gem.art)}" ${gem.fb ? `data-fb="${esc(gem.fb)}"` : ''} alt="">`}
@@ -1179,15 +1187,148 @@ function renderArenaHead() {
   const span = s.nextTierAt ? s.nextTierAt - s.tierFloor : 1;
   const pct = s.nextTierAt ? Math.min(100, Math.max(0, ((a.rating - s.tierFloor) / span) * 100)) : 100;
   const next = Object.keys(TIER)[Object.keys(TIER).indexOf(s.tier) + 1];
-  $('#arena-season').innerHTML = `<div class="season-top">${S.user ? avatarHTML({ ...S.user, frame: a.frame }) : ''}${tierBadge(s.tier)}<span class="muted">Saison ${s.number} · fin dans ${daysLeft(s.endsAt)}</span></div>
+  const extras = $('#arena-extras');
+  if (extras) extras.innerHTML = eventBanner(a.event) + passHTML(a.pass);
+  $('#arena-season').innerHTML = `<div class="season-top">${S.user ? avatarHTML({ ...S.user, frame: a.frame, legend: a.legend }) : ''}${tierBadge(s.tier)}<span class="muted">Saison ${s.number} · fin dans ${daysLeft(s.endsAt)}</span></div>
     <div class="tier-bar" style="--tc:${TIER[s.tier].color}"><i style="width:${pct}%"></i></div>
     <span class="tier-next">${s.nextTierAt ? `${TIER[next].label} à ${s.nextTierAt} pts · encore ${s.nextTierAt - a.rating}` : 'Palier maximal atteint'}</span>`;
   if (a.lastSeason && !S.seasonShown) { S.seasonShown = true; showSeasonEnd(a.lastSeason); }
+  else if (a.lastBoss && !S.bossShown && $('#sheet').hidden) { S.bossShown = true; showBossResult(a.lastBoss); }
   $('#reward-pips').innerHTML = Array.from({ length: a.rewardedPerDay }, (_, i) => `<i class="${i < a.rewardedToday ? 'on' : ''}${i % 2 ? ' pair' : ''}"></i>`).join('');
   const left = a.rewardedPerDay - a.rewardedToday;
   $('#reward-text').innerHTML = left > 0
     ? `<b>+${a.winEssence}</b> essence par victoire · encore <b>${left}</b> aujourd'hui`
     : 'Essence du jour empochée · la cote compte toujours';
+}
+
+const fmtInt = (n) => Number(n || 0).toLocaleString('fr-FR');
+const rewardText = (r) => [r.essence && `${r.essence} essence`, r.standard && `${r.standard} relique${r.standard > 1 ? 's' : ''}`,
+  r.premium && `${r.premium} prestige`, r.legend && 'cadre Légende'].filter(Boolean).join(' + ');
+
+// ---------- Événements du week-end ----------
+function eventBanner(e) {
+  if (!e) return '';
+  return `<button type="button" class="event-banner k-${e.kind}${e.active ? ' on' : ''}" data-event>
+    <span class="kicker">${e.active ? 'Événement en cours' : 'Ce week-end'}</span><b>${esc(e.title)}</b>
+    <span class="event-when">${e.active ? `fin dans ${daysLeft(e.endsAt)}` : `dans ${daysLeft(e.startsAt)}`}</span></button>`;
+}
+
+const EVENT_MARK = { DOUBLE_ESSENCE: '×2', DOUBLE_XP: 'XP ×2', CHAOS_META: '?!' };
+
+function showEvent(e) {
+  if (!e) return;
+  const changes = e.kind === 'CHAOS_META' && e.active ? (S.meta?.changes || []).filter((c) => c.reason.startsWith('Événement')) : [];
+  openSheet(`<div class="event-pop k-${e.kind}">
+    <span class="kicker">${e.active ? 'Événement en cours' : 'Prochain événement'}</span>
+    <div class="event-mark">${EVENT_MARK[e.kind]}</div>
+    <h2>${esc(e.title)}</h2><p>${esc(e.text)}</p>
+    ${changes.length ? `<div class="event-changes">${changes.map((c) => `<span class="${c.percent > 0 ? 'up' : 'down'}">${esc(c.name)} ${signed(c.percent)} %</span>`).join('')}</div>` : ''}
+    <p class="muted">${e.active ? `Jusqu'à lundi minuit · fin dans ${daysLeft(e.endsAt)}` : `Du samedi au lundi minuit · dans ${daysLeft(e.startsAt)}`}</p>
+    <button class="btn primary big block" type="button" id="event-go">${e.active ? 'Foncer dans l\'arène' : 'Compris'}</button></div>`);
+  if (e.active) { audio.chime(4); buzz([40, 30, 80]); }
+  $('#event-go').onclick = () => { closeSheet(); if (e.active && S.view !== 'arena') setView('arena'); };
+}
+
+const EVENT_KEY = 'reliques.event.seen';
+
+/** Popup à la première ouverture pendant un événement. */
+async function maybeShowEvent() {
+  const e = S.meta?.event;
+  if (!e?.active || store.get(EVENT_KEY) === e.id || !$('#tuto').hidden || !$('#sheet').hidden) return;
+  store.set(EVENT_KEY, e.id);
+  showEvent(e);
+  while (!$('#sheet').hidden) await sleep(300);
+}
+
+// ---------- Pass de saison ----------
+function passHTML(p) {
+  if (!p) return '';
+  const max = p.level >= p.maxLevel;
+  const into = max ? p.xpPerLevel : p.xp - p.level * p.xpPerLevel;
+  const next = p.rewards.find((r) => r.level === p.level + 1);
+  return `<button type="button" class="pass-strip${max ? ' max' : ''}" data-pass>
+    <span class="pass-lvl"><em>Pass</em><b>${p.level}</b></span>
+    <span class="pass-main"><span class="pass-bar"><i style="width:${Math.min(100, (into / p.xpPerLevel) * 100)}%"></i></span>
+      <span class="pass-next">${max ? 'Pass terminé : tu es une Légende' : `${into} / ${p.xpPerLevel} XP · niv. ${p.level + 1} : ${rewardText(next)}`}</span></span></button>`;
+}
+
+function showPass() {
+  const a = S.arena; const p = a?.pass; if (!p) return;
+  openSheet(`<div class="pass-sheet"><span class="kicker">Saison ${a.season.number} · fin dans ${daysLeft(a.season.endsAt)}</span>
+    <h2>Pass de saison</h2>
+    <p class="muted">Victoire en attaque +${p.attackWinXp} XP, défaite +${p.attackLossXp}, défense tenue +${p.defenseWinXp}, boss +${p.bossXp}.
+      ${p.xpPerLevel} XP par niveau, chaque niveau paie tout de suite. ${a.event?.active && a.event.kind === 'DOUBLE_XP' ? '<b>Double XP ce week-end !</b>' : ''}</p>
+    <ol class="pass-track">${p.rewards.map((r) => `<li class="${r.level <= p.level ? 'done' : r.level === p.level + 1 ? 'next' : ''}${r.legend ? ' legend' : ''}">
+      <b>${r.level}</b><span>${rewardText(r)}</span>${r.level <= p.level ? '<em>Obtenu</em>' : r.level === p.level + 1 ? `<em>${p.xp - p.level * p.xpPerLevel} / ${p.xpPerLevel}</em>` : ''}</li>`).join('')}</ol>
+    <p class="muted">Niveau ${p.maxLevel} : cadre animé « Légende » jusqu'à la fin de la saison suivante, et le titre Légende sur ton profil, pour toujours. Le pass repart à zéro à chaque saison.</p></div>`);
+}
+
+function showLevelUp(rewards) {
+  const top = rewards[rewards.length - 1];
+  openSheet(`<div class="levelup${top.legend ? ' legend' : ''}"><span class="kicker">Pass de saison</span>
+    <div class="lvl-badge"><em>Niveau</em><b>${top.level}</b></div>
+    <h2>${top.legend ? 'Tu es une Légende !' : 'Niveau atteint !'}</h2>
+    <ul class="lvl-rewards">${rewards.map((r) => `<li><b>Niv. ${r.level}</b><span>${rewardText(r)}</span></li>`).join('')}</ul>
+    ${top.legend ? '<p class="muted">Cadre animé débloqué jusqu\'à la fin de la saison prochaine. Flex autorisé.</p>' : ''}
+    <button class="btn primary big block" type="button" id="lvl-ok">Récupérer</button></div>`);
+  audio.chime(top.legend ? 6 : 4); buzz([60, 40, 120]);
+  $('#lvl-ok').onclick = async () => { closeSheet(); try { setWallet(await api('/capsules/state')); saveSnapshot(); } catch { /* le stock suivra */ } };
+}
+
+// ---------- Boss de la semaine ----------
+async function renderBoss() {
+  const body = $('#arena-body');
+  if (!S.boss) body.innerHTML = '<p class="empty-note">Le boss arrive…</p>';
+  try {
+    const b = S.boss = await api('/capsules/boss');
+    if (S.arenaTab !== 'boss') return;
+    body.innerHTML = bossHTML(b);
+    $('#boss-go').onclick = attackBoss;
+  } catch (e) { body.innerHTML = `<p class="empty-note">${esc(e.message)}</p>`; }
+}
+
+function bossHTML(b) {
+  const units = b.team.units.map((u) => `<div class="boss-unit r-${u.rarity}">${unitImg(u)}<span class="role">${ROLES[u.role]}</span><b>${esc(u.champion)}</b></div>`).join('');
+  const rows = b.top.map((e) => `<button type="button" class="lrow${e.userId === S.user?.id ? ' me' : ''}${e.rank <= 3 ? ` podium p${e.rank}` : ''}" data-profile="${e.userId}">
+    <span class="rank">${e.rank}</span>${avatarHTML(e)}
+    <span class="who"><b>${esc(e.displayName)}${e.userId === S.user?.id ? ' (toi)' : ''}</b><span>${e.attempts} tentative${e.attempts > 1 ? 's' : ''}</span></span>
+    <b class="pts">${fmtInt(e.best)}</b></button>`).join('');
+  const wait = Date.parse(b.resetAt) - now();
+  return `<section class="boss">
+    <div class="boss-head"><span class="kicker">Boss de la semaine · fin dans ${daysLeft(b.endsAt)}</span><h2>${esc(b.name)}</h2>
+      <p class="muted">Équipe Exaltée gonflée à +35 %. Fais un max de dégâts : ${b.killPoints} par kill, ${b.towerPoints} par tour, ${fmtInt(b.winPoints)} si tu le bats. Ton meilleur score compte.</p></div>
+    <div class="boss-units">${units}</div>
+    <div class="boss-me"><div><span class="kicker">Ton record</span><b>${b.myBest != null ? fmtInt(b.myBest) : '—'}</b><span>${b.myRank ? `#${b.myRank} cette semaine` : 'pas encore classé'}</span></div>
+      <div><span class="kicker">Tentatives</span><b>${b.attemptsLeft} / ${b.attemptsPerDay}</b><span>aujourd'hui</span></div></div>
+    <button class="btn primary big block" id="boss-go" type="button" ${b.attemptsLeft && b.mine ? '' : 'disabled'}>${!b.mine ? 'Complète ton roster d\'abord' : b.attemptsLeft ? 'Attaquer le boss' : `Nouvelles tentatives ${fmtWait(wait)}`}</button>
+    <p class="muted boss-rewards">Lundi : 1er +3 prestige, 2e +2, 3e +1, tous les autres participants +1 relique. Chaque tentative donne de l'XP de pass.</p>
+    <div class="section-head"><h2>Dégâts infligés</h2><span class="muted">${b.top.length} joueur${b.top.length > 1 ? 's' : ''}</span></div>
+    ${rows ? `<div class="ladder">${rows}</div>` : '<p class="empty-note">Personne n\'a encore attaqué : sois le premier.</p>'}
+  </section>`;
+}
+
+async function attackBoss() {
+  const btn = $('#boss-go'); btn.disabled = true; btn.textContent = 'Combat en cours…';
+  try { await playBattle(await api('/capsules/boss/attack', { method: 'POST' })); }
+  catch (e) { toast(e.message, true); renderBoss(); }
+}
+
+function showBossResult(r) {
+  const rewards = [r.rewardStandard && `+${r.rewardStandard} relique${r.rewardStandard > 1 ? 's' : ''}`, r.rewardPremium && `+${r.rewardPremium} prestige`].filter(Boolean).join(' · ');
+  openSheet(`<div class="season-end boss-end"><span class="kicker">Boss de la semaine terminé</span>
+    <h2>${esc(r.name)}</h2>
+    <div class="facts"><div><b>#${r.rank}</b><span>sur ${r.players}</span></div><div><b>${fmtInt(r.best)}</b><span>Dégâts</span></div></div>
+    <p class="season-reward">${rewards ? `<b>${rewards}</b> ajoutées à ton stock` : 'Pas de récompense cette fois.'}</p>
+    <p class="muted">Un nouveau boss t'attend déjà.</p>
+    <button class="btn primary big block" id="boss-ok">${rewards ? 'Récupérer' : 'OK'}</button></div>`);
+  $('#boss-ok').onclick = async () => {
+    closeSheet();
+    try {
+      await api(`/capsules/boss/${encodeURIComponent(r.weekId)}/seen`, { method: 'POST' });
+      setWallet(await api('/capsules/state'));
+      if (rewards) { audio.chime(5); buzz([60, 40, 120]); }
+    } catch (e) { toast(e.message, true); }
+  };
 }
 
 function unitCell(u) {
@@ -1218,6 +1359,7 @@ function renderArenaBody() {
   $$('[data-arena]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.arena === tab)));
   if (tab === 'foes') renderFoes();
   else if (tab === 'ladder') renderLadder();
+  else if (tab === 'boss') renderBoss();
   else renderHistory();
 }
 
@@ -1241,11 +1383,25 @@ function renderFoes() {
 }
 
 function ladderRow(e) {
+  return ladderRowHTML(e);
+}
+
+function ladderTags(e) {
+  const tags = [
+    e.titles?.length && `<em class="ltag champ" title="Champion de saison">Champion ${e.titles.map((n) => `S${n}`).join(' · ')}</em>`,
+    e.legend && '<em class="ltag legend" title="Pass de saison terminé">Légende</em>',
+    e.shamed && `<em class="ltag shame" title="A perdu contre le compte de test cette saison">${shameTag()}</em>`,
+    S.ladderLast && e.rank === S.ladderLast && '<em class="ltag shame" title="Dernier du classement">Lanterne rouge</em>',
+  ].filter(Boolean);
+  return tags.length ? `<span class="ltags">${tags.join('')}</span>` : '';
+}
+
+function ladderRowHTML(e) {
   const mine = e.userId === S.user?.id;
   return `<button type="button" class="lrow${mine ? ' me' : ''}${e.rank <= 3 ? ` podium p${e.rank}` : ''}" data-profile="${e.userId}">
     <span class="rank">${e.rank}</span>${avatarHTML(e)}
     <span class="who"><b>${esc(e.displayName)}${mine ? ' (toi)' : ''}</b><span>${e.wins} V · ${e.losses} D</span>
-      ${e.titles?.length || e.shamed ? `<span class="ltags">${e.titles?.length ? `<em class="ltag champ" title="Champion de saison">Champion ${e.titles.map((n) => `S${n}`).join(' · ')}</em>` : ''}${e.shamed ? `<em class="ltag shame" title="A perdu contre le compte de test cette saison">${shameTag()}</em>` : ''}</span>` : ''}</span>
+      ${ladderTags(e)}</span>
     ${tierBadge(tierOf(e.rating))}<b class="pts">${e.rating}</b></button>`;
 }
 
@@ -1258,6 +1414,7 @@ async function renderLadder() {
     const head = S.arena ? `<div class="ladder-head">${tierBadge(S.arena.season.tier)}<span>Saison ${S.arena.season.number} · fin dans ${daysLeft(S.arena.season.endsAt)}</span></div>` : '';
     if (!l.top.length) { body.innerHTML = `${head}<p class="empty-note">Personne n'a encore combattu cette saison : lance le premier combat !</p>`; return; }
     const meIn = l.me && l.top.some((e) => e.userId === l.me.userId);
+    S.ladderLast = l.top.length >= 4 && l.top.length < 100 ? Math.max(...l.top.map((e) => e.rank)) : null;
     body.innerHTML = `${head}<div class="ladder">${l.top.map(ladderRow).join('')}${l.me && !meIn ? `<div class="lgap">···</div>${ladderRow(l.me)}` : ''}</div>`;
   } catch (e) { body.innerHTML = `<p class="empty-note">${esc(e.message)}</p>`; }
 }
@@ -1717,7 +1874,7 @@ async function playBattle(b, { spectator = false } = {}) {
   const el = $('#battle');
   el.hidden = false; el.className = `battle${spectator ? ' spectator' : ''}`;
   $('#b-me-av').innerHTML = avatarInner(pMe); $('#b-them-av').innerHTML = avatarInner(pThem);
-  setFrame($('#b-me-av'), pMe.frame); setFrame($('#b-them-av'), pThem.frame);
+  setFrame($('#b-me-av'), pMe.frame, pMe.legend); setFrame($('#b-them-av'), pThem.frame, pThem.legend);
   $('#b-me-name').textContent = spectator ? pMe.displayName : mineA ? 'Toi' : 'Toi (défense)'; $('#b-them-name').textContent = pThem.displayName;
   $('#b-share').hidden = true; $('#b-feed').innerHTML = ''; $('#b-end').hidden = true;
   $('#b-announce').hidden = true; $('#b-callout').hidden = true;
@@ -1752,11 +1909,14 @@ async function playBattle(b, { spectator = false } = {}) {
       <img src="${esc(champIcon(u))}" alt=""><span class="pg-name"><b>${esc(u.champion)}</b><em>${ROLES[i]}</em></span>
       ${u.talent?.icon ? `<img class="pg-talent" src="${esc(u.talent.icon)}" alt="" title="${esc(u.talent.spell)}">` : ''}
       <b class="pg-kd">${u.kills} / ${u.deaths}</b></div>`).join('');
-  const title = spectator ? `Victoire de ${(b.attackerWon ? b.attacker : b.defender).displayName}` : won ? 'Victoire' : 'Défaite';
+  const title = spectator ? `Victoire de ${(b.attackerWon ? b.attacker : b.defender).displayName}`
+    : b.boss ? (won ? 'Boss terrassé' : 'Le boss tient bon') : won ? 'Victoire' : 'Défaite';
   $('#b-end').innerHTML = `<div class="pg-title ${spectator || won ? 'win' : 'loss'}">${esc(title)}</div>
     <div class="end-chips">
-      ${spectator ? `<span class="chip">${b.minutes} min</span>` : `<span class="chip ${delta >= 0 ? 'up' : 'down'}">${signed(delta)} pts · ${pMe.ratingAfter}</span>`}
+      ${spectator ? `<span class="chip">${b.minutes} min</span>` : b.boss ? `<span class="chip gold">${fmtInt(b.bossScore)} dégâts${b.bossScore >= b.bossBest ? ' · record' : ''}</span>`
+        : `<span class="chip ${delta >= 0 ? 'up' : 'down'}">${signed(delta)} pts · ${pMe.ratingAfter}</span>`}
       ${!spectator && mineA && b.essence ? `<span class="chip ess">+${b.essence} essence</span>` : ''}
+      ${!spectator && mineA && b.passXp ? `<span class="chip xp">+${b.passXp} XP pass</span>` : ''}
       <span class="chip gold">MVP · ${esc(mvp.champion)}</span></div>
     <div class="pg-board"><div class="pg-team me"><span class="kicker">${esc(spectator ? pMe.displayName : 'Ton équipe')}</span>${rows(mine.units, 'me')}</div>
       <div class="pg-team them"><span class="kicker">${esc(pThem.displayName)}</span>${rows(theirs.units, 'them')}</div></div>
@@ -1768,11 +1928,13 @@ async function playBattle(b, { spectator = false } = {}) {
   if (spectator || won) { audio.chime(5); buzz([60, 40, 120]); } else { audio.tone(150, 0.6, 'sawtooth', 0.08); buzz(90); }
   $('#b-skip').hidden = true; $('#b-speed').hidden = true; $('#b-replay').hidden = false; $('#b-close').hidden = false;
   $('#b-close').textContent = spectator && !S.token ? 'Jouer aussi' : 'Continuer';
-  $('#b-share').hidden = spectator;
+  $('#b-share').hidden = spectator || b.boss;
 }
 
 function closeBattle() {
   $('#battle').hidden = true;
+  const ended = replay.battle;
+  if (!replay.spectator && ended?.passRewards?.length && ended.attacker.userId === S.user?.id) showLevelUp(ended.passRewards);
   const wasSpectator = replay.spectator;
   replay.battle = null; replay.skip = true; replay.wake(); replay.spectator = false;
   if (new URLSearchParams(location.search).has('replay')) history.replaceState(null, '', location.pathname);
@@ -1817,9 +1979,11 @@ function showSeasonEnd(r) {
     <div class="season-crest"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 4 56 14v18c0 14-10 24-24 28C18 56 8 46 8 32V14z"/></svg>${tierBadge(r.tier, true)}</div>
     <div class="facts"><div><b>#${r.rank}</b><span>Rang</span></div><div><b>${r.rating}</b><span>Cote finale</span></div><div><b>${r.wins} V · ${r.losses} D</b><span>Bilan</span></div></div>
     <p class="season-reward">${rewards ? `<b>${rewards}</b> ajoutées à ton stock` : `Joue au moins 5 combats dans une saison pour recevoir des reliques.`}</p>
-    <p class="muted">Nouvelle saison : ta cote repart à mi-chemin de 1000. À toi de grimper !</p>
+    <p class="muted">Nouvelle saison : ta cote repart à mi-chemin de 1000, ton palier final devient ton cadre. À toi de grimper !</p>
     <button class="btn primary big block" id="season-ok">${rewards ? 'Récupérer' : 'C\'est parti'}</button>
+    <button class="btn ghost block" id="season-share" type="button">Partager mon bilan</button>
   </div>`);
+  $('#season-share').onclick = () => shareSeasonCard(r).catch((e) => toast(e.message, true));
   $('#season-ok').onclick = async () => {
     closeSheet();
     try {
@@ -1828,6 +1992,44 @@ function showSeasonEnd(r) {
       if (rewards) { audio.chime(5); buzz([60, 40, 120]); toast(`${rewards} : bonne ouverture !`); }
     } catch (e) { toast(e.message, true); }
   };
+}
+
+/** Image du bilan de saison (1080 × 1350) : partage natif avec fichier, sinon téléchargement. */
+async function shareSeasonCard(r) {
+  const W = 1080, H = 1350;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const tc = TIER[r.tier].color;
+  const font = getComputedStyle(document.documentElement).getPropertyValue('--display').trim() || 'sans-serif';
+  await document.fonts?.ready;
+  const bg = g.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, '#0d1222'); bg.addColorStop(1, '#05070c');
+  g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  const glow = g.createRadialGradient(W / 2, 520, 30, W / 2, 520, 560); glow.addColorStop(0, `${tc}55`); glow.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = glow; g.fillRect(0, 0, W, H);
+  g.textAlign = 'center';
+  g.fillStyle = '#8b95a7'; g.font = `700 40px ${font}`; g.fillText(`RELIQUES · SAISON ${r.number}`, W / 2, 130);
+  g.fillStyle = '#ffffff'; g.font = `700 84px ${font}`; g.fillText((S.user?.displayName || '').toUpperCase(), W / 2, 240, W - 120);
+  g.save(); g.translate(W / 2, 540); g.scale(6, 6); g.translate(-32, -32);
+  const shield = new Path2D('M32 4 56 14v18c0 14-10 24-24 28C18 56 8 46 8 32V14z');
+  g.fillStyle = `${tc}26`; g.fill(shield); g.lineWidth = 1.1; g.strokeStyle = tc; g.stroke(shield); g.restore();
+  g.fillStyle = tc; g.font = `700 96px ${font}`; g.fillText(TIER[r.tier].label.toUpperCase(), W / 2, 575, 300 * 2);
+  const stats = [[`#${r.rank}${r.players ? ` / ${r.players}` : ''}`, 'RANG'], [String(r.rating), 'COTE FINALE'], [`${r.wins} V · ${r.losses} D`, 'BILAN'], [`NIV. ${r.passLevel ?? 0}`, 'PASS DE SAISON']];
+  stats.forEach(([v, l], i) => {
+    const x = i % 2 ? W * 0.72 : W * 0.28, y = 930 + Math.floor(i / 2) * 170;
+    g.fillStyle = '#ffffff'; g.font = `700 76px ${font}`; g.fillText(v, x, y, W / 2 - 60);
+    g.fillStyle = '#8b95a7'; g.font = `700 30px ${font}`; g.fillText(l, x, y + 48);
+  });
+  const quip = r.rank === 1 ? 'CHAMPION DE SAISON. INCLINEZ-VOUS.' : r.rank <= 3 ? 'SUR LE PODIUM. LES AUTRES REGARDENT.'
+    : r.players && r.rank === r.players ? 'LANTERNE ROUGE. ÇA NE PEUT QUE MONTER.' : 'LA SAISON PROCHAINE, C\'EST LA BONNE.';
+  g.fillStyle = tc; g.font = `700 38px ${font}`; g.fillText(quip, W / 2, H - 90, W - 100);
+  const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
+  const file = new File([blob], `reliques-saison-${r.number}.png`, { type: 'image/png' });
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: `Ma saison ${r.number}` }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = file.name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast('Image du bilan téléchargée');
 }
 
 function showUnitTalent(role) {
@@ -2001,23 +2203,29 @@ function setupInstall() {
   $('#install-menu').onclick = () => { $('#menu').hidden = true; showInstall(); };
 }
 
-const NEWS_KEY = 'capsules.news.profiles-v1';
+const NEWS_KEY = 'capsules.news.v3-arena';
 
 async function maybeShowNews() {
   if (store.get(NEWS_KEY) || !$('#tuto').hidden) return;
   store.set(NEWS_KEY, '1');
   openSheet(`<div class="news">
-    <span class="kicker">Nouveau</span>
-    <h2>Profils de joueurs et guide des règles</h2>
-    <div class="news-item"><b>Ton palmarès, visible par tous</b><span>Taux de victoire, meilleure série, kills, ACE, plus bel exploit, champion fétiche, victime préférée et bête noire. Gagne des titres en jouant.</span></div>
-    <div class="news-item"><b>Espionne les autres</b><span>Touche un joueur dans le classement, tes amis ou l'aperçu d'un combat pour ouvrir son profil.</span></div>
-    <div class="news-item"><b>Guide des règles</b><span>Tous les chiffres du moteur de combat : postes, raretés, gammes, méta, contres et talents. Avec une check-list pour maximiser ton équipe.</span></div>
-    <button class="btn primary block" type="button" data-news="profile">Voir mon profil</button>
-    <button class="btn ghost block" type="button" data-news="guide">Lire le guide</button>
+    <span class="kicker">Grosse mise à jour</span>
+    <h2>L'arène passe à la vitesse supérieure</h2>
+    <div class="news-item"><b>Pass de saison</b><span>Chaque combat donne de l'XP. 15 niveaux de reliques, d'essence et de prestige, payés tout de suite. Au bout : un cadre animé Légende.</span></div>
+    <div class="news-item"><b>Boss de la semaine</b><span>Un roster Exalté surpuissant que tout le monde attaque. 3 tentatives par jour, classement des dégâts, prestige pour le podium.</span></div>
+    <div class="news-item"><b>Week-ends en folie</b><span>Double essence, double XP ou méta folle : un événement chaque samedi et dimanche.</span></div>
+    <div class="news-item"><b>Saisons de 2 semaines</b><span>Nouveaux paliers Grand maître et Challenger, plus durs à atteindre. Ton palier final devient le cadre de ton icône pour toute la saison suivante.</span></div>
+    <div class="news-item"><b>3 équipes enregistrées</b><span>Prépare plusieurs compos et change d'équipe en un geste depuis ta collection.</span></div>
+    <div class="news-item"><b>Flex et honte</b><span>Étiquette Champion de saison, titre Légende… et Paillasson d'AmiTest, Lanterne rouge ou Passoire pour les autres. Les notifs te préviennent quand on te passe devant.</span></div>
+    <button class="btn primary block" type="button" data-news="pass">Voir mon pass</button>
+    <button class="btn ghost block" type="button" data-news="boss">Affronter le boss</button>
   </div>`);
-  $$('[data-news]').forEach((b) => (b.onclick = () => {
-    if (b.dataset.news === 'guide') showGuide();
-    else if (S.user) showProfile(S.user.id);
+  $$('[data-news]').forEach((b) => (b.onclick = async () => {
+    closeSheet();
+    S.arenaTab = b.dataset.news === 'boss' ? 'boss' : S.arenaTab;
+    setView('arena');
+    // Le pass s'ouvre après les autres popups du lancement (événement, patch).
+    S.openPassAfter = b.dataset.news === 'pass';
   }));
   // Le popup d'installation attend la fermeture de celui-ci.
   while (!$('#sheet').hidden) await sleep(300);
@@ -2123,6 +2331,9 @@ function showGuide() {
       <li><b>Cote</b> : Elo de facteur 32. À cote égale, ±16. Un défenseur battu perd les trois quarts du gain de l'attaquant.</li>
       <li><b>Essence</b> : 2 victoires en attaque = 1 relique, jusqu'à 4 victoires payées par jour.</li>
       <li><b>Revanche</b> : un seul défi par joueur jusqu'à sa riposte, ou 24 h.</li>
+      <li><b>Pass de saison</b> : victoire en attaque +30 XP, défaite +15, défense tenue +10, boss +20 ; 80 XP par niveau, 15 niveaux payés tout de suite. Le dernier donne le cadre animé Légende.</li>
+      <li><b>Boss de la semaine</b> : 3 tentatives par jour, sans effet sur la cote. 100 par kill, 250 par tour, 3 000 si tu le bats. Le lundi : 1er +3 prestige, 2e +2, 3e +1, les autres +1 relique.</li>
+      <li><b>Week-ends</b> : du samedi au lundi minuit, en rotation : double essence, double XP de pass, méta folle (une classe +15 %, une autre −10 %).</li>
       <li><b>Saisons</b> : deux semaines, du lundi au lundi. Argent 1050, Or 1150, Platine 1250, Diamant 1400, Maître 1550, Grand maître 1700, Challenger 1850. Récompense de palier dès 5 combats, ton palier final devient le cadre de ton icône pour la saison suivante, puis la cote revient à mi-chemin de 1000.</li></ul>`)}
     ${sec('Check-list pour maximiser ton équipe', `<ul class="g-list check">
       <li>Chaque champion à son poste principal (+12 %).</li>
@@ -2312,7 +2523,9 @@ async function start() {
   // Pas encore d'icône : choix imposé avant tout autre popup.
   if (S.online && S.cat && !S.user?.avatarChampionId) await showAvatarPicker(true);
   await maybeShowNews();
+  await maybeShowEvent();
   await maybeShowMeta();
+  if (S.openPassAfter) { S.openPassAfter = false; while (!S.arena) await sleep(200); showPass(); while (!$('#sheet').hidden) await sleep(300); }
   maybePromptInstall();
 }
 
@@ -2356,6 +2569,8 @@ function bind() {
     if (pick) { setSlot(+pick.dataset.slotIndex, pick.dataset.pick); return; }
     const clear = e.target.closest('[data-pick-clear]');
     if (clear) { setSlot(+clear.dataset.pickClear, null); return; }
+    if (e.target.closest('[data-pass]')) { showPass(); return; }
+    if (e.target.closest('[data-event]')) { showEvent(S.arena?.event || S.meta?.event); return; }
     const team = e.target.closest('[data-team]');
     if (team) { selectTeam(+team.dataset.team); return; }
     const slot = e.target.closest('[data-slot]');
@@ -2437,6 +2652,8 @@ function bind() {
     if (!S.token) return;
     if (S.retryStart) { S.retryStart = false; start(); return; }
     api('/capsules/state', { retry: true }).then((w) => { S.online = true; setWallet(w); saveSnapshot(); }).catch(() => {});
+    // Un événement a pu commencer pendant que l'app dormait.
+    loadMeta().then(maybeShowEvent);
   });
 }
 
@@ -2453,5 +2670,6 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { sc
 const params = new URLSearchParams(location.search);
 const startView = params.get('view');
 if (startView === 'collection' || startView === 'arena') S.view = startView;
+if (['foes', 'ladder', 'history', 'boss'].includes(params.get('tab'))) S.arenaTab = params.get('tab');
 if (S.token) { start(); setView(S.view); } else showAuth();
 if (params.get('replay')) openSharedReplay(params.get('replay'));

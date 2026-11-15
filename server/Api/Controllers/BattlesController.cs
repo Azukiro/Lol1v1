@@ -40,6 +40,21 @@ public sealed class BattlesController(BattleService battles) : ControllerBase
         return NoContent();
     }
 
+    [HttpGet("boss")]
+    public Task<BossDto> Boss() => battles.GetBossAsync(User.UserId());
+
+    [HttpPost("boss/attack")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
+    public Task<BattleDto> AttackBoss() => battles.AttackBossAsync(User.UserId());
+
+    [HttpPost("boss/{weekId}/seen")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
+    public async Task<IActionResult> BossSeen(string weekId)
+    {
+        await battles.MarkBossSeenAsync(User.UserId(), weekId);
+        return NoContent();
+    }
+
     [HttpGet("meta")]
     public Task<MetaDto> Meta() => battles.GetMetaAsync();
 

@@ -25,6 +25,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<RelicBattle> RelicBattles => Set<RelicBattle>();
     public DbSet<SeasonResult> SeasonResults => Set<SeasonResult>();
     public DbSet<MetaPatch> MetaPatches => Set<MetaPatch>();
+    public DbSet<BossScore> BossScores => Set<BossScore>();
+    public DbSet<PushLog> PushLogs => Set<PushLog>();
 
     /// <summary>Incrémente le jeton de concurrence des portefeuilles modifiés (stock, essence, roster…).</summary>
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
@@ -208,6 +210,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasKey(x => new { x.UserId, x.SeasonId });
             e.Property(x => x.SeasonId).HasMaxLength(16);
             e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<BossScore>(e =>
+        {
+            e.ToTable("boss_score");
+            e.HasKey(x => new { x.WeekId, x.UserId });
+            e.Property(x => x.WeekId).HasMaxLength(8);
+            e.Property(x => x.Day).HasMaxLength(10);
+            e.HasIndex(x => x.Paid);
+            e.HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<PushLog>(e =>
+        {
+            e.ToTable("push_log");
+            e.HasKey(x => x.Key);
+            e.Property(x => x.Key).HasMaxLength(80);
         });
 
         b.Entity<MetaPatch>(e =>

@@ -41,9 +41,10 @@
   </section>
 
   <!-- Application -->
+  <div class="amb" id="amb" aria-hidden="true"></div>
   <div id="app" class="app" hidden>
     <header class="topbar">
-      <div class="brand"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="#capsule-mini"/></svg><span>Reliques</span></div>
+      <div class="brand"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="#capsule-mini"/></svg><span id="view-title">Reliques</span></div>
       <nav class="tabs" aria-label="Sections">
         <button class="tab" data-view="friends">Club</button>
         <button class="tab" data-view="collection">Collection</button>
@@ -267,9 +268,9 @@
   <!-- Combat rejoué : carte animée façon jeu -->
   <div id="battle" class="battle" hidden role="dialog" aria-modal="true" aria-label="Combat">
     <div class="hud">
-      <div class="hud-side me"><span class="avatar" id="b-me-av"></span><div><b id="b-me-name"></b><span><svg viewBox="0 0 24 24"><use href="#ico-tower"/></svg><i id="b-t-me">0</i> · <i id="b-g-me">0</i>k</span></div></div>
+      <div class="hud-side me"><span class="avatar" id="b-me-av"></span><div><b id="b-me-name"></b><span><svg viewBox="0 0 24 24"><use href="#ico-tower"/></svg><i id="b-t-me">0</i> · <i id="b-g-me">0</i>k<span class="b-buffs" id="b-buffs-me"></span></span></div></div>
       <div class="hud-score"><b id="b-k-me">0</b><span class="clock" id="b-clock">00:00</span><b id="b-k-them">0</b></div>
-      <div class="hud-side them"><div><b id="b-them-name"></b><span><i id="b-g-them">0</i>k · <i id="b-t-them">0</i><svg viewBox="0 0 24 24"><use href="#ico-tower"/></svg></span></div><span class="avatar" id="b-them-av"></span></div>
+      <div class="hud-side them"><div><b id="b-them-name"></b><span><span class="b-buffs" id="b-buffs-them"></span><i id="b-g-them">0</i>k · <i id="b-t-them">0</i><svg viewBox="0 0 24 24"><use href="#ico-tower"/></svg></span></div><span class="avatar" id="b-them-av"></span></div>
     </div>
     <div class="hud-gold"><i id="b-g-fill"></i></div>
 
@@ -287,6 +288,7 @@
       <div class="tactic" id="b-tactic" hidden role="group" aria-label="Décision"></div>
     </div>
 
+    <div class="b-duel" id="b-duel"></div>
     <ol class="killfeed" id="b-feed" aria-live="polite"></ol>
     <div class="postgame" id="b-end" hidden></div>
     <div class="battle-actions">

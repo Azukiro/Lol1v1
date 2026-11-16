@@ -509,18 +509,20 @@ function showSingle(d) {
   const it = item(d.kind, d.itemId);
   const el = $('#reveal-single');
   const more = stockOf() > 0;
+  const queen = isAhriItem(it);
+  $('#reveal').classList.toggle('ahri', queen);
   el.innerHTML = `<div class="summon r-${d.rarity}"><div class="summon-in">
       <div class="summon-back"><svg viewBox="0 0 100 100"><use href="#crystal"/></svg></div>
       <div class="summon-front big-card${more ? ' tappable' : ''}" ${more ? 'role="button" tabindex="0" aria-label="Ouvrir la relique suivante"' : ''}>${cardHTML(it, { isNew: d.isNew, tag: 'div' })}</div>
     </div></div>
-    <div class="summon-after">${starsHTML(d.rarity)}${dropInfo(d, it)}${impactHTML(d, it)}
+    <div class="summon-after">${queen ? starsHTML(d.rarity).replace(/<svg viewBox="0 0 24 24"><path d="M12 2\.5[^"]*"\/><\/svg>/g, HEART_SVG) : starsHTML(d.rarity)}${dropInfo(d, it)}${queen ? '<p class="queen">La reine est arrivée ♡</p>' : ''}${impactHTML(d, it)}
     ${more ? '<p class="tap-again">Touche la carte pour ouvrir la suivante</p>' : ''}</div>`;
   el.hidden = false;
   const sm = $('.summon', el);
   // La carte arrive face cachée, se retourne sur la silhouette, puis la couleur revient.
   requestAnimationFrame(() => sm.classList.add('in'));
   setTimeout(() => { sm.classList.add('turn'); audio.chime(rank(d.rarity)); }, skipper.on ? 0 : 900);
-  setTimeout(() => sm.classList.add('color'), skipper.on ? 150 : 1450);
+  setTimeout(() => { sm.classList.add('color'); if (queen) heartBurst(14); }, skipper.on ? 150 : 1450);
   setTimeout(() => { el.classList.add('done'); showRevealActions(false); }, skipper.on ? 200 : 1650);
   const eq = $('[data-equip]', el);
   if (eq) eq.onclick = async (e) => { e.stopPropagation(); eq.disabled = true; await setSlot(+eq.dataset.equip, eq.dataset.key); eq.textContent = 'Équipé'; toast(`${it.name} rejoint ton équipe en ${ROLES[+eq.dataset.equip]}.`); };
@@ -598,7 +600,19 @@ function showRevealActions(pending) {
   $('#reveal-close').hidden = pending;
 }
 
+/** Gerbe de cœurs depuis le centre (révélation d'Ahri). */
+function heartBurst(n) {
+  const host = $('#sparks'); if (!host || reduceMotion()) return;
+  for (let i = 0; i < n; i++) {
+    const h = document.createElement('span'); h.className = 'hpop'; h.innerHTML = HEART_SVG;
+    const a = (i / n) * Math.PI * 2 + Math.random() * 0.4, r = 110 + Math.random() * 60;
+    h.style.cssText = `--tx:${Math.cos(a) * r}px;--ty:${Math.sin(a) * r}px;--sz:${16 + Math.random() * 14}px;color:${i % 3 ? '#ff8ad8' : '#ffd1ee'};animation-delay:${Math.random() * 0.15}s`;
+    host.appendChild(h); setTimeout(() => h.remove(), 1700);
+  }
+}
+
 function closeReveal() {
+  $('#reveal').classList.remove('ahri');
   $('#reveal').hidden = true; $('#rays').className = 'rays'; $('#reveal-single').classList.remove('done');
   S.busy = false; renderWallet();
 }
@@ -1123,6 +1137,7 @@ async function loadFeed() {
     $('#feed').innerHTML = S.feed.length ? S.feed.map(feedItemHTML).join('')
       : '<p class="empty-note">Rien cette semaine. Les gros tirages et les combats de tes potes apparaîtront ici.</p>';
     if (S.friends) renderStories(S.friends.filter((p) => p.added));
+    if (S.view === 'friends') ambientFor('friends');
   } catch (e) { $('#feed').innerHTML = `<p class="empty-note">${esc(e.message)}</p>`; }
 }
 
@@ -1368,6 +1383,7 @@ async function loadArena({ quiet = false } = {}) {
     renderArenaHead();
     renderArenaTeam();
     renderArenaBody();
+    ambientFor('arena'); animateIn($('#view-arena'));
   } catch (e) { if (!quiet) toast(e.message, true); }
 }
 
@@ -1386,7 +1402,7 @@ function renderArenaHead() {
   const pct = s.nextTierAt ? Math.min(100, Math.max(0, ((a.rating - s.tierFloor) / span) * 100)) : 100;
   const next = Object.keys(TIER)[Object.keys(TIER).indexOf(s.tier) + 1];
   const extras = $('#arena-extras');
-  if (extras) extras.innerHTML = rookieBanner(a) + eventBanner(a.event) + passHTML(a.pass);
+  if (extras) extras.innerHTML = rookieBanner(a) + eventBanner(a.event) + passHTML(a.pass) + shortcutsHTML();
   const tc = TIER[s.tier].color, nc = next ? TIER[next].color : tc;
   $('#arena-hero').style.setProperty('--tc', tc);
   $('#arena-season').innerHTML = `<div class="tier-head" style="--tc:${tc};--nc:${nc}">
@@ -1456,15 +1472,35 @@ async function maybeShowEvent() {
 }
 
 // ---------- Pass de saison ----------
+/** Icône de récompense : relique, prestige, essence ou cadre Légende. */
+function rewardIcon(r) {
+  if (r.legend) return '<svg viewBox="0 0 64 64" class="ri legend"><use href="#emblem"/></svg>';
+  if (r.premium) return '<svg viewBox="0 0 100 100" class="ri prem"><use href="#crystal"/></svg>';
+  if (r.standard) return '<svg viewBox="0 0 100 100" class="ri"><use href="#crystal"/></svg>';
+  return '<svg viewBox="0 0 16 16" class="ri ess"><path d="M8 1 13 8 8 15 3 8z"/></svg>';
+}
+
+/** Piste du pass : quelques niveaux autour du niveau actuel, avec leurs récompenses. */
 function passHTML(p) {
   if (!p) return '';
   const max = p.level >= p.maxLevel;
   const into = max ? p.xpPerLevel : p.xp - p.level * p.xpPerLevel;
-  const next = p.rewards.find((r) => r.level === p.level + 1);
-  return `<button type="button" class="pass-strip${max ? ' max' : ''}" data-pass>
-    <span class="pass-lvl"><em>Pass</em><b>${p.level}</b></span>
-    <span class="pass-main"><span class="pass-bar"><i style="width:${Math.min(100, (into / p.xpPerLevel) * 100)}%"></i></span>
-      <span class="pass-next">${max ? 'Pass terminé : tu es une Légende' : `${into} / ${p.xpPerLevel} XP · niv. ${p.level + 1} : ${rewardText(next)}`}</span></span></button>`;
+  const from = Math.max(1, Math.min(p.level - 1, p.maxLevel - 5));
+  const nodes = p.rewards.filter((r) => r.level >= from && r.level < from + 6);
+  return `<button type="button" class="pass-track2${max ? ' max' : ''}" data-pass>
+    <span class="pt-head"><b>Pass · niveau ${p.level}</b><span class="muted">${max ? 'Terminé : tu es une Légende' : `${into} / ${p.xpPerLevel} XP`}</span></span>
+    <span class="pt-nodes">${nodes.map((r) => `<span class="pt-node${r.level <= p.level ? ' done' : ''}${r.level === p.level + 1 ? ' next' : ''}">
+      <span class="pt-ico">${rewardIcon(r)}</span><em>${r.level}</em></span>`).join('')}</span>
+    <span class="pass-bar"><i style="width:${Math.min(100, (into / p.xpPerLevel) * 100)}%"></i></span></button>`;
+}
+
+/** Raccourcis : boss de la semaine et patch de la semaine. */
+function shortcutsHTML() {
+  const m = S.meta;
+  return `<div class="shortcuts">
+    <button type="button" class="sc" data-arena-go="boss"><svg viewBox="0 0 24 24"><path d="M4 18h16M4 16 3 7l5 4 4-6 4 6 5-4-1 9z"/></svg><span><b>Boss</b><em>de la semaine</em></span></button>
+    ${m?.changes.length ? `<button type="button" class="sc" data-meta-open><svg viewBox="0 0 24 24"><path d="M5 8h13l-4-4M19 16H6l4 4"/></svg><span><b>Patch ${m.number}</b><em>${m.changes.length} changements</em></span></button>` : ''}
+  </div>`;
 }
 
 function showPass() {
@@ -1592,9 +1628,12 @@ function renderArenaTeam() {
       <button class="btn primary small" data-goto="collection">Compléter mon roster</button></div>`;
     return;
   }
-  el.innerHTML = `<div class="section-head"><h2>Ton équipe</h2><span class="power">${riskHTML(a.team)} Puissance <b>${a.team.power}</b></span></div>
-    <div class="units">${a.team.units.map(unitCell).join('')}</div>
-    <div class="team-foot">${synergyHTML(a.team.synergies)}<button class="btn ghost small" data-goto="collection">Modifier</button></div>`;
+  el.innerHTML = `<div class="team-strip">
+      <div class="ts-head"><b>Ton équipe</b>${riskHTML(a.team)}<span class="ts-pow">Puissance <b class="num">${a.team.power}</b></span></div>
+      <div class="ts-row">${a.team.units.map((u) => `<button type="button" class="ts-unit r-${u.rarity}" data-unit="${u.role}" aria-label="${esc(u.champion)}">${unitImg(u)}<span class="ts-role">${ROLES[u.role]}</span></button>`).join('')}</div>
+      <div class="team-foot">${synergyHTML(a.team.synergies)}<button class="btn small" type="button" id="arena-compose">Composer</button></div>
+    </div>`;
+  $('#arena-compose').onclick = () => showComposer(0);
 }
 
 function renderArenaBody() {
@@ -1663,7 +1702,12 @@ async function renderLadder() {
     if (!l.top.length) { body.innerHTML = `${head}<p class="empty-note">Personne n'a encore combattu cette saison : lance le premier combat !</p>`; return; }
     const meIn = l.me && l.top.some((e) => e.userId === l.me.userId);
     S.ladderLast = l.top.length >= 4 && l.top.length < 100 ? Math.max(...l.top.map((e) => e.rank)) : null;
-    body.innerHTML = `${head}<div class="ladder">${l.top.map(ladderRow).join('')}${l.me && !meIn ? `<div class="lgap">···</div>${ladderRow(l.me)}` : ''}</div>`;
+    const pod = l.top.slice(0, 3);
+    const podium = pod.length >= 3 ? `<div class="podium">${[pod[1], pod[0], pod[2]].map((e) => `<button type="button" class="pd p${e.rank}" data-profile="${e.userId}">
+        ${e.rank === 1 ? '<svg class="crown" viewBox="0 0 24 24"><path d="M4 18h16M4 16 3 7l5 4 4-6 4 6 5-4-1 9z"/></svg>' : ''}
+        <span class="pd-av" style="--tc:${TIER[tierOf(e.rating)].color}">${avatarInner(e)}</span><b>${esc(e.displayName)}</b><span class="pd-pts">${fmtInt(e.rating)}</span><i>${e.rank}</i></button>`).join('')}</div>` : '';
+    const rest = podium ? l.top.slice(3) : l.top;
+    body.innerHTML = `${head}${podium}<div class="ladder">${rest.map(ladderRow).join('')}${l.me && !meIn ? `<div class="lgap">···</div>${ladderRow(l.me)}` : ''}</div>`;
   } catch (e) { body.innerHTML = `<p class="empty-note">${esc(e.message)}</p>`; }
 }
 
@@ -1750,16 +1794,18 @@ async function openFoe(id) {
       <span class="kicker">Aperçu du combat</span>
       <h2>Toi contre ${esc(p.opponent.displayName)}</h2>
       <button class="btn ghost small" type="button" data-profile="${id}">Voir son profil</button>
-      <div class="vs-head">
-        <div><span class="kicker">Ta puissance</span><b>${p.mine.power}</b></div>
-        <span class="vs-badge ${trendCls}">${trend}</span>
-        <div class="right"><span class="kicker">${p.rating} pts</span><b>${p.theirs.power}</b></div>
+      <div class="vs-face">
+        <div><span class="vf-av me">${S.user ? avatarInner(S.user) : ''}</span><b>Toi</b><span class="num">${p.mine.power}</span></div>
+        <div class="vf-mid"><span class="vf-vs">VS</span><span class="vs-badge ${trendCls}">${trend}</span></div>
+        <div><span class="vf-av them">${avatarInner(p.opponent)}</span><b>${esc(p.opponent.displayName)}</b><span class="num">${p.theirs.power}</span></div>
       </div>
       ${forecastHTML(p.forecast, p.mine, p.theirs)}
+      <details class="vs-more"><summary>Vis-à-vis poste par poste</summary>
       <div class="matchups">${ROLES.map((r, i) => matchupRow(r, p.mine.units[i], p.theirs.units[i])).join('')}</div>
       <div class="vs-syn"><div><span class="kicker">Tes bonus</span>${synergyHTML(p.mine.synergies)}</div>
         <div><span class="kicker">Ses bonus</span>${synergyHTML(p.theirs.synergies)}</div></div>
-      <details class="talents-vs" open><summary>Talents en jeu</summary>
+      </details>
+      <details class="talents-vs"><summary>Talents en jeu</summary>
         <div><span class="kicker">Ton équipe</span>${p.mine.units.map((u) => `<div class="tv-row"><b>${esc(u.champion)}</b>${talentHTML(u.talent, true)}</div>`).join('')}</div>
         <div><span class="kicker">En face</span>${p.theirs.units.map((u) => `<div class="tv-row"><b>${esc(u.champion)}</b>${talentHTML(u.talent, true)}</div>`).join('')}</div>
       </details>
@@ -1967,6 +2013,14 @@ function scoreboard(ev) {
   $('#b-g-me').textContent = gm.toFixed(1); $('#b-g-them').textContent = gt.toFixed(1);
   $('#b-g-fill').style.width = `${gm + gt ? (gm / (gm + gt)) * 100 : 50}%`;
   $('#b-clock').textContent = `${String(ev.minute).padStart(2, '0')}:00`;
+  R.score = { km, kt, tm, tt }; duelPanel();
+}
+
+/** Face-à-face des stats sous la carte : kills, tours, dragons, gardien ancien. */
+function duelPanel() {
+  const sc = R.score || { km: 0, kt: 0, tm: 0, tt: 0 }, o = R.obj || { me: { dragon: 0, ancient: 0 }, them: { dragon: 0, ancient: 0 } };
+  const row = (label, a, b) => { const t = a + b || 1; return `<span class="dv">${a}</span><span class="dl">${label}</span><span class="dv r">${b}</span><i class="db"><b style="width:${(a / t) * 100}%"></b><b style="width:${(b / t) * 100}%"></b></i>`; };
+  $('#b-duel').innerHTML = row('Kills', sc.km, sc.kt) + row('Tours', sc.tm, sc.tt) + row('Dragons', o.me.dragon, o.them.dragon) + row('Nashor', o.me.ancient, o.them.ancient);
 }
 
 /** Les deux équipes se regroupent autour du lieu du teamfight. */
@@ -2106,6 +2160,8 @@ async function objective(k, place, actor, ev) {
   if (actor !== 1 && actor !== 4) move(k, actor, add(P(k, sides[1]), [2, -2]));
   bfx.burst(pit, TEAM_COLOR[k], 50, 1.6);
   icon.classList.remove('contest'); icon.classList.add('taken', k);
+  R.obj[k][place === 'ancient' ? 'ancient' : 'dragon']++; duelPanel();
+  $(`#b-buffs-${k}`).insertAdjacentHTML('beforeend', `<img class="b-buff" src="https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-match-history/global/default/${place === 'ancient' ? 'baron' : 'dragon'}-100.png" alt="">`);
   shake();
   if (!replay.skip) audio.chime(3);
   if (ev.kind === 'TALENT') callout(k, actor, ev);
@@ -2118,6 +2174,8 @@ function buildMap(mine, theirs) {
   R.units = { me: mine.units, them: theirs.units };
   R.tok = { me: [], them: [] }; R.pos = { me: [], them: [] }; R.alive = { me: [], them: [] };
   R.towers = { me: [], them: [] }; R.nexus = {}; R.fight = null;
+  R.obj = { me: { dragon: 0, ancient: 0 }, them: { dragon: 0, ancient: 0 } }; R.score = null;
+  $('#b-buffs-me').innerHTML = ''; $('#b-buffs-them').innerHTML = '';
   const towers = $('#b-towers'); const tokens = $('#b-tokens');
   towers.innerHTML = ''; tokens.innerHTML = '';
   for (const k of ['me', 'them']) {
@@ -2229,9 +2287,14 @@ async function playBattle(b, { spectator = false, live = null } = {}) {
       ${spectator ? `<span class="chip">${b.minutes} min</span>` : b.boss ? `<span class="chip gold">${fmtInt(b.bossScore)} dégâts${b.bossScore >= b.bossBest ? ' · record' : ''}</span>`
         : `<span class="chip ${delta >= 0 ? 'up' : 'down'}">${signed(delta)} pts · ${pMe.ratingAfter}</span>`}
       ${!spectator && mineA && b.essence ? `<span class="chip ess">+${b.essence} essence</span>` : ''}
-      ${!spectator && mineA && b.passXp ? `<span class="chip xp">+${b.passXp} XP pass</span>` : ''}
       ${b.tactics?.length ? `<span class="chip">${b.tactics.filter((t) => t.outcome > 0).length} / ${b.tactics.length} calls réussis</span>` : ''}
-      <span class="chip gold">MVP · ${esc(mvp.champion)}</span></div>
+</div>
+    ${!spectator && mineA && b.passXp && S.arena?.pass ? (() => {
+      const pa = S.arena.pass, xp = pa.xp + b.passXp, lvl = Math.min(pa.maxLevel, Math.floor(xp / pa.xpPerLevel)), into = lvl >= pa.maxLevel ? pa.xpPerLevel : xp - lvl * pa.xpPerLevel;
+      return `<div class="pg-pass"><div class="pg-pass-head"><b>Pass · niveau ${lvl}${lvl > pa.level ? ' atteint' : ''}</b><span class="num">+${b.passXp} XP</span></div>
+        <div class="pass-bar"><i style="width:${(into / pa.xpPerLevel) * 100}%"></i></div>
+        ${(b.passRewards || []).map((r) => `<div class="pg-reward">${rewardIcon(r)}<div><b>Récompense débloquée</b><span>${rewardText(r)}</span></div></div>`).join('')}</div>`; })() : ''}
+    <div class="pg-mvp">${unitImg(mvp)}<div><span class="kicker">Joueur du match</span><b>${esc(mvp.champion)}</b><span>${mvp.kills} kill${mvp.kills > 1 ? 's' : ''} · ${mvp.deaths} mort${mvp.deaths > 1 ? 's' : ''}</span></div></div>
     <div class="pg-board"><div class="pg-team me"><span class="kicker">${esc(spectator ? pMe.displayName : 'Ton équipe')}</span>${rows(mine.units, 'me')}</div>
       <div class="pg-team them"><span class="kicker">${esc(pThem.displayName)}</span>${rows(theirs.units, 'them')}</div></div>
     ${!spectator && mineA && won && !b.essence ? '<p class="muted">Essence du jour déjà empochée : la victoire compte pour la cote.</p>' : ''}
@@ -2290,7 +2353,7 @@ function showSeasonEnd(r) {
     .filter(Boolean).join(' · ');
   openSheet(`<div class="season-end" style="--tc:${TIER[r.tier].color}">
     <span class="kicker">Saison ${r.number} terminée</span>
-    <div class="season-crest"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M32 4 56 14v18c0 14-10 24-24 28C18 56 8 46 8 32V14z"/></svg>${tierBadge(r.tier, true)}</div>
+    <div class="season-crest"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="#emblem"/></svg><b class="season-tier">${TIER[r.tier].label}</b></div>
     <div class="facts"><div><b>#${r.rank}</b><span>Rang</span></div><div><b>${r.rating}</b><span>Cote finale</span></div><div><b>${r.wins} V · ${r.losses} D</b><span>Bilan</span></div></div>
     <p class="season-reward">${rewards ? `<b>${rewards}</b> ajoutées à ton stock` : `Joue au moins 5 combats dans une saison pour recevoir des reliques.`}</p>
     <p class="muted">Nouvelle saison : ta cote repart à mi-chemin de 1000, ton palier final devient ton cadre. À toi de grimper !</p>
@@ -2473,9 +2536,61 @@ function bindArena() {
   $('#b-close').onclick = closeBattle;
   $('#b-share').onclick = shareBattle;
   $('#arena-team').addEventListener('click', (e) => { const u = e.target.closest('[data-unit]'); if (u) showUnitTalent(+u.dataset.unit); });
+  $('#view-arena').addEventListener('click', (e) => {
+    const go = e.target.closest('[data-arena-go]');
+    if (go) { S.arenaTab = go.dataset.arenaGo; renderArenaBody(); $('.arena-tabs').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    if (e.target.closest('[data-meta-open]')) showMeta();
+  });
 }
 
 // ---------- Navigation ----------
+// ---------- Mise en scène commune : titre, fond teinté par l'art, entrée animée ----------
+const VIEW_TITLE = { open: 'Reliques', collection: 'Collection', arena: 'Arène', friends: 'Club', profile: 'Profil' };
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** Fond d'ambiance : l'illustration mise en avant, très floue, en haut de l'écran (ou une couleur). */
+function setAmbient(src, color) {
+  const el = $('#amb'); if (!el) return;
+  el.style.backgroundImage = src ? `url('${src}')` : color ? `radial-gradient(circle at 30% 30%, ${color}, transparent 60%)` : 'none';
+}
+
+/** Skin mis en avant par écran : dernier tirage, plus rare possédé, gros tirage d'un pote, signature. */
+function ambientFor(v) {
+  const best = () => [...S.owned.keys()].map(fromKey).filter((it) => it?.kind === 'SKIN').sort((a, b) => rank(b.rarity) - rank(a.rarity))[0];
+  if (v === 'open') { const d = S.recent?.[0]; const it = d && item(d.kind, d.itemId); return setAmbient(it?.splash); }
+  if (v === 'collection') return setAmbient(best()?.splash);
+  if (v === 'arena') return setAmbient(null, S.arena ? TIER[S.arena.season.tier].color : '#c8a96a');
+  if (v === 'friends') { const f = (S.feed || []).find((x) => x.kind === 'DROP'); const it = f && item(f.itemKind, f.itemId); return setAmbient(it?.splash || best()?.splash); }
+  if (v === 'profile') { const sig = S.myStats?.signature && item(S.myStats.signature.kind, S.myStats.signature.itemId); return setAmbient(sig?.splash || best()?.splash); }
+}
+
+/** Les chiffres défilent jusqu'à leur valeur, les barres se remplissent. */
+function animateIn(root) {
+  if (!root || reduceMotion()) return;
+  $$('.num, .me-stats b, .stock-big b', root).forEach((el) => {
+    if (el.children.length) return;
+    const m = el.textContent.trim().match(/^([+\u2212-]?)(\d[\d\s\u00a0\u202f]*)(\s?%?)$/);
+    if (!m) return;
+    const to = +m[2].replace(/\D/g, ''); if (!to) return;
+    const t0 = performance.now(), dur = 700 + Math.min(to, 2000) * 0.15;
+    const step = (t) => { const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = m[1] + fmtInt(Math.round(to * e)) + m[3]; if (k < 1 && el.isConnected) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  });
+  $$('.tier-bar i, .meter i, .pass-bar i', root).forEach((i) => {
+    const w = i.style.width; if (!w) return;
+    i.style.transition = 'none'; i.style.width = '0'; void i.offsetWidth; i.style.transition = ''; i.style.width = w;
+  });
+}
+
+function enterView(v) {
+  const el = $(`#view-${v}`); if (!el) return;
+  $('#view-title').textContent = VIEW_TITLE[v] || 'Reliques';
+  ambientFor(v);
+  el.classList.remove('enter'); void el.offsetWidth; el.classList.add('enter');
+  setTimeout(() => animateIn(el), 60);
+}
+
 function setView(v, { friend = false } = {}) {
   // Quitter la collection d'un ami : retour à la sienne.
   if (!friend) S.friend = null;
@@ -2501,6 +2616,7 @@ function setView(v, { friend = false } = {}) {
     loadArena().then(() => { if (!store.get(TUTO_KEY) && S.view === 'arena' && $('#tuto').hidden) showTuto(); });
   }
   scrollTo({ top: 0 });
+  enterView(v);
 }
 
 // ---------- PWA : installation et notifications ----------
@@ -2518,32 +2634,40 @@ function setupInstall() {
   $('#install-menu').onclick = () => showInstall();
 }
 
-const NEWS_KEY = 'capsules.news.v3-arena';
+const NEWS_KEY = 'capsules.news.v4-redesign';
 
+/**
+ * Note de patch de la refonte : écran plein, une seule fois. Le cristal tombe et éclate, puis le titre
+ * sur un défilé de splash arts, et les nouveautés arrivent une à une.
+ */
 async function maybeShowNews() {
   if (store.get(NEWS_KEY) || !$('#tuto').hidden) return;
+  // Nouveau joueur : rien à « mettre à jour », la note de patch ne le concerne pas.
+  if (!(S.wallet?.totalOpened > 0)) { store.set(NEWS_KEY, '1'); return; }
   store.set(NEWS_KEY, '1');
-  openSheet(`<div class="news">
-    <span class="kicker">Grosse mise à jour</span>
-    <h2>L'arène passe à la vitesse supérieure</h2>
-    <div class="news-item"><b>Pass de saison</b><span>Chaque combat donne de l'XP. 15 niveaux de reliques, d'essence et de prestige, payés tout de suite. Au bout : un cadre animé Légende.</span></div>
-    <div class="news-item"><b>Boss de la semaine</b><span>Un roster Exalté surpuissant que tout le monde attaque. 3 tentatives par jour, classement des dégâts, prestige pour le podium.</span></div>
-    <div class="news-item"><b>Week-ends en folie</b><span>Double essence, double XP ou méta folle : un événement chaque samedi et dimanche.</span></div>
-    <div class="news-item"><b>Saisons de 2 semaines</b><span>Nouveaux paliers Grand maître et Challenger, plus durs à atteindre. Ton palier final devient le cadre de ton icône pour toute la saison suivante.</span></div>
-    <div class="news-item"><b>3 équipes enregistrées</b><span>Prépare plusieurs compos et change d'équipe en un geste depuis ta collection.</span></div>
-    <div class="news-item"><b>Flex et honte</b><span>Étiquette Champion de saison, titre Légende… et Paillasson d'AmiTest, Lanterne rouge ou Passoire pour les autres. Les notifs te préviennent quand on te passe devant.</span></div>
-    <button class="btn primary block" type="button" data-news="pass">Voir mon pass</button>
-    <button class="btn ghost block" type="button" data-news="boss">Affronter le boss</button>
-  </div>`);
-  $$('[data-news]').forEach((b) => (b.onclick = async () => {
-    closeSheet();
-    S.arenaTab = b.dataset.news === 'boss' ? 'boss' : S.arenaTab;
-    setView('arena');
-    // Le pass s'ouvre après les autres popups du lancement (événement, patch).
-    S.openPassAfter = b.dataset.news === 'pass';
-  }));
-  // Le popup d'installation attend la fermeture de celui-ci.
-  while (!$('#sheet').hidden) await sleep(300);
+  const MAP_IMG = 'https://ddragon.leagueoflegends.com/cdn/16.22.1/img/map/map11.png';
+  const splashes = ['Ahri_1', 'Jinx_1', 'Leona_1', 'Yasuo_1', 'Kaisa_1', 'Lux_1'].map((a) => `${DD}/splash/${a}.jpg`);
+  const feats = [
+    ['Ouvrir devient un rituel', 'Le cristal monte de rareté sous une colonne de lumière, éclate, et la carte se révèle en silhouette. Puis on te dit si le skin renforce ton équipe.', '<svg viewBox="0 0 100 100" class="nf-crys"><use href="#crystal"/></svg>'],
+    ['Tes matchs sur la vraie carte', 'Dragon, Nashor, tours, sorts des champions : chaque combat se rejoue sur la Faille.', `<img src="${MAP_IMG}" alt="">`],
+    ['Le Club', 'Les gros tirages et les combats de tes potes, ta bête noire et la revanche en un geste.', '<svg viewBox="0 0 24 24" class="nf-ico"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.5 2.7-5.5 6-5.5s6 2 6 5.5"/><circle cx="17" cy="9" r="2.6"/><path d="M16.5 14.6c2.7 0 4.5 1.8 4.5 5.4"/></svg>'],
+    ['Ta collection en étagères', 'Une étagère par gamme, les manquants en ombre, et la puissance réelle de chaque skin dans ta fiche.', '<svg viewBox="0 0 24 24" class="nf-ico"><rect x="4" y="4" width="7" height="9" rx="2"/><rect x="13" y="4" width="7" height="5" rx="2"/><rect x="4" y="15" width="7" height="5" rx="2"/><rect x="13" y="11" width="7" height="9" rx="2"/></svg>'],
+    ['Et Ahri, plus kawaii que jamais', 'Partout où elle apparaît, la reine a ses oreilles, son sticker et ses cœurs.', `<span class="nf-fox">${FOX_SVG}</span>`],
+  ];
+  const el = document.createElement('div');
+  el.className = 'news2'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', 'Nouveautés');
+  el.innerHTML = `<div class="nf-bg">${splashes.map((u, i) => `<i style="background-image:url('${u}');animation-delay:${i * 3}s"></i>`).join('')}</div>
+    <div class="nf-shade"></div>
+    <svg class="nf-drop" viewBox="0 0 100 100" aria-hidden="true"><use href="#crystal"/></svg><div class="nf-flash"></div>
+    <div class="nf-body">
+      <span class="kicker">Note de patch</span>
+      <h2>Reliques fait peau neuve</h2>
+      <div class="nf-list">${feats.map(([t, d, v], i) => `<div class="nf-item" style="animation-delay:${1.6 + i * 0.35}s"><span class="nf-vis">${v}</span><div><b>${t}</b><span>${d}</span></div></div>`).join('')}</div>
+      <button class="btn primary big block" type="button" id="news-go" style="animation-delay:${1.6 + feats.length * 0.35}s">C'est parti</button>
+    </div>`;
+  document.body.appendChild(el);
+  audio.chime(5); buzz([40, 30, 80]);
+  await new Promise((resolve) => { $('#news-go').onclick = () => { el.classList.add('out'); setTimeout(() => { el.remove(); resolve(); }, 300); setView('open'); }; });
 }
 
 // ---------- Méta de la semaine ----------
@@ -3012,6 +3136,50 @@ function showComposer(start = 0) {
 }
 
 function syncSegmented() { $$('.coll-controls .segmented button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.group === S.coll.group))); }
+
+// ---------- Ahri, la reine : oreilles de renarde, sticker et cœurs partout où elle apparaît ----------
+const HEART_SVG = '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 21s-7.5-4.6-9.6-9.2C.9 8.5 3 5 6.4 5c2.1 0 3.6 1.2 4.6 2.6C12 6.2 13.5 5 15.6 5 19 5 21.1 8.5 19.6 11.8 17.5 16.4 12 21 12 21z"/></svg>';
+const FOX_SVG = '<svg viewBox="0 0 40 40"><path d="M6 19 9 3l9 9z" fill="#ff8ad8"/><path d="M34 19 31 3l-9 9z" fill="#ff8ad8"/><path d="M9.5 13 10.5 6.5l4.5 4.5z" fill="#ffe1f3"/><path d="M30.5 13 29.5 6.5 25 11z" fill="#ffe1f3"/><path d="M5 21c0-9 8-11.5 15-11.5S35 12 35 21c0 9-7.5 14-15 14S5 30 5 21z" fill="#fff4fa" stroke="#ff8ad8" stroke-width="1.6"/><path d="M11 22q3-4 6 0M23 22q3-4 6 0" stroke="#5a2a45" stroke-width="2" fill="none" stroke-linecap="round"/><ellipse cx="11" cy="27" rx="3" ry="1.8" fill="#ff9fd6" opacity=".85"/><ellipse cx="29" cy="27" rx="3" ry="1.8" fill="#ff9fd6" opacity=".85"/><path d="M17 27.5q1.5 2 3 0 1.5 2 3 0" stroke="#5a2a45" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>';
+const AHRI_ID = () => S.cat?.champions?.find((c) => c.alias === 'Ahri')?.id ?? 103;
+const isAhriSrc = (src) => /\/Ahri_\d/.test(src) || src.endsWith(`/champion-icons/${AHRI_ID()}.png`);
+const isAhriItem = (it) => it?.champ?.alias === 'Ahri';
+const ROUND = '.avatar, .sring, .fc-av, .vf-av, .pd-av, .token, .kf-face-wrap';
+const CARDS = '.card, .ts-unit, .slot, .cp-main, .unit-art, .boss-unit, .pg-mvp, .me-sig';
+
+function ahrify(root = document) {
+  if (!root.querySelectorAll) return;
+  root.querySelectorAll('img').forEach((img) => {
+    if (img.dataset.ahri || !isAhriSrc(img.getAttribute('src') || '')) return;
+    img.dataset.ahri = '1';
+    const round = img.closest(ROUND);
+    if (round && !round.classList.contains('ahri-av')) {
+      round.classList.add('ahri-av');
+      round.insertAdjacentHTML('beforeend', '<span class="ear l"></span><span class="ear r"></span><span class="mini-heart">' + HEART_SVG + '</span>');
+      return;
+    }
+    const card = img.closest(CARDS);
+    if (card && !card.classList.contains('ahri-card')) {
+      card.classList.add('ahri-card');
+      card.insertAdjacentHTML('beforeend', `<span class="fox-sticker">${FOX_SVG}</span>`);
+    }
+  });
+}
+
+/** Petits cœurs qui sautent des cartes d'Ahri visibles (quelques-uns à la fois). */
+function ahriHearts() {
+  if (reduceMotion() || document.hidden) return;
+  const vis = $$('.ahri-card').filter((c) => { const r = c.getBoundingClientRect(); return r.width > 40 && r.bottom > 0 && r.top < innerHeight; }).slice(0, 4);
+  vis.forEach((c) => {
+    if (Math.random() < 0.4) return;
+    const h = document.createElement('span'); h.className = 'kheart'; h.innerHTML = HEART_SVG;
+    h.style.left = `${15 + Math.random() * 70}%`; h.style.top = `${45 + Math.random() * 35}%`;
+    h.style.setProperty('--x', `${(Math.random() - 0.5) * 30}px`); h.style.setProperty('--sz', `${10 + Math.random() * 7}px`);
+    c.appendChild(h); setTimeout(() => h.remove(), 2400);
+  });
+}
+new MutationObserver((ms) => { for (const m of ms) m.addedNodes.forEach((n) => { if (n.nodeType === 1) ahrify(n.parentElement || n); }); })
+  .observe(document.body, { childList: true, subtree: true });
+setInterval(ahriHearts, 1300);
 
 // ---------- Démarrage ----------
 fetch('/health', { cache: 'no-store' }).catch(() => {});

@@ -1572,8 +1572,8 @@ button.lrow:hover, button.lrow:focus-visible { border-color: var(--line-2); }
 .fc-duo .fc-av + .fc-av { margin-left: -10px; box-shadow: 0 0 0 2px var(--panel); }
 .fc-txt { flex: 1; min-width: 0; font-size: 14px; line-height: 1.3; }
 .fc-txt span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
-.fcard.fbattle.win { box-shadow: inset 3px 0 0 var(--blue); }
-.fcard.fbattle.loss { box-shadow: inset 3px 0 0 var(--pink); }
+.fcard.fbattle.win .fc-av:first-child { box-shadow: 0 0 0 2px var(--blue); }
+.fcard.fbattle.loss .fc-av:first-child { box-shadow: 0 0 0 2px var(--pink); }
 .friend { border: 0; border-radius: 16px; }
 
 .me-extra { display: grid; gap: 10px; }

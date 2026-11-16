@@ -67,6 +67,10 @@ public sealed class CapsulesController(
     [HttpGet("friends")]
     public Task<List<PlayerCardDto>> Friends() => social.GetFriendsAsync(User.UserId());
 
+    /// <summary>Fil du Club : gros tirages et combats des amis sur 7 jours.</summary>
+    [HttpGet("feed")]
+    public Task<List<FeedItemDto>> Feed() => social.GetFeedAsync(User.UserId());
+
     [HttpPost("friends")]
     [EnableRateLimiting(RateLimits.RelicWrite)]
     public Task<PlayerCardDto> AddFriend(AddFriendRequest req) => social.AddFriendAsync(User.UserId(), req.Query, req.UserId);

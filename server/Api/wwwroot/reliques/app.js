@@ -1056,9 +1056,18 @@ function setUser(user) {
 /** Carte du profil : cote, rang et collection en un coup d'œil. */
 function renderMe() {
   const el = $('#me-stats'); if (!el) return;
-  const a = S.arena, owned = S.owned?.size || 0;
+  const a = S.arena, owned = S.owned?.size || 0, st = S.myStats;
   const cell = (v, l) => `<div><b>${v}</b><span>${l}</span></div>`;
   el.innerHTML = (a ? cell(fmtInt(a.rating), a.rank ? `cote · #${a.rank}` : 'cote') + cell(`${a.wins}–${a.losses}`, 'victoires – défaites') : '') + (owned ? cell(fmtInt(owned), 'objets collectionnés') : '');
+  const extra = $('#me-extra');
+  if (!extra || !st) return;
+  const form = (st.form || []).slice(-10);
+  const sig = st.signature && item(st.signature.kind, st.signature.itemId);
+  extra.innerHTML = `${form.length ? `<div class="me-form"><span class="kicker">Forme · ${form.length} derniers</span>
+      <div class="form-row">${form.map((w) => `<i class="${w ? 'w' : 'l'}"></i>`).join('')}</div>
+      <span class="muted">Série en cours : <b>${st.streak > 0 ? `${st.streak} victoire${st.streak > 1 ? 's' : ''}` : st.streak < 0 ? `${-st.streak} défaite${st.streak < -1 ? 's' : ''}` : '—'}</b> · record ${st.bestStreak}</span></div>` : ''}
+    ${sig ? `<div class="me-sig"><img src="${esc(sig.art)}" alt=""><div><span class="kicker">Ta signature</span><b>${esc(sig.name)}</b><span class="muted">${st.signature.games} parties · ${st.signature.wins} victoires</span></div></div>` : ''}
+    ${st.nemesis ? `<div class="me-sig nemesis"><span class="kicker">Bête noire</span><b>${esc(st.nemesis.displayName)}</b><span class="muted">${st.nemesis.count} défaite${st.nemesis.count > 1 ? 's' : ''} contre</span></div>` : ''}`;
 }
 
 function friendHTML(p) {
@@ -1075,11 +1084,71 @@ function friendHTML(p) {
   </div>`;
 }
 
+/** Bande de potes en haut du Club : anneau à la couleur de leur palier, liseré animé s'ils ont un gros tirage récent. */
+function renderStories(added) {
+  const fresh = new Set((S.feed || []).filter((f) => f.kind === 'DROP' && now() - Date.parse(f.at) < 864e5).map((f) => f.player.userId));
+  $('#stories').innerHTML = `<button class="story add" type="button" id="story-add"><span class="sring"><b>+</b></span><span>Ajouter</span></button>`
+    + added.map((p) => `<button class="story${fresh.has(p.userId) ? ' fresh' : ''}" type="button" data-profile="${p.userId}">
+      <span class="sring" style="--tc:${p.frame ? TIER[p.frame].color : 'var(--line-2)'}">${avatarInner(p)}</span><span>${esc(p.displayName)}</span></button>`).join('');
+  $('#story-add').onclick = () => { const q = $('#friend-query'); q.focus(); q.scrollIntoView({ block: 'center', behavior: 'smooth' }); };
+}
+
+const feedAgo = (iso) => ago(iso);
+
+function feedItemHTML(f) {
+  if (f.kind === 'DROP') {
+    const it = item(f.itemKind, f.itemId); if (!it) return '';
+    const mine = S.owned.has(it.key);
+    return `<article class="fcard fdrop r-${it.rarity}">
+      <div class="fc-art" style="background-image:url('${esc(it.splash)}'), url('${esc(it.art)}')"><span class="fc-rar">${LABEL[it.rarity]}</span></div>
+      <div class="fc-body"><span class="fc-av">${avatarInner(f.player)}</span>
+        <div class="fc-txt"><b>${esc(f.player.displayName)}</b> a tiré <b>${esc(it.name)}</b><span>${feedAgo(f.at)}${mine ? '' : ' · tu ne l\'as pas'}</span></div>
+        <button class="btn small" type="button" data-player="${f.player.userId}">Sa collection</button></div>
+    </article>`;
+  }
+  const me = S.user?.id;
+  const [w, l] = f.attackerWon ? [f.attacker, f.defender] : [f.defender, f.attacker];
+  const text = w.userId === me ? `Tu as battu <b>${esc(l.displayName)}</b>` : l.userId === me ? `<b>${esc(w.displayName)}</b> t'a battu` : `<b>${esc(w.displayName)}</b> a battu <b>${esc(l.displayName)}</b>`;
+  const tone = w.userId === me ? 'win' : l.userId === me ? 'loss' : '';
+  return `<article class="fcard fbattle ${tone}">
+    <div class="fc-body"><span class="fc-duo"><span class="fc-av">${avatarInner(w)}</span><span class="fc-av">${avatarInner(l)}</span></span>
+      <div class="fc-txt">${text}<span>${feedAgo(f.at)}</span></div>
+      <button class="btn small" type="button" data-battle="${f.battleId}">Revoir</button></div>
+  </article>`;
+}
+
+async function loadFeed() {
+  try {
+    S.feed = await api('/capsules/feed');
+    $('#feed').innerHTML = S.feed.length ? S.feed.map(feedItemHTML).join('')
+      : '<p class="empty-note">Rien cette semaine. Les gros tirages et les combats de tes potes apparaîtront ici.</p>';
+    if (S.friends) renderStories(S.friends.filter((p) => p.added));
+  } catch (e) { $('#feed').innerHTML = `<p class="empty-note">${esc(e.message)}</p>`; }
+}
+
+/** Ta bête noire du moment (stats du profil) : la revanche à un geste. */
+async function loadRival() {
+  const el = $('#rival-card');
+  try {
+    const st = await api(`/capsules/players/${S.user.id}/stats`);
+    S.myStats = st;
+    const n = st.nemesis;
+    if (!n) { el.hidden = true; return; }
+    el.hidden = false;
+    el.innerHTML = `<div class="rv-top"><span class="kicker">Rivalité</span><span class="muted">ta bête noire</span></div>
+      <div class="rv-main"><div class="rv-txt"><b>Toi contre ${esc(n.displayName)}</b><span>${n.count} défaite${n.count > 1 ? 's' : ''} contre ${esc(n.displayName)}</span></div>
+      <b class="num rv-score">${n.count}</b></div>
+      <button class="btn primary block" type="button" data-foe="${n.userId}">Prendre ta revanche</button>`;
+  } catch { el.hidden = true; }
+}
+
 async function loadFriends() {
   try {
+    loadFeed(); loadRival();
     const list = await api('/capsules/friends');
     S.friends = list;
     const added = list.filter((p) => p.added);
+    renderStories(added);
     const met = list.filter((p) => !p.added);
     $('#friends-count').textContent = added.length ? `${added.length}` : '';
     $('#friends-list').innerHTML = added.length ? added.map(friendHTML).join('')
@@ -2416,7 +2485,7 @@ function setView(v, { friend = false } = {}) {
   $('#view-friends').hidden = v !== 'friends';
   $('#view-arena').hidden = v !== 'arena';
   $('#view-profile').hidden = v !== 'profile';
-  if (v === 'profile') renderMe();
+  if (v === 'profile') { renderMe(); if (S.user) api(`/capsules/players/${S.user.id}/stats`).then((st) => { S.myStats = st; renderMe(); }).catch(() => {}); }
   const tab = friend ? 'friends' : v;
   $$('[data-view]').forEach((b) => (b.dataset.view === tab ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current')));
   if (v === 'collection') {
@@ -2955,6 +3024,6 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { sc
 const params = new URLSearchParams(location.search);
 const startView = params.get('view');
 if (['collection', 'arena', 'friends', 'profile'].includes(startView)) S.view = startView;
-if (['foes', 'ladder', 'history', 'boss'].includes(params.get('tab'))) S.arenaTab = params.get('tab');
+if (['foes', 'ladder', 'boss'].includes(params.get('tab'))) S.arenaTab = params.get('tab');
 if (S.token) { start(); setView(S.view); } else showAuth();
 if (params.get('replay')) openSharedReplay(params.get('replay'));

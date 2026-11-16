@@ -11,8 +11,14 @@ namespace Api.Services;
 /// Côté social des reliques : roster mis en avant (5 postes), amis suivis et collection d'un autre joueur.
 /// Les collections sont visibles par tout joueur connecté ; la liste d'amis (réciproque) sert de raccourci.
 /// </summary>
-public sealed class RelicSocialService(AppDbContext db, RotationService rotation)
+public sealed class RelicSocialService(AppDbContext db, RotationService rotation, TimeProvider clock)
 {
+    /// <summary>Fenêtre et taille du fil du Club.</summary>
+    public static readonly TimeSpan FeedWindow = TimeSpan.FromDays(7);
+    public const int FeedSize = 40;
+    /// <summary>Rareté minimale d'un tirage d'ami pour apparaître dans le fil.</summary>
+    public const Rarity FeedMinRarity = Rarity.EPIC;
+
     public const int RosterSize = 5;
     public const int MaxFriends = 100;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } };
@@ -118,6 +124,32 @@ public sealed class RelicSocialService(AppDbContext db, RotationService rotation
         var ids = added.Concat(met.Except(added)).ToList();
         var cards = await CardsAsync(ids, added.ToHashSet());
         return ids.Where(cards.ContainsKey).Select(id => cards[id]).ToList();
+    }
+
+    /// <summary>
+    /// Fil du Club sur 7 jours : nouveaux tirages Épique ou mieux de mes amis, et combats où un ami ou moi sommes impliqués
+    /// face à un ami (les combats contre des inconnus restent dans l'historique de chacun).
+    /// </summary>
+    public async Task<List<FeedItemDto>> GetFeedAsync(Guid userId)
+    {
+        var since = clock.GetUtcNow() - FeedWindow;
+        var friends = await db.RelicFriends.Where(f => f.UserId == userId).Select(f => f.FriendId).ToListAsync();
+        if (friends.Count == 0) return [];
+        var circle = friends.Append(userId).ToList();
+        var drops = await db.CapsuleDrops
+            .Where(d => friends.Contains(d.UserId) && d.IsNew && d.Rarity >= FeedMinRarity && d.OpenedAt >= since)
+            .OrderByDescending(d => d.OpenedAt).Take(FeedSize).ToListAsync();
+        var battles = await db.RelicBattles
+            .Where(b => b.CreatedAt >= since && circle.Contains(b.AttackerId) && circle.Contains(b.DefenderId))
+            .OrderByDescending(b => b.CreatedAt).Take(FeedSize)
+            .Select(b => new { b.Id, b.AttackerId, b.DefenderId, b.AttackerWon, b.CreatedAt }).ToListAsync();
+        var ids = drops.Select(d => d.UserId).Concat(battles.SelectMany(b => new[] { b.AttackerId, b.DefenderId })).Distinct().ToList();
+        var cards = await CardsAsync(ids, friends.ToHashSet());
+        var items = drops.Where(d => cards.ContainsKey(d.UserId))
+            .Select(d => new FeedItemDto("DROP", d.OpenedAt, cards[d.UserId], d.Kind, d.ItemId, d.Rarity))
+            .Concat(battles.Where(b => cards.ContainsKey(b.AttackerId) && cards.ContainsKey(b.DefenderId))
+                .Select(b => new FeedItemDto("BATTLE", b.CreatedAt, Attacker: cards[b.AttackerId], Defender: cards[b.DefenderId], AttackerWon: b.AttackerWon, BattleId: b.Id)));
+        return items.OrderByDescending(i => i.At).Take(FeedSize).ToList();
     }
 
     /// <summary>Ajout par identifiant, par Riot ID (Pseudo#TAG) ou par pseudo exact de l'app.</summary>

@@ -53,3 +53,11 @@ public sealed record DebugGrantRequest(int Count, int Essence = 0, int Premium =
 public sealed record PushKeyDto(string? PublicKey);
 public sealed record PushSubscribeRequest(string Endpoint, string P256dh, string Auth);
 public sealed record PushUnsubscribeRequest(string Endpoint);
+
+/// <summary>
+/// Fil du Club : gros tirages des amis (Épique ou mieux, nouveaux) et combats entre amis ou contre soi.
+/// Kind = DROP (Player, ItemKind, ItemId, Rarity) ou BATTLE (Attacker, Defender, AttackerWon, BattleId).
+/// </summary>
+public sealed record FeedItemDto(
+    string Kind, DateTimeOffset At, PlayerCardDto? Player = null, CapsuleItemKind? ItemKind = null, int? ItemId = null, Rarity? Rarity = null,
+    PlayerCardDto? Attacker = null, PlayerCardDto? Defender = null, bool? AttackerWon = null, Guid? BattleId = null);

@@ -313,8 +313,12 @@ public sealed class BattleService(
     /// <summary>Rejeu d'un combat, réservé à ses deux participants.</summary>
     public async Task<BattleDto> GetAsync(Guid userId, Guid battleId)
     {
-        var battle = await db.RelicBattles.FirstOrDefaultAsync(b => b.Id == battleId && (b.AttackerId == userId || b.DefenderId == userId))
+        // Participants, et amis d'un participant (le fil du Club montre les combats entre amis).
+        var battle = await db.RelicBattles.FirstOrDefaultAsync(b => b.Id == battleId)
             ?? throw new AppException("Combat introuvable.", 404);
+        if (battle.AttackerId != userId && battle.DefenderId != userId
+            && !await db.RelicFriends.AnyAsync(f => f.UserId == userId && (f.FriendId == battle.AttackerId || f.FriendId == battle.DefenderId)))
+            throw new AppException("Combat introuvable.", 404);
         return await ToDtoAsync(battle, JsonSerializer.Deserialize<BattleOutcome>(battle.Result, Json)!);
     }
 

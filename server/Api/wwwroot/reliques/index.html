@@ -184,19 +184,25 @@
         <button data-arena="foes" aria-selected="true">Adversaires</button>
         <button data-arena="ladder">Classement</button>
         <button data-arena="boss">Boss</button>
-        <button data-arena="history">Historique</button>
       </div>
       <section id="arena-body" class="arena-body"></section>
     </main>
 
     <!-- Vue amis -->
     <main id="view-friends" class="view view-friends" hidden>
+      <h1 class="club-title">Club</h1>
+      <div class="stories" id="stories"></div>
       <form class="friend-add" id="friend-form">
         <input id="friend-query" placeholder="Riot ID (Pseudo#TAG) ou pseudo" autocomplete="off" required minlength="2">
         <button class="btn primary" type="submit">Ajouter</button>
       </form>
+      <section class="rival-card" id="rival-card" hidden></section>
       <section>
-        <div class="section-head"><h2>Mes amis</h2><span class="muted" id="friends-count"></span></div>
+        <div class="section-head"><h2>Fil</h2><span class="muted">7 derniers jours</span></div>
+        <div class="feed" id="feed"></div>
+      </section>
+      <section>
+        <div class="section-head"><h2>Tous mes potes</h2><span class="muted" id="friends-count"></span></div>
         <div class="friends" id="friends-list"></div>
       </section>
       <section id="suggest-block" hidden>
@@ -210,6 +216,7 @@
       <section class="me-card">
         <div class="menu-user" id="menu-user"></div>
         <div class="me-stats" id="me-stats"></div>
+        <div class="me-extra" id="me-extra"></div>
         <button class="btn block" id="profile-menu">Voir mon profil complet</button>
       </section>
       <section class="settings" aria-label="Réglages">

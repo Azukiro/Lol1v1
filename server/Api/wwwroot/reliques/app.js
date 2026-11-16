@@ -735,24 +735,21 @@ function showItem(key) {
   const o = ownedOf(key);
   const odds = S.cat.oddsBy.STANDARD[it.rarity];
   const chanceIn = (type) => (S.cat.oddsBy[type][it.rarity]?.percent ?? 0) / S.cat.byRarity[it.rarity].length;
-  const fmt = (c) => (c === 0 ? '—' : `${c >= 0.01 ? c.toFixed(2) : c.toFixed(3)}%`);
+  const fmt = (c) => (c === 0 ? '—' : `${c >= 0.01 ? c.toFixed(2) : c.toFixed(3)} %`);
   const lines = it.lines.map((l) => S.cat.line.get(l)).filter(Boolean);
-  openSheet(`
-    <div class="detail-hero" style="background-image:url('${esc(it.splash)}'), url('${esc(it.art)}')"></div>
-    <div class="detail-body r-${it.rarity}">
-      <div class="tags"><span class="tag">${LABEL[it.rarity]}</span>${it.legacy ? '<span class="tag line">Héritage</span>' : ''}
-        ${lines.map((l) => `<button class="tag line" data-goto-line="${l.id}">${esc(l.name)}</button>`).join('')}</div>
+  const p = it.champ?.profile;
+  const lineRows = lines.map((l) => { const ids = S.cat.byLine.get(l.id) || []; const own = ids.filter((id) => lens().has(`SKIN:${id}`)).length;
+    return `<button type="button" class="ln-row" data-goto-line="${l.id}"><span>Gamme ${esc(l.name)}</span><b>${own} / ${ids.length}</b></button>`; }).join('');
+  openSheet(`<div class="skin-sheet r-${it.rarity}">
+    <div class="ss-art" style="background-image:url('${esc(it.art)}')"></div>
+    <div class="ss-body">
+      <div class="ss-tags"><span class="tg r-${it.rarity}">${LABEL[it.rarity]}</span>${o?.count > 1 ? `<span class="tg">×${o.count}</span>` : ''}${it.legacy ? '<span class="tg">Héritage</span>' : ''}${o ? '' : '<span class="tg">Pas encore obtenu</span>'}</div>
       <h2>${esc(it.name)}</h2>
-      <p class="muted">${it.kind === 'SKIN' ? `Skin de ${esc(it.sub)}` : 'Champion'}</p>
-      <div class="facts">
-        <div><b>${o ? `×${o.count}` : '—'}</b><span>Exemplaires</span></div>
-        <div><b>${o ? new Date(o.firstObtainedAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : 'Jamais'}</b><span>Obtenu</span></div>
-        <div><b>${fmt(chanceIn('STANDARD'))}</b><span>Chance / relique</span></div>
-      </div>
+      <p class="muted">${it.kind === 'SKIN' ? esc(it.sub) : 'Champion'}${p ? ` · ${CURVE[p.curve].label} · ${STYLE[p.style].label}` : ''}</p>
       ${unitBlock(it, o)}
-      <p class="muted">Chance par relique prestige : ${fmt(chanceIn('PREMIUM'))}</p>
-      ${o ? `<p class="muted">Un doublon rapporte ${odds?.duplicateEssence ?? 0} essence.</p>` : '<p class="muted">Pas encore obtenu. Continue d\'ouvrir !</p>'}
-    </div>`);
+      ${lineRows ? `<div class="ln-list">${lineRows}</div>` : ''}
+      <p class="ss-fine">Chance par relique ${fmt(chanceIn('STANDARD'))} · prestige ${fmt(chanceIn('PREMIUM'))}${o ? ` · obtenu le ${new Date(o.firstObtainedAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })} · doublon ${odds?.duplicateEssence ?? 0} essence` : ''}</p>
+    </div></div>`);
 }
 
 /** Puissance d'une unité seule à un poste (rareté, poste, méta), comme dans teamPower. */
@@ -825,29 +822,49 @@ function setType(type) {
 const ROLES = ['Top', 'Jungle', 'Mid', 'Bot', 'Support'];
 const keyOf = (slot) => (slot ? (slot.loan ? `LOAN:${slot.itemId}` : `${slot.kind}:${slot.itemId}`) : null);
 
+const ROLE_ICON = ['r-top', 'r-jgl', 'r-mid', 'r-bot', 'r-sup'];
+const roleIcon = (i, cls = '') => `<svg viewBox="0 0 24 24" class="ricon ${cls}" aria-hidden="true"><use href="#${ROLE_ICON[i]}"/></svg>`;
+const fullSlots = (slots) => Array.from({ length: 5 }, (_, k) => slots?.[k] ?? null);
+const warnIcon = '<svg viewBox="0 0 24 24" class="wicon"><path d="M12 4 21 20H3z"/><path d="M12 10v4M12 17v.01"/></svg>';
+const boltIcon = '<svg viewBox="0 0 24 24" class="wicon ok"><path d="M13 3 5 14h6l-1 7 8-11h-6z"/></svg>';
+
+/** Malus de composition à corriger (frontline, dégâts, protection) et bonus de gamme, en lignes courtes. */
+function teamNotes(its) {
+  const filled = its.filter(Boolean);
+  const notes = [];
+  if (filled.length < 5) notes.push(['warn', `Encore ${5 - filled.length} poste${filled.length < 4 ? 's' : ''} à remplir pour entrer dans l'arène`]);
+  else teamNeeds(its).filter((x) => !x.ok).forEach((x) => notes.push(['warn', x.tip.replace(/^Ajoute [^:]+ : /, '').replace(/^sans /, 'Sans ')]));
+  if (new Set(filled.map((it) => it.champ.id)).size < filled.length) notes.push(['warn', 'Champion en double : −10 % pour toute l\'équipe']);
+  const lines = {};
+  filled.forEach((it) => new Set(it.lines).forEach((l) => { lines[l] = (lines[l] || 0) + 1; }));
+  const [bl, bn] = Object.entries(lines).sort((a, b) => b[1] - a[1])[0] || [];
+  if (bn >= 2) notes.push(['ok', `Gamme ${esc(S.cat.line.get(+bl)?.name || '')} ×${bn} : +${3 * (bn - 1)} % à toute l'équipe`]);
+  return notes;
+}
+const notesHTML = (notes) => notes.map(([k, t]) => `<div class="tnote ${k}">${k === 'ok' ? boltIcon : warnIcon}<span>${t}</span></div>`).join('');
+
+/** Rangée de 5 portraits : skin, poste, liseré de rareté. */
+function teamRowHTML(slots, editable) {
+  return `<div class="trow">${fullSlots(slots).map((sl, i) => {
+    const it = slotItem(sl);
+    const tag = editable ? 'button' : 'div';
+    return `<${tag} class="tport${it ? ` r-${it.rarity}` : ' empty'}" ${editable ? `type="button" data-compose="${i}"` : ''} aria-label="${ROLES[i]}${it ? ` : ${esc(it.name)}` : ' libre'}">
+      ${it ? `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt="">` : '<b class="tplus">+</b>'}${roleIcon(i)}</${tag}>`;
+  }).join('')}</div>`;
+}
+
 function renderRoster() {
   const friend = S.friend;
   const slots = friend ? friend.roster : S.roster;
   const editable = !friend;
-  $('#roster-title').textContent = friend ? `Roster de ${friend.name}` : 'Mon roster';
-  $('#roster-hint').textContent = editable ? 'Touche un poste' : '';
+  const its = rosterItems(fullSlots(slots));
+  $('#roster-title').textContent = friend ? `Équipe de ${friend.name}` : 'Mon équipe';
+  $('#roster-hint').innerHTML = `Puissance <b class="num">${teamPower(its)}</b>`;
   $('#compose-btn').hidden = !editable;
-  $('#team-tabs').hidden = !editable || !S.teams.length;
-  $('#team-tabs').innerHTML = editable ? S.teams.map((t, i) => `<button type="button" role="tab" data-team="${i}" aria-selected="${i === S.activeTeam}"
-    title="${i === S.activeTeam ? 'Équipe active (touche pour renommer)' : 'Jouer avec cette équipe'}">${esc(t.name)}</button>`).join('') : '';
-  $('#roster').innerHTML = ROLES.map((role, i) => {
-    const it = slotItem(slots[i]);
-    const tag = editable ? 'button' : 'div';
-    const fit = it ? fitOf(it.champ, i) : 0;
-    return `<${tag} class="slot${it ? ` filled r-${it.rarity}` : ''}" ${editable ? `type="button" data-slot="${i}"` : ''} aria-label="${role}${it ? ` : ${esc(it.name)}, ${LABEL[it.rarity]}, ${fitLabel(fit).toLowerCase()}` : ''}">
-      ${it ? `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt=""><span class="shade"></span><b>${esc(it.name)}</b><span class="rar" title="${LABEL[it.rarity]}"></span>${it.loan ? '<span class="slot-loan" title="Champion prêté par la rotation de la semaine">Prêt</span>' : ''}
-        ${it.champ.profile ? `<span class="slot-fit ${fit > 0 ? 'up' : 'down'}" title="${fitLabel(fit)}">${signed(fit)} %</span>` : ''}${metaTag(it.champ, 'slot-meta')}`
-        : `<span class="plus">${editable ? '+' : '—'}</span>`}
-      <span class="role">${role}</span></${tag}>`;
-  }).join('');
-  // L'analyse détaillée se replie : la puissance reste visible.
-  const wasOpen = $('#team-coach .coach-wrap')?.open;
-  $('#team-coach').innerHTML = editable ? `<details class="coach-wrap"${wasOpen ? ' open' : ''}><summary><span>Analyse de l'équipe</span><span>Puissance <b>${teamPower(rosterItems(S.roster))}</b></span></summary>${coachHTML(S.roster)}</details>` : '';
+  $('#team-tabs').hidden = true;
+  $('#roster').innerHTML = teamRowHTML(slots, editable);
+  $('#team-coach').innerHTML = editable ? notesHTML(teamNotes(its).slice(0, 2)) : '';
+  if ($('#composer') && !$('#composer').hidden) drawComposer();
 }
 
 // ---------- Aide à la composition (miroir des règles du serveur, BattleRules) ----------
@@ -921,40 +938,44 @@ function coachHTML(slots) {
   </div>`;
 }
 
-// Sélecteur d'un poste : objets classés par bonus de poste (principal, secondaire, hors poste), puis par rareté.
+// Sélecteur d'un poste : chaque candidat avec son gain réel de puissance pour l'équipe et la raison en une ligne.
 function showSlotPicker(index) {
   const current = keyOf(S.roster[index]);
-  const used = new Set(S.roster.map(keyOf).filter((k) => k && k !== current));
-  const taken = new Set(S.roster.map((s, i) => i !== index && slotItem(s)?.champ.id).filter(Boolean));
-  // Rotation : champions prêtés, hors ceux déjà possédés (la version possédée est Exaltée).
+  const used = new Set(fullSlots(S.roster).map(keyOf).filter((k) => k && k !== current));
+  const taken = new Set(fullSlots(S.roster).map((sl, i) => i !== index && slotItem(sl)?.champ.id).filter(Boolean));
   const loans = [...rotationIds()].filter((id) => !S.owned.has(`CHAMPION:${id}`)).map(loanItem);
-  const items = [...S.owned.keys()].map(fromKey).concat(loans).filter((it) => it && !used.has(it.key))
-    .sort((a, b) => fitOf(b.champ, index) - fitOf(a.champ, index) || rank(b.rarity) - rank(a.rarity) || a.name.localeCompare(b.name, 'fr'));
-  const groups = [
-    { fit: FIT.main, title: 'Poste principal', note: '+12 %' },
-    { fit: FIT.secondary, title: 'Poste secondaire', note: '+8 %' },
-    { fit: FIT.off, title: 'Hors poste', note: '−10 %' },
-  ].map((g) => ({ ...g, its: items.filter((it) => (it.champ.profile ? fitOf(it.champ, index) : FIT.off) === g.fit) })).filter((g) => g.its.length);
-  const best = items.find((it) => !taken.has(it.champ.id));
-  openSheet(`<div class="picker">
-    <h2>Poste ${ROLES[index]}</h2>
-    <p class="muted">Les champions faits pour ce poste d'abord. Tous les postes restent ouverts, avec un malus hors poste.</p>
-    ${S.rotation?.championIds.length ? `<p class="pick-rotation"><b>Rotation de la semaine</b> ${S.rotation.championIds.length} champions prêtés à tous, marqués « Prêt » : rareté Commune, sans bonus de rareté. Ils repartent ${fmtWeekEnd(S.rotation.endsAt)}.</p>` : ''}
-    ${items.length ? `<input type="search" id="pick-search" placeholder="Rechercher dans ta collection" autocomplete="off">` : ''}
-    ${current ? `<button class="btn ghost small" data-pick-clear="${index}">Retirer du poste</button>` : ''}
-    ${items.length ? groups.map((g) => `<section class="pick-group">
-        <div class="group-head"><h3>${g.title}</h3><span class="fit ${g.fit > 0 ? 'up' : 'down'}">${g.note}</span><span class="num">${g.its.length}</span></div>
-        <div class="grid">${g.its.map((it) => pickCard(it, index, { selected: it.key === current, best: it === best, dup: taken.has(it.champ.id) })).join('')}</div>
-      </section>`).join('') : '<p class="empty-note">Ouvre des reliques pour remplir ton roster.</p>'}
+  const cur = rosterItems(fullSlots(S.roster)), base = teamPower(cur);
+  const needsBefore = teamNeeds(cur);
+  const rows = [...S.owned.keys()].map(fromKey).concat(loans).filter((it) => it && !used.has(it.key)).map((it) => {
+    const next = cur.slice(); next[index] = it;
+    const gain = teamPower(next) - base;
+    const fit = fitOf(it.champ, index), meta = metaOf(it.champ);
+    const fixes = needsBefore.filter((x, k) => !x.ok && teamNeeds(next)[k].ok).map((x) => x.label.toLowerCase());
+    const why = [
+      CLASS[primaryClass(it.champ)?.toUpperCase()]?.label,
+      fixes.length ? `<span class="up">corrige ${fixes.join(', ')}</span>` : '',
+      meta > 0 ? `<span class="up">buff ${signed(meta)} %</span>` : meta < 0 ? `<span class="down">nerf ${signed(meta)} %</span>` : '',
+      it.champ.profile && fit < 0 ? `<span class="down">hors poste −10 %</span>` : '',
+      taken.has(it.champ.id) ? '<span class="down">déjà dans l\'équipe</span>' : '',
+      it.loan ? 'prêt de la semaine' : '',
+    ].filter(Boolean).join(' · ');
+    return { it, gain, fit, meta, why, sel: it.key === current };
+  }).sort((a, b) => b.sel - a.sel || b.gain - a.gain || rank(b.it.rarity) - rank(a.it.rarity));
+  const row = (r) => `<button type="button" class="pk-row${r.sel ? ' sel' : ''}" data-pick="${r.it.key}" data-slot-index="${index}" data-f="${r.fit === FIT.main ? 'main' : ''} ${r.meta > 0 ? 'buff' : ''}" data-q="${esc(`${r.it.name} ${r.it.sub}`.toLowerCase().normalize('NFD').replace(/\p{M}/gu, ''))}">
+      <span class="pk-art r-${r.it.rarity}"><img loading="lazy" src="${esc(r.it.splash)}" alt=""></span>
+      <span class="pk-txt"><b>${esc(r.it.name)} <em class="tg r-${r.it.rarity}">${LABEL[r.it.rarity]}</em>${r.sel ? ' <em class="tg eq">équipé</em>' : ''}</b><span>${r.why}</span></span>
+      <span class="pk-gain"><b class="num ${r.sel ? '' : r.gain > 0 ? 'up' : r.gain < 0 ? 'down' : ''}">${r.sel ? '—' : `${r.gain > 0 ? '+' : r.gain < 0 ? '−' : ''}${Math.abs(r.gain)}`}</b><small>${base + (r.sel ? 0 : r.gain)}</small></span></button>`;
+  openSheet(`<div class="picker2">
+    <div class="pk-head">${roleIcon(index, 'big')}<h2>${ROLES[index]}</h2><span class="muted">équipe ${base}</span></div>
+    <div class="pk-chips" role="group"><button type="button" data-pk="" aria-pressed="true">Meilleurs</button><button type="button" data-pk="main" aria-pressed="false">Poste principal</button><button type="button" data-pk="buff" aria-pressed="false">Buffés</button></div>
+    ${rows.length > 8 ? '<input type="search" id="pick-search" placeholder="Rechercher dans ta collection" autocomplete="off">' : ''}
+    ${current ? `<button class="btn small pk-clear" type="button" data-pick-clear="${index}">Retirer du poste</button>` : ''}
+    <div class="pk-list">${rows.length ? rows.map(row).join('') : '<p class="empty-note">Ouvre des reliques pour remplir ton équipe.</p>'}</div>
   </div>`);
-  $('#pick-search')?.addEventListener('input', (e) => {
-    const q = e.target.value.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').trim();
-    $$('.picker .card').forEach((c) => {
-      const it = fromKey(c.dataset.pick);
-      c.hidden = !!q && !`${it.name} ${it.sub}`.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').includes(q);
-    });
-    $$('.pick-group').forEach((g) => { g.hidden = !$$('.card', g).some((c) => !c.hidden); });
-  });
+  let f = '', q = '';
+  const apply = () => $$('.pk-row').forEach((r) => { r.hidden = (f && !r.dataset.f.includes(f)) || (q && !r.dataset.q.includes(q)); });
+  $$('[data-pk]').forEach((b) => (b.onclick = () => { f = b.dataset.pk; $$('[data-pk]').forEach((x) => x.setAttribute('aria-pressed', String(x === b))); apply(); }));
+  $('#pick-search')?.addEventListener('input', (e) => { q = e.target.value.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').trim(); apply(); });
 }
 
 function pickCard(it, index, { selected = false, best = false, dup = false } = {}) {
@@ -992,6 +1013,7 @@ async function selectTeam(i) {
   try {
     applyTeams(await api(`/capsules/teams/${i}/select`, { method: 'POST' }));
     renderRoster(); buzz(20);
+    if (S.view === 'arena') loadArena({ quiet: true });
     toast(`${S.teams[i].name} part au combat (et défend).`);
     if (S.arena) loadArena({ quiet: true });
   } catch (e) { toast(e.message, true); }
@@ -1089,9 +1111,8 @@ function friendHTML(p) {
   const pct = total ? Math.round((p.owned / total) * 1000) / 10 : 0;
   return `<div class="friend">
     <button class="friend-main" data-profile="${p.userId}" type="button">
-      ${avatarHTML(p)}
-      <span class="who"><b>${esc(p.displayName)}</b><span>${p.riotId ? esc(p.riotId) + ' · ' : ''}${p.owned} objets · ${pct}%</span></span>
-      <span class="mini-roster">${p.roster.map((s) => { const it = slotItem(s); return it ? `<img loading="lazy" class="r-${it.rarity}" src="${esc(it.art)}" alt="">` : '<i></i>'; }).join('')}</span>
+      <span class="fring" style="--tc:${p.frame ? TIER[p.frame].color : 'var(--line-2)'}">${avatarInner(p)}</span>
+      <span class="who"><b>${esc(p.displayName)}</b><span>${fmtInt(p.owned)} objets · ${String(pct).replace('.', ',')} %</span></span>
     </button>
     ${p.added ? `<button class="icon-btn" data-unfriend="${p.userId}" aria-label="Retirer ${esc(p.displayName)}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`
       : `<button class="btn small" data-befriend="${p.userId}">Ajouter</button>`}
@@ -1250,10 +1271,10 @@ async function showProfile(userId) {
 
     openSheet(`<div class="pf" style="--tc:${TIER[s.tier].color}">
       <div class="pf-hero">
-        <span class="pf-avatar">${avatarHTML(p)}</span>
-        <h2>${esc(p.displayName)}</h2>
-        <div class="pf-tags">${tierBadge(s.tier)}${s.rank ? `<span class="pf-rank">#${s.rank} sur ${s.ranked}</span>` : ''}${top && s.rank > 1 && top <= 50 ? `<span class="pf-top">Top ${top} %</span>` : ''}</div>
-        <div class="pf-rating"><b>${s.rating}</b><span>pts · record ${s.bestRating}</span></div>
+        <span class="fring pf-ring" style="--tc:${TIER[s.tier].color}">${avatarInner(p)}</span>
+        <div class="pf-id"><h2>${esc(p.displayName)}</h2>
+          <div class="pf-tags"><span class="tg" style="--rc:${TIER[s.tier].color}">${TIER[s.tier].label}</span><span class="muted">${fmtInt(s.rating)}${s.rank ? ` · #${s.rank} sur ${s.ranked}` : ''}</span></div>
+          <span class="muted pf-best">record ${fmtInt(s.bestRating)}${top && s.rank > 1 && top <= 50 ? ` · top ${top} %` : ''}</span></div>
       </div>
       <div class="pf-titles">${profileTitles(s, collPct).map(([t, c]) => `<span class="pf-title ${c}">${t}</span>`).join('')}</div>
       ${games ? `
@@ -1539,30 +1560,26 @@ async function renderBoss() {
 }
 
 function bossHTML(b) {
-  const units = b.team.units.map((u) => `<div class="boss-unit r-${u.rarity}">${unitImg(u)}<span class="role">${ROLES[u.role]}</span><b>${esc(u.champion)}</b></div>`).join('');
-  const rows = b.top.map((e) => `<button type="button" class="lrow${e.userId === S.user?.id ? ' me' : ''}${e.rank <= 3 ? ` podium p${e.rank}` : ''}" data-profile="${e.userId}">
+  const lead = unitItem(b.team.units[2] || b.team.units[0]);
+  const units = b.team.units.map((u) => `<div class="tport r-${u.rarity}">${unitImg(u)}${roleIcon(u.role)}</div>`).join('');
+  const rows = b.top.map((e) => `<button type="button" class="lrow${e.userId === S.user?.id ? ' me' : ''}" data-profile="${e.userId}">
     <span class="rank">${e.rank}</span>${avatarHTML(e)}
     <span class="who"><b>${esc(e.displayName)}${e.userId === S.user?.id ? ' (toi)' : ''}</b><span>${e.attempts} tentative${e.attempts > 1 ? 's' : ''}</span></span>
     <b class="pts">${fmtInt(e.best)}</b></button>`).join('');
   const wait = Date.parse(b.resetAt) - now();
-  return `<section class="boss">
-    <div class="boss-head"><span class="kicker">Boss de la semaine · fin dans ${daysLeft(b.endsAt)}</span><h2>${esc(b.name)}</h2>
-      <p class="muted">Équipe Exaltée gonflée à +35 %. Fais un max de dégâts : ${b.killPoints} par kill, ${b.towerPoints} par tour, ${fmtInt(b.winPoints)} si tu le bats.
-        C'est toi qui fais les calls : à chaque phase, lis les intentions du boss et contre-le (+${b.readPoints} par call réussi). Ton meilleur score compte.</p></div>
-    <div class="boss-units">${units}</div>
-    <div class="boss-me"><div><span class="kicker">Ton record</span><b>${b.myBest != null ? fmtInt(b.myBest) : '—'}</b><span>${b.myRank ? `#${b.myRank} cette semaine` : 'pas encore classé'}</span></div>
-      <div><span class="kicker">Tentatives</span><b>${b.attemptsLeft} / ${b.attemptsPerDay}</b><span>aujourd'hui</span></div></div>
-    <button class="btn primary big block" id="boss-go" type="button" ${b.openRun || (b.attemptsLeft && b.mine) ? '' : 'disabled'}>${b.openRun ? 'Reprendre la partie en cours'
-      : !b.mine ? 'Complète ton roster d\'abord' : b.attemptsLeft ? 'Attaquer le boss' : `Nouvelles tentatives ${fmtWait(wait)}`}</button>
-    <p class="muted boss-rewards">Lundi : 1er +3 prestige, 2e +2, 3e +1, tous les autres participants +1 relique. Chaque tentative donne de l'XP de pass.</p>
+  return `<section class="boss2">
+    <div class="b2-banner" style="${lead ? `background-image:url('${esc(lead.splash)}')` : ''}"><div><span class="kicker">Boss · fin dans ${daysLeft(b.endsAt)}</span><h2>${esc(b.name)}</h2></div></div>
+    <div class="trow">${units}</div>
+    <p class="muted b2-rule">Équipe Exaltée à <b>+35 %</b>. Fais un max de dégâts et lis ses intentions à chaque phase.</p>
+    <div class="b2-me"><div><span class="kicker">Ton record</span><b class="num">${b.myBest != null ? fmtInt(b.myBest) : '—'}</b><span>${b.myRank ? `#${b.myRank} cette semaine` : 'pas encore classé'}</span></div>
+      <div class="r"><span class="kicker">Tentatives</span><b class="num">${b.attemptsLeft} / ${b.attemptsPerDay}</b><span>aujourd'hui</span></div></div>
+    <button class="btn primary block" id="boss-go" type="button" ${b.openRun || (b.attemptsLeft && b.mine) ? '' : 'disabled'}>${b.openRun ? 'Reprendre la partie en cours'
+      : !b.mine ? 'Complète ton équipe d\'abord' : b.attemptsLeft ? 'Attaquer le boss' : `Nouvelles tentatives ${fmtWait(wait)}`}</button>
+    <details class="vs-more"><summary>Règles et récompenses</summary><p class="muted">${b.killPoints} points par kill, ${b.towerPoints} par tour, ${fmtInt(b.winPoints)} si tu le bats, +${b.readPoints} par call réussi. Ton meilleur score compte. Lundi : 1er +3 prestige, 2e +2, 3e +1, tous les autres participants +1 relique.</p></details>
     <div class="section-head"><h2>Dégâts infligés</h2><span class="muted">${b.top.length} joueur${b.top.length > 1 ? 's' : ''}</span></div>
     ${rows ? `<div class="ladder">${rows}</div>` : '<p class="empty-note">Personne n\'a encore attaqué : sois le premier.</p>'}
   </section>`;
 }
-
-/** Coquille de combat pour une partie contre le boss en cours (avant la fin, pas de score). */
-const bossShell = (s) => ({ id: s.runId, attacker: s.me, defender: s.boss, a: s.a, b: s.b, events: s.events, attackerWon: false,
-  boss: true, essence: 0, passXp: 0, minutes: 0 });
 
 async function attackBoss() {
   const btn = $('#boss-go'); btn.disabled = true; btn.textContent = 'Combat en cours…';
@@ -1628,12 +1645,12 @@ function renderArenaTeam() {
       <button class="btn primary small" data-goto="collection">Compléter mon roster</button></div>`;
     return;
   }
+  const its = rosterItems(fullSlots(S.roster));
   el.innerHTML = `<div class="team-strip">
-      <div class="ts-head"><b>Ton équipe</b>${riskHTML(a.team)}<span class="ts-pow">Puissance <b class="num">${a.team.power}</b></span></div>
-      <div class="ts-row">${a.team.units.map((u) => `<button type="button" class="ts-unit r-${u.rarity}" data-unit="${u.role}" aria-label="${esc(u.champion)}">${unitImg(u)}<span class="ts-role">${ROLES[u.role]}</span></button>`).join('')}</div>
-      <div class="team-foot">${synergyHTML(a.team.synergies)}<button class="btn small" type="button" id="arena-compose">Composer</button></div>
+      <div class="ts-head"><b>Mon équipe</b><span class="ts-pow">Puissance <b class="num">${a.team.power}</b></span><button class="btn small" type="button" data-compose="0">Composer</button></div>
+      ${teamRowHTML(S.roster, true)}
+      ${notesHTML(teamNotes(its).slice(0, 2))}
     </div>`;
-  $('#arena-compose').onclick = () => showComposer(0);
 }
 
 function renderArenaBody() {
@@ -1648,18 +1665,15 @@ function renderArenaBody() {
 function foeHTML(o) {
   const p = o.player;
   const wait = o.availableAt ? Date.parse(o.availableAt) - now() : 0;
-  const status = o.revenge ? '<span class="cta revenge">Revanche</span>'
-    : wait > 0 ? `<span class="cta wait">${fmtWait(wait)}</span>` : '<span class="cta">Défier</span>';
+  const status = wait > 0 ? `<span class="tchip z">${fmtWait(wait)}</span>` : '';
   // Puissance de son roster estimée côté client (rareté, poste, méta), comparée à la tienne : un repère, pas une prédiction.
   const theirs = S.cat ? teamPower(rosterItems(p.roster)) : 0, mine = S.arena?.team?.power || 0;
   const gap = mine && theirs ? (theirs - mine) / mine : 0;
   const cmp = !mine || !theirs ? '' : gap > 0.05 ? '<span class="tchip m">Plus fort</span>' : gap < -0.05 ? '<span class="tchip p">Moins fort</span>' : '<span class="tchip z">Même niveau</span>';
   return `<button class="foe${o.revenge ? ' hot' : ''}" data-foe="${p.userId}" type="button">
-    ${avatarHTML(p)}
-    <span class="who"><b>${esc(p.displayName)}${o.rookie ? ' <span class="foe-rookie">Recrue</span>' : ''}</b><span>${o.rating} pts${o.friend ? ' · ami' : ''}${theirs ? ` · équipe ${theirs}` : ''}</span></span>
-    ${cmp}
-    <span class="mini-roster">${p.roster.map((s) => { const it = S.cat && slotItem(s); return it ? `<img loading="lazy" class="r-${it.rarity}" src="${esc(it.art)}" alt="">` : '<i></i>'; }).join('')}</span>
-    ${status}
+    <span class="fring" style="--tc:${p.frame ? TIER[p.frame].color : TIER[tierOf(o.rating)].color}">${avatarInner(p)}</span>
+    <span class="who"><b>${esc(p.displayName)}${o.revenge ? ' <em class="tg rev">Revanche</em>' : ''}${o.rookie ? ' <em class="tg new">Recrue</em>' : ''}</b><span>${fmtInt(o.rating)}${theirs ? ` · équipe ${theirs}` : ''}</span></span>
+    ${status || cmp}
   </button>`;
 }
 
@@ -1686,10 +1700,10 @@ function ladderTags(e) {
 function ladderRowHTML(e) {
   const mine = e.userId === S.user?.id;
   return `<button type="button" class="lrow${mine ? ' me' : ''}${e.rank <= 3 ? ` podium p${e.rank}` : ''}" data-profile="${e.userId}">
-    <span class="rank">${e.rank}</span>${avatarHTML(e)}
+    <span class="rank">${e.rank}</span><span class="fring" style="--tc:${TIER[tierOf(e.rating)].color}">${avatarInner(e)}</span>
     <span class="who"><b>${esc(e.displayName)}${mine ? ' (toi)' : ''}</b><span>${e.wins} V · ${e.losses} D</span>
       ${ladderTags(e)}</span>
-    ${tierBadge(tierOf(e.rating))}<b class="pts">${e.rating}</b></button>`;
+    <b class="pts">${fmtInt(e.rating)}</b></button>`;
 }
 
 async function renderLadder() {
@@ -3015,6 +3029,8 @@ function bind() {
     if (e.target.closest('[data-event]')) { showEvent(S.arena?.event || S.meta?.event); return; }
     const team = e.target.closest('[data-team]');
     if (team) { selectTeam(+team.dataset.team); return; }
+    const comp = e.target.closest('[data-compose]');
+    if (comp) { showComposer(+comp.dataset.compose); return; }
     const slot = e.target.closest('[data-slot]');
     if (slot) { showSlotPicker(+slot.dataset.slot); return; }
     if (e.target.closest('#coach-meta')) { showMeta(); return; }
@@ -3104,35 +3120,60 @@ function bind() {
   });
 }
 
-/** Compositeur d'équipe : carrousel des 5 postes, chaque skin en grand avec ce qu'il apporte. */
+/** Compositeur d'équipe : écran plein, un poste à la fois en grand, avec ce qu'il apporte et l'analyse de l'équipe. */
+const COMP = { i: 0 };
 function showComposer(start = 0) {
-  let i = start;
-  const draw = () => {
-    const its = rosterItems(Array.from({ length: 5 }, (_, k) => S.roster?.[k] ?? null));
-    const it = its[i], prev = its[(i + 4) % 5], next = its[(i + 1) % 5];
-    const side = (x, cls) => `<div class="cp-side ${cls}${x ? ` r-${x.rarity}` : ''}">${x ? `<img src="${esc(x.art)}" ${x.fb ? `data-fb="${esc(x.fb)}"` : ''} alt="">` : ''}</div>`;
-    const fit = it ? fitOf(it.champ, i) : 0, meta = it ? metaOf(it.champ) : 0;
-    $('#sheet-body').innerHTML = `<div class="composer">
-      <div class="cp-head"><span class="kicker">${esc(S.teams?.[S.activeTeam]?.name || 'Équipe')}</span><span>Puissance <b class="num">${teamPower(its)}</b></span></div>
-      <div class="cp-stage">${side(prev, 'l')}${side(next, 'r')}
-        <div class="cp-main${it ? ` r-${it.rarity}` : ' empty'}" data-slot="${i}" role="button" tabindex="0" aria-label="Changer le ${ROLES[i]}">
-          ${it ? `<img src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt=""><div class="cp-cap"><div class="cp-role"><span>${ROLES[i]}</span><b class="num">${unitPower(it, i)}</b></div><b>${esc(it.name)}</b><span>${esc(it.sub)}</span></div>`
-            : `<div class="cp-empty"><b>+</b><span>${ROLES[i]} libre</span></div>`}
-        </div></div>
-      <div class="cp-roles">${ROLES.map((r, k) => `<button type="button" data-cp="${k}" aria-pressed="${k === i}">${r}</button>`).join('')}</div>
-      ${it ? `<div class="ub-chips">${it.champ.profile ? `<span class="tchip ${fit > 0 ? 'p' : 'm'}">${fit === FIT.main ? 'Poste principal' : fit === FIT.secondary ? 'Poste secondaire' : 'Hors poste'} ${signed(fit)} %</span>` : ''}<span class="tchip ${meta > 0 ? 'p' : meta < 0 ? 'm' : 'z'}">Méta ${signed(meta)} %</span></div>` : ''}
-      <button class="btn primary block" type="button" data-slot="${i}">${it ? `Changer ${esc(it.champ.name)}` : `Choisir un ${ROLES[i]}`}</button>
-    </div>`;
-    $$('[data-cp]').forEach((b) => (b.onclick = () => { i = +b.dataset.cp; draw(); }));
-    const st = $('.cp-stage');
+  COMP.i = start;
+  let el = $('#composer');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'composer'; el.className = 'composer2'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', 'Composer mon équipe');
+    document.body.appendChild(el);
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-cp-close]')) { el.hidden = true; return; }
+      const r = e.target.closest('[data-cp]'); if (r) { COMP.i = +r.dataset.cp; drawComposer(); return; }
+      const t = e.target.closest('[data-cp-team]'); if (t) { selectTeam(+t.dataset.cpTeam); return; }
+      if (e.target.closest('.cp-side.l')) { COMP.i = (COMP.i + 4) % 5; drawComposer(); return; }
+      if (e.target.closest('.cp-side.r')) { COMP.i = (COMP.i + 1) % 5; drawComposer(); return; }
+      const ch = e.target.closest('[data-cp-change]'); if (ch) showSlotPicker(COMP.i);
+    });
     let x0 = null;
-    st.ontouchstart = (e) => { x0 = e.touches[0].clientX; };
-    st.ontouchend = (e) => { if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 40) { i = (i + (dx < 0 ? 1 : 4)) % 5; draw(); } };
-    $('.cp-side.l').onclick = () => { i = (i + 4) % 5; draw(); };
-    $('.cp-side.r').onclick = () => { i = (i + 1) % 5; draw(); };
-  };
-  $('#sheet').hidden = false;
-  draw();
+    el.addEventListener('touchstart', (e) => { if (e.target.closest('.cp-stage')) x0 = e.touches[0].clientX; }, { passive: true });
+    el.addEventListener('touchend', (e) => { if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 40) { COMP.i = (COMP.i + (dx < 0 ? 1 : 4)) % 5; drawComposer(); } });
+  }
+  el.hidden = false;
+  drawComposer();
+}
+
+function drawComposer() {
+  const el = $('#composer'); if (!el || el.hidden) return;
+  const i = COMP.i;
+  const its = rosterItems(fullSlots(S.roster));
+  const it = its[i], prev = its[(i + 4) % 5], next = its[(i + 1) % 5];
+  const side = (x, cls) => `<div class="cp-side ${cls}${x ? ` r-${x.rarity}` : ''}">${x ? `<img src="${esc(x.art)}" ${x.fb ? `data-fb="${esc(x.fb)}"` : ''} alt="">` : ''}</div>`;
+  const fit = it ? fitOf(it.champ, i) : 0, meta = it ? metaOf(it.champ) : 0;
+  const p = it?.champ.profile;
+  const chips = it ? [
+    p ? `<span class="tchip ${fit > 0 ? 'p' : 'm'}">${fit === FIT.main ? 'Poste principal' : fit === FIT.secondary ? 'Poste secondaire' : 'Hors poste'} ${signed(fit)} %</span>` : '',
+    `<span class="tchip ${meta > 0 ? 'p' : meta < 0 ? 'm' : 'z'}">Méta ${signed(meta)} %</span>`,
+    p ? `<span class="tchip z">${CURVE[p.curve].label} · ${STYLE[p.style].label}</span>` : '',
+  ].join('') : '';
+  const team = S.teams?.[S.activeTeam];
+  const risk = S.arena?.team ? riskOf(S.arena.team)[0] : null;
+  el.innerHTML = `<div class="cp-amb" style="${it ? `background-image:url('${esc(it.splash)}')` : ''}"></div>
+    <div class="cp-top"><button class="icon-btn" type="button" data-cp-close aria-label="Fermer"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none"/></svg></button>
+      <div class="cp-teams">${(S.teams || []).map((t, k) => `<button type="button" data-cp-team="${k}" aria-pressed="${k === S.activeTeam}">${esc(t.name)}</button>`).join('')}</div>
+      <b class="num cp-pow">${teamPower(its)}</b></div>
+    <div class="cp-stage">${side(prev, 'l')}${side(next, 'r')}
+      <div class="cp-main${it ? ` r-${it.rarity}` : ' empty'}" data-cp-change role="button" tabindex="0" aria-label="Changer le ${ROLES[i]}">
+        ${it ? `<img src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt=""><div class="cp-cap"><div class="cp-role">${roleIcon(i)}<span>${ROLES[i]}</span><b class="num">${unitPower(it, i)}</b></div><b>${esc(it.name)}</b><span>${esc(CLASS[primaryClass(it.champ)?.toUpperCase()]?.label || '')}${it.champ.talent ? ` · Talent ${esc(it.champ.talent.spell)}` : ''}</span></div>`
+          : `<div class="cp-empty"><b>+</b><span>${ROLES[i]} libre</span></div>`}
+      </div></div>
+    <div class="cp-roles">${ROLES.map((r, k) => `<button type="button" data-cp="${k}" aria-pressed="${k === i}" aria-label="${r}">${roleIcon(k)}</button>`).join('')}</div>
+    <div class="cp-chips">${chips}</div>
+    <div class="cp-card">${notesHTML(teamNotes(its))}${risk ? `<div class="tnote"><span class="muted">Risque de l'équipe</span><b class="cp-risk">${risk}</b></div>` : ''}
+      <div class="tnote"><span class="muted">${curveVerdict(its)}</span></div></div>
+    <button class="btn primary block cp-go" type="button" data-cp-change>${it ? `Changer ${esc(it.champ.name)}` : `Choisir un ${ROLES[i]}`}</button>`;
+  if (team) $$('[data-cp-team]', el).forEach((b) => (b.title = +b.dataset.cpTeam === S.activeTeam ? 'Équipe active (touche pour renommer)' : 'Jouer avec cette équipe'));
 }
 
 function syncSegmented() { $$('.coll-controls .segmented button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.group === S.coll.group))); }
@@ -3144,7 +3185,7 @@ const AHRI_ID = () => S.cat?.champions?.find((c) => c.alias === 'Ahri')?.id ?? 1
 const isAhriSrc = (src) => /\/Ahri_\d/.test(src) || src.endsWith(`/champion-icons/${AHRI_ID()}.png`);
 const isAhriItem = (it) => it?.champ?.alias === 'Ahri';
 const ROUND = '.avatar, .sring, .fc-av, .vf-av, .pd-av, .token, .kf-face-wrap';
-const CARDS = '.card, .ts-unit, .slot, .cp-main, .unit-art, .boss-unit, .pg-mvp, .me-sig';
+const CARDS = '.card, .tport, .pk-art, .cp-main, .cp-side, .unit-art, .pg-mvp, .me-sig, .pf-champ';
 
 function ahrify(root = document) {
   if (!root.querySelectorAll) return;

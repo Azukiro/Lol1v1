@@ -1340,3 +1340,5 @@ button.lrow:hover, button.lrow:focus-visible { border-color: var(--line-2); }
 .odds-table > .name { text-transform: none; letter-spacing: 0; font-weight: 800; font-family: var(--body); }
 .odds-table > .h { letter-spacing: .1em; font-family: var(--body); }
 .odds-table > .sel { font-weight: 800; font-stretch: 80%; font-size: 15px; }
+
+.tap-hint, .tap-again { text-transform: none; letter-spacing: .02em; font-size: 13px; font-weight: 600; }

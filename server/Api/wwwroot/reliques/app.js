@@ -287,6 +287,19 @@ const fx = {
   },
 };
 
+const restart = (el, cls) => { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); };
+const SPARK = '<svg viewBox="0 0 24 24"><path d="M12 0c.7 6.4 5.6 11.3 12 12-6.4.7-11.3 5.6-12 12-.7-6.4-5.6-11.3-12-12C6.4 11.3 11.3 6.4 12 0z"/></svg>';
+/** Quelques étincelles en étoile autour du cristal, plutôt qu'une pluie de confettis. */
+function sparkle(n, color, spread = 120) {
+  const host = $('#sparks'); if (!host || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  for (let i = 0; i < n; i++) {
+    const sp = document.createElement('span'); sp.className = 'spark'; sp.innerHTML = SPARK;
+    const a = Math.random() * Math.PI * 2, d = 50 + Math.random() * spread;
+    sp.style.cssText = `left:calc(50% + ${Math.cos(a) * d}px);top:calc(42% + ${Math.sin(a) * d}px);color:${color};--sz:${10 + Math.random() * 16}px;animation-delay:${Math.random() * 0.2}s`;
+    host.appendChild(sp); setTimeout(() => sp.remove(), 1400);
+  }
+}
+
 // ---------- État et minuterie ----------
 const now = () => Date.now() + S.clockOffset;
 
@@ -313,6 +326,10 @@ function renderTimer() {
   const left = Math.max(0, w.nextAtMs - now());
   const m = Math.floor(left / 60000); const s = Math.floor((left % 60000) / 1000);
   $('#next-text').textContent = `prochaine dans ${m}:${String(s).padStart(2, '0')}`;
+  const nx = $('#ring-next');
+  if (nx && S.type !== 'PREMIUM') { const n = w.maxStock, i = w.available, r = 136, c = 150, frac = Math.max(0.001, 1 - left / (w.intervalSeconds * 1000));
+    const pt = (a) => `${(c + r * Math.cos(a)).toFixed(1)} ${(c + r * Math.sin(a)).toFixed(1)}`, a0 = (i / n) * Math.PI * 2 - Math.PI / 2 + 0.06, a1 = a0 + (((i + 1) / n) * Math.PI * 2 - Math.PI / 2 - 0.06 - a0) * frac;
+    nx.setAttribute('d', `M${pt(a0)} A${r} ${r} 0 0 1 ${pt(a1)}`); }
   $('#timer-fill').style.width = `${100 - (left / (w.intervalSeconds * 1000)) * 100}%`;
 }
 
@@ -331,7 +348,11 @@ function renderWallet() {
   $('#capsule').classList.toggle('empty', !has);
   $('#capsule').disabled = !has;
   $('#capsule-count').textContent = stock;
-  $('#tap-hint').textContent = has ? 'Touche pour ouvrir' : premium ? `Forge-en une : ${w.essencePerPremium} essence` : 'Reviens bientôt';
+  $('#tap-hint').textContent = has ? 'Touche le cristal pour l’ouvrir' : premium ? `Forge-en une : ${w.essencePerPremium} essence` : 'Le prochain cristal arrive bientôt';
+  $('#stock-n').textContent = premium ? w.premiumAvailable : w.available;
+  $('#stock-max').textContent = w.maxStock;
+  $('#stock-max').parentElement.hidden = premium;
+  renderStockRing();
   $('#pips').innerHTML = Array.from({ length: w.maxStock }, (_, i) => `<i class="pip${i < w.available ? ' on' : ''}"></i>`).join('')
     + (w.available > w.maxStock ? '' : '');
   $('#stock-text').textContent = `${w.available} / ${w.maxStock} reliques${w.available > w.maxStock ? ' (bonus)' : ''}`;
@@ -341,7 +362,7 @@ function renderWallet() {
   $('#open-all').textContent = n >= 2 ? `Ouvrir ×${n}` : 'Tout ouvrir';
   $('#essence').textContent = w.essence;
   // Jauge jusqu'au prix d'une prestige, repère au prix d'une capsule.
-  $('#essence-text').textContent = `${w.essence} essence`;
+  $('#essence-text').textContent = `${fmtInt(w.essence)} essence`;
   $('#essence-fill').style.width = `${Math.min(100, (w.essence / w.essencePerPremium) * 100)}%`;
   $('#essence-tick').style.left = `${(w.essencePerCapsule / w.essencePerPremium) * 100}%`;
   $('#price-std').textContent = w.essencePerCapsule;
@@ -357,6 +378,20 @@ function renderWallet() {
   try { all ? navigator.setAppBadge?.(all) : navigator.clearAppBadge?.(); } catch { /* non supporté */ }
   $('#debug').hidden = !w.debug;
   renderTimer();
+}
+
+/** Anneau de stock autour du cristal : un cran par relique, le cran suivant se remplit avec le minuteur. */
+function renderStockRing() {
+  const w = S.wallet, el = $('#stock-ring'); if (!w || !el) return;
+  const premium = S.type === 'PREMIUM', n = premium ? Math.max(1, Math.min(10, w.premiumAvailable)) : w.maxStock;
+  const full = premium ? w.premiumAvailable : w.available, r = 136, c = 150;
+  const pt = (a) => `${(c + r * Math.cos(a)).toFixed(1)} ${(c + r * Math.sin(a)).toFixed(1)}`;
+  const arc = (i, frac = 1) => { const a0 = (i / n) * Math.PI * 2 - Math.PI / 2 + 0.06, a1 = a0 + (((i + 1) / n) * Math.PI * 2 - Math.PI / 2 - 0.06 - a0) * frac; return `M${pt(a0)} A${r} ${r} 0 0 1 ${pt(a1)}`; };
+  let out = '';
+  for (let i = 0; i < n; i++) out += `<path d="${arc(i)}" class="${i < full ? 'on' : ''}"/>`;
+  if (!premium && full < n) out += `<path d="${arc(full, 0.001)}" class="next" id="ring-next"/>`;
+  el.innerHTML = out;
+  el.classList.toggle('premium', premium);
 }
 
 function renderRecent() {
@@ -381,7 +416,9 @@ async function openCapsules(count) {
   reveal.hidden = false; reveal.style.setProperty('--glow', startGlow);
   $('#reveal-single').hidden = true; $('#reveal-multi').hidden = true; $('#reveal-actions').hidden = true; $('#rays').className = 'rays';
   skipper.on = false;
-  cap.hidden = false; cap.className = 'reveal-capsule charge';
+  cap.hidden = false; cap.className = 'reveal-capsule descend';
+  $$('.cracks path', cap).forEach((c) => c.classList.remove('on'));
+  $('#pillar').className = 'pillar on';
   buzz(30);
   let res;
   try {
@@ -391,23 +428,26 @@ async function openCapsules(count) {
   }
   const best = res.drops.reduce((m, d) => (rank(d.rarity) > rank(m) ? d.rarity : m), 'COMMON');
 
-  // Montée en tension : la lueur passe par chaque palier jusqu'à la rareté obtenue.
-  const steps = rank(best) <= 1 ? [best] : RARITIES.slice(2, rank(best) + 1);
+  // Montée de palier : la colonne de lumière passe par chaque rareté, le cristal se fissure un peu plus à chaque fois.
+  const steps = rank(best) <= 1 ? [best] : RARITIES.slice(1, rank(best) + 1);
+  const cracks = $$('.cracks path', cap);
   for (let i = 0; i < steps.length; i++) {
     if (skipper.on) { reveal.style.setProperty('--glow', COLOR[best]); break; }
     reveal.style.setProperty('--glow', COLOR[steps[i]]);
-    if (i === steps.length - 1 && rank(best) >= 3) cap.classList.add('hard');
+    restart($('#pillar'), 'pulse'); restart(cap, `shake${Math.min(i, 3)}`);
+    cracks.slice(0, Math.min(cracks.length, (i + 1) * 2)).forEach((c) => c.classList.add('on'));
+    sparkle(3 + i * 2, COLOR[steps[i]]);
     audio.step(rank(steps[i])); buzz(20 + i * 15);
-    await pause(count > 1 ? 320 : 420 + i * 90);
+    await pause(count > 1 ? 340 : 480 + i * 70);
   }
-  cap.className = 'reveal-capsule pop';
-  await pause(220);
+  cap.classList.add('pop');
+  await pause(200);
   const r = rank(best);
-  $('#flash').className = 'flash'; void $('#flash').offsetWidth; $('#flash').className = 'flash go';
-  const box = cap.getBoundingClientRect();
-  fx.burst(box.left + box.width / 2, box.top + box.height / 2, best, 80 + r * 40, 0.8 + r * 0.15);
+  restart($('#flash'), 'go'); restart($('#wave'), 'go');
+  sparkle(8 + r * 2, '#fff3d0', 170);
   audio.burst(r); buzz(r >= 3 ? [60, 40, 120] : 50);
   if (r >= 2) $('#rays').className = 'rays on';
+  $('#pillar').className = 'pillar';
   cap.hidden = true;
 
   for (const d of res.drops) applyDrop(d);
@@ -436,16 +476,55 @@ function dropInfo(d, it) {
   </div>`;
 }
 
+/** Étoiles de rareté : 1 pour Commun … 7 pour Exalté. */
+const starsHTML = (r) => `<div class="stars" aria-label="${rank(r) + 1} étoiles">${Array.from({ length: rank(r) + 1 }, (_, i) => `<i style="animation-delay:${i * 0.18}s"><svg viewBox="0 0 24 24"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.5 1.3 6.6L12 17.2 6.1 20.5l1.3-6.6L2.5 9.4l6.6-.8z"/></svg></i>`).join('')}</div>`;
+
+/** Meilleur poste où le skin tiré renforce l'équipe active (même calcul que la puissance du roster). */
+function bestUpgrade(it) {
+  if (!it || S.friend) return null;
+  const cur = rosterItems(Array.from({ length: 5 }, (_, i) => S.roster?.[i] ?? null)), base = teamPower(cur);
+  let best = null;
+  for (let i = 0; i < 5; i++) {
+    if (cur[i]?.key === it.key) return null;
+    // Pas de doublon de champion : on ne remplace que son propre poste.
+    const other = cur.findIndex((x, j) => j !== i && x?.champ.id === it.champ.id);
+    if (other >= 0) continue;
+    const next = cur.slice(); next[i] = it;
+    const gain = teamPower(next) - base;
+    if (gain > 0 && (!best || gain > best.gain)) best = { slot: i, gain, from: cur[i], power: teamPower(next) };
+  }
+  return best;
+}
+
+function impactHTML(d, it) {
+  if (!d.isNew) return `<div class="impact dupe"><div><b>Doublon</b><span>Converti en essence</span></div><b class="num">+${d.essence}</b></div>`;
+  const up = bestUpgrade(it);
+  if (!up) return '';
+  return `<div class="impact"><div><b>${up.from ? `Meilleur que ton ${ROLES[up.slot]}` : `Poste ${ROLES[up.slot]} libre`}</b>
+    <span>${up.from ? `${esc(up.from.name)} → ${esc(it.name)}` : 'Il entre directement dans ton équipe'}</span></div><b class="num">+${up.gain}</b>
+    <button class="btn primary small" type="button" data-equip="${up.slot}" data-key="${it.key}">Équiper</button></div>`;
+}
+
 function showSingle(d) {
   const it = item(d.kind, d.itemId);
   const el = $('#reveal-single');
   const more = stockOf() > 0;
-  el.innerHTML = `<div class="big-card r-${d.rarity}${more ? ' tappable' : ''}" ${more ? 'role="button" tabindex="0" aria-label="Ouvrir la relique suivante"' : ''}>
-      ${cardHTML(it, { isNew: d.isNew, tag: 'div' })}</div>${dropInfo(d, it)}
-    ${more ? '<p class="tap-again">Touche la carte pour ouvrir la suivante</p>' : ''}`;
+  el.innerHTML = `<div class="summon r-${d.rarity}"><div class="summon-in">
+      <div class="summon-back"><svg viewBox="0 0 100 100"><use href="#crystal"/></svg></div>
+      <div class="summon-front big-card${more ? ' tappable' : ''}" ${more ? 'role="button" tabindex="0" aria-label="Ouvrir la relique suivante"' : ''}>${cardHTML(it, { isNew: d.isNew, tag: 'div' })}</div>
+    </div></div>
+    <div class="summon-after">${starsHTML(d.rarity)}${dropInfo(d, it)}${impactHTML(d, it)}
+    ${more ? '<p class="tap-again">Touche la carte pour ouvrir la suivante</p>' : ''}</div>`;
   el.hidden = false;
-  audio.chime(rank(d.rarity));
-  showRevealActions(false);
+  const sm = $('.summon', el);
+  // La carte arrive face cachée, se retourne sur la silhouette, puis la couleur revient.
+  requestAnimationFrame(() => sm.classList.add('in'));
+  setTimeout(() => { sm.classList.add('turn'); audio.chime(rank(d.rarity)); }, skipper.on ? 0 : 900);
+  setTimeout(() => sm.classList.add('color'), skipper.on ? 150 : 1450);
+  setTimeout(() => { el.classList.add('done'); showRevealActions(false); }, skipper.on ? 200 : 1650);
+  const eq = $('[data-equip]', el);
+  if (eq) eq.onclick = async (e) => { e.stopPropagation(); eq.disabled = true; await setSlot(+eq.dataset.equip, eq.dataset.key); eq.textContent = 'Équipé'; toast(`${it.name} rejoint ton équipe en ${ROLES[+eq.dataset.equip]}.`); };
+  $('#reveal-actions').hidden = true;
   if (more) {
     const card = $('.big-card', el);
     // Après l'animation de retournement, pour ne pas enchaîner sur un double tap.
@@ -488,8 +567,7 @@ function flipCard(el) {
   const d = JSON.parse($('#multi-grid').dataset.drops)[+el.dataset.i];
   const r = rank(d.rarity);
   if (r >= 2) {
-    const b = el.getBoundingClientRect();
-    setTimeout(() => fx.burst(b.left + b.width / 2, b.top + b.height / 2, d.rarity, 40 + r * 20, 0.5 + r * 0.1), 250);
+    el.style.setProperty('--rc', COLOR[d.rarity]);
     audio.chime(r); buzz(r >= 4 ? [40, 30, 80] : 30);
   } else audio.tone(420 + r * 120, 0.08, 'triangle', 0.08);
   if ($$('.flip:not(.open)').length === 0) multiDone(JSON.parse($('#multi-grid').dataset.drops));
@@ -498,7 +576,8 @@ function flipCard(el) {
 function multiDone(drops) {
   const news = drops.filter((d) => d.isNew).length;
   const ess = drops.reduce((s, d) => s + d.essence, 0);
-  $('#multi-sub').innerHTML = `<span class="multi-summary"><b>${news}</b> nouveauté${news > 1 ? 's' : ''}${ess ? ` · <b>+${ess}</b> essence` : ''}${stockOf() ? ' · touche une carte pour continuer' : ''}</span>`;
+  const ups = drops.filter((d) => d.isNew).map((d) => bestUpgrade(item(d.kind, d.itemId))).filter(Boolean).length;
+  $('#multi-sub').innerHTML = `<span class="multi-summary"><b>${news}</b> nouveauté${news > 1 ? 's' : ''}${ess ? ` · <b>+${ess}</b> essence` : ''}${ups ? ` · <b>${ups}</b> amélioration${ups > 1 ? 's' : ''} d'équipe` : ''}${stockOf() ? ' · touche une carte pour continuer' : ''}</span>`;
   showRevealActions(false);
 }
 
@@ -520,7 +599,7 @@ function showRevealActions(pending) {
 }
 
 function closeReveal() {
-  $('#reveal').hidden = true; $('#rays').className = 'rays';
+  $('#reveal').hidden = true; $('#rays').className = 'rays'; $('#reveal-single').classList.remove('done');
   S.busy = false; renderWallet();
 }
 
@@ -847,7 +926,7 @@ function pickCard(it, index, { selected = false, best = false, dup = false } = {
 }
 
 async function setSlot(index, key) {
-  const slots = S.roster.map((s) => (s ? { kind: s.kind, itemId: s.itemId, loan: !!s.loan } : null));
+  const slots = Array.from({ length: 5 }, (_, i) => S.roster?.[i] ?? null).map((s) => (s ? { kind: s.kind, itemId: s.itemId, loan: !!s.loan } : null));
   slots[index] = key ? (([kind, id]) => (kind === 'LOAN' ? { kind: 'CHAMPION', itemId: +id, loan: true } : { kind, itemId: +id }))(key.split(':')) : null;
   await saveRoster(slots);
 }
@@ -2690,6 +2769,7 @@ function bind() {
   $('#sound-toggle').onclick = () => { S.sound = !S.sound; store.set('capsules.sound', S.sound ? 'on' : 'off'); soundLabel(); };
   soundLabel();
   $('#odds-btn').onclick = () => { if (S.cat) showOdds(); };
+  $('#odds-row').onclick = () => { if (S.cat) showOdds(); };
   $('#profile-menu').onclick = () => { if (S.user) showProfile(S.user.id); };
   $('#guide-menu').onclick = () => showGuide();
   $('#logout-btn').onclick = logout;

@@ -63,39 +63,39 @@
 
       <section class="stage" aria-live="polite">
         <div class="stage-glow"></div>
+        <svg class="stock-ring" id="stock-ring" viewBox="0 0 300 300" aria-hidden="true"></svg>
         <button class="capsule" id="capsule" aria-label="Ouvrir une relique">
           <svg viewBox="0 0 200 220" aria-hidden="true"><use href="#capsule-art"/></svg>
-          <span class="capsule-count" id="capsule-count">0</span>
+          <span class="capsule-count" id="capsule-count" hidden>0</span>
         </button>
-        <div class="tap-hint" id="tap-hint">Touche pour ouvrir</div>
       </section>
-
-      <p class="premium-note" id="premium-note" hidden>Forgée avec l'essence. Aucun skin commun, Épique ou mieux 6 fois sur 10.</p>
 
       <section class="stock" id="stock">
-        <div class="pips" id="pips" aria-hidden="true"></div>
-        <div class="stock-line"><span id="stock-text">0 / 10 reliques</span><span class="sep">·</span><span id="next-text" class="muted"></span></div>
-        <div class="timer-bar"><i id="timer-fill"></i></div>
+        <div class="stock-big"><b class="num" id="stock-n">0</b><span class="num"> / <span id="stock-max">10</span></span></div>
+        <div class="stock-line"><span id="next-text" class="muted"></span></div>
+        <span id="stock-text" hidden></span><div class="pips" id="pips" hidden></div><div class="timer-bar" hidden><i id="timer-fill"></i></div>
       </section>
+      <p class="premium-note" id="premium-note" hidden>Forgée avec l'essence. Aucun skin commun, Épique ou mieux 6 fois sur 10.</p>
+      <div class="tap-hint" id="tap-hint">Touche le cristal pour l'ouvrir</div>
 
       <section class="actions">
         <button class="btn primary big" id="open-one" disabled>Ouvrir</button>
-        <button class="btn ghost big" id="open-all" disabled>Tout ouvrir</button>
+        <button class="btn big" id="open-all" disabled>Tout ouvrir</button>
       </section>
 
-      <section class="perks">
-        <div class="perk">
-          <div class="perk-head"><span class="kicker">Garantie</span><b id="pity-text">Épique garanti dans 10</b></div>
-          <div class="meter"><i id="pity-fill"></i></div>
+      <section class="relic-list">
+        <div class="rl-row">
+          <div class="rl-main"><b id="pity-text">Épique garanti dans 10</b><div class="meter"><i id="pity-fill"></i></div></div>
         </div>
-        <div class="perk">
-          <div class="perk-head"><span class="kicker">Essence · forge</span><b id="essence-text">0</b></div>
-          <div class="meter essence"><i id="essence-fill"></i><span class="tick" id="essence-tick"></span></div>
+        <div class="rl-row">
+          <div class="rl-main"><b>Forge</b><span class="muted"><span id="essence-text">0</span> · convertis tes doublons</span>
+            <div class="meter essence" hidden><i id="essence-fill"></i><span class="tick" id="essence-tick"></span></div></div>
           <div class="forge">
-            <button class="btn small" id="buy-std" disabled>Relique · <span id="price-std">150</span></button>
-            <button class="btn small gold" id="buy-prem" disabled>Prestige · <span id="price-prem">600</span></button>
+            <button class="btn small" id="buy-std" disabled><svg viewBox="0 0 100 100"><use href="#crystal"/></svg><span id="price-std">150</span></button>
+            <button class="btn small gold" id="buy-prem" disabled><svg viewBox="0 0 100 100"><use href="#crystal"/></svg><span id="price-prem">600</span></button>
           </div>
         </div>
+        <button class="rl-row rl-link" type="button" id="odds-row"><div class="rl-main"><b>Taux de drop</b><span class="muted">Raretés, garantie, essence des doublons</span></div><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
       </section>
 
       <section class="notify-card" id="notify-card" hidden>
@@ -104,7 +104,7 @@
         <button class="btn small" id="notify-btn">Activer</button>
       </section>
 
-      <section class="odds-panel">
+      <section class="odds-panel" hidden>
         <div class="section-head"><h2>Taux de drop</h2><span class="muted">par relique</span></div>
         <div class="odds-table" id="odds-table"></div>
         <p class="odds-note" id="odds-note"></p>
@@ -235,9 +235,15 @@
   <!-- Révélation -->
   <div id="reveal" class="reveal" hidden>
     <canvas id="fx"></canvas>
+    <div class="pillar" id="pillar"></div>
     <div class="rays" id="rays"></div>
+    <div class="wave" id="wave"></div>
+    <div class="sparks" id="sparks"></div>
     <div class="flash" id="flash"></div>
-    <div class="reveal-capsule" id="reveal-capsule" role="button" aria-label="Passer l'animation"><svg viewBox="0 0 200 220" aria-hidden="true"><use href="#capsule-art"/></svg></div>
+    <div class="reveal-capsule" id="reveal-capsule" role="button" aria-label="Passer l'animation">
+      <svg viewBox="0 0 100 100" aria-hidden="true"><use href="#crystal"/></svg>
+      <svg viewBox="0 0 100 100" class="cracks" aria-hidden="true"><path d="M50 50 44 30 47 14"/><path d="M50 50 62 60 70 72"/><path d="M50 50 34 56 28 66"/><path d="M50 50 58 36 66 28"/><path d="M50 50 52 70 50 86"/><path d="M50 50 38 42 30 34"/></svg>
+    </div>
     <div class="reveal-single" id="reveal-single" hidden></div>
     <div class="reveal-multi" id="reveal-multi" hidden>
       <div class="multi-head"><h2 id="multi-title">10 reliques</h2><span class="muted" id="multi-sub">Touche une carte pour la révéler</span></div>

@@ -4,7 +4,7 @@ const DD = 'https://ddragon.leagueoflegends.com/cdn/img/champion';
 const CD = 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/';
 const RARITIES = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'MYTHIC', 'ULTIMATE', 'EXALTED'];
 const LABEL = { COMMON: 'Commun', RARE: 'Rare', EPIC: 'Épique', LEGENDARY: 'Légendaire', MYTHIC: 'Mythique', ULTIMATE: 'Ultime', EXALTED: 'Exalté' };
-const COLOR = { COMMON: '#8a94a6', RARE: '#19e3ff', EPIC: '#a78bfa', LEGENDARY: '#ff8a3d', MYTHIC: '#ff3366', ULTIMATE: '#ffc94d', EXALTED: '#ffffff' };
+const COLOR = { COMMON: '#9aa4b1', RARE: '#4f9cff', EPIC: '#b06cff', LEGENDARY: '#ff9f1a', MYTHIC: '#ff4d6d', ULTIMATE: '#ffd34d', EXALTED: '#ffffff' };
 const CATALOG_KEY = 'capsules.catalog.v6';
 // Build de cette coquille, gravé au déploiement par le Dockerfile ; « dev » en local.
 const APP_VERSION = '__BUILD__'.includes('_') ? 'dev' : '__BUILD__';
@@ -944,6 +944,15 @@ function setUser(user) {
   S.user = user;
   store.set('capsules.user', JSON.stringify(user));
   $('#menu-user').innerHTML = `<span class="avatar">${avatarInner(user)}</span><span><b>${esc(user.displayName)}</b>${esc(user.email)}</span>`;
+  renderMe();
+}
+
+/** Carte du profil : cote, rang et collection en un coup d'œil. */
+function renderMe() {
+  const el = $('#me-stats'); if (!el) return;
+  const a = S.arena, owned = S.owned?.size || 0;
+  const cell = (v, l) => `<div><b>${v}</b><span>${l}</span></div>`;
+  el.innerHTML = (a ? cell(fmtInt(a.rating), a.rank ? `cote · #${a.rank}` : 'cote') + cell(`${a.wins}–${a.losses}`, 'victoires – défaites') : '') + (owned ? cell(fmtInt(owned), 'objets collectionnés') : '');
 }
 
 function friendHTML(p) {
@@ -1090,12 +1099,12 @@ async function showProfile(userId) {
 
 // ---------- Arène : combats roster contre roster ----------
 const CLASS = {
-  ASSASSIN: { label: 'Assassin', color: '#ff3366' },
+  ASSASSIN: { label: 'Assassin', color: '#ff4d6d' },
   MAGE: { label: 'Mage', color: '#a78bfa' },
   MARKSMAN: { label: 'Tireur', color: '#ffc94d' },
   TANK: { label: 'Tank', color: '#3ddc84' },
   FIGHTER: { label: 'Combattant', color: '#ff8a3d' },
-  SUPPORT: { label: 'Soutien', color: '#19e3ff' },
+  SUPPORT: { label: 'Soutien', color: '#6fb7ff' },
 };
 const CURVE = {
   EARLY: { label: 'Early', color: '#ff8a3d', text: 'Fort en lane, plus faible en fin de partie.' },
@@ -1179,6 +1188,7 @@ async function loadArena({ quiet = false } = {}) {
     if (!S.cat) await loadCatalog();
     S.arena = await api('/capsules/arena', { retry: true });
     renderArenaBadge();
+    renderMe();
     if (S.view !== 'arena') return;
     renderArenaHead();
     renderArenaTeam();
@@ -1678,7 +1688,7 @@ const bfx = {
   },
 };
 
-const TEAM_COLOR = { me: '#19e3ff', them: '#ff3366' };
+const TEAM_COLOR = { me: '#6fb7ff', them: '#e5534b' };
 const R = {};
 
 function token(k, role) { return R.tok[k][role]; }
@@ -2252,7 +2262,7 @@ function closeTuto() {
 function bindArena() {
   $$('[data-arena]').forEach((b) => (b.onclick = () => { S.arenaTab = b.dataset.arena; renderArenaBody(); }));
   $('#tuto-btn').onclick = showTuto;
-  $('#tuto-menu').onclick = () => { $('#menu').hidden = true; showTuto(); };
+  $('#tuto-menu').onclick = () => showTuto();
   $('#tuto-next').onclick = () => tutoGo(tuto.i + 1);
   $('#tuto-prev').onclick = () => tutoGo(tuto.i - 1);
   $('#tuto-x').onclick = closeTuto;
@@ -2288,6 +2298,8 @@ function setView(v, { friend = false } = {}) {
   $('#view-collection').hidden = v !== 'collection';
   $('#view-friends').hidden = v !== 'friends';
   $('#view-arena').hidden = v !== 'arena';
+  $('#view-profile').hidden = v !== 'profile';
+  if (v === 'profile') renderMe();
   const tab = friend ? 'friends' : v;
   $$('[data-view]').forEach((b) => (b.dataset.view === tab ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current')));
   if (v === 'collection') {
@@ -2317,7 +2329,7 @@ function setupInstall() {
   $('#install-menu').hidden = standalone;
   addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; });
   addEventListener('appinstalled', () => { installEvent = null; $('#install-menu').hidden = true; closeSheet(); toast('App installée !'); });
-  $('#install-menu').onclick = () => { $('#menu').hidden = true; showInstall(); };
+  $('#install-menu').onclick = () => showInstall();
 }
 
 const NEWS_KEY = 'capsules.news.v3-arena';
@@ -2583,7 +2595,6 @@ async function logout() {
   store.del(snapKey());
   S.token = null; S.user = null; S.owned.clear(); S.recent = []; S.friend = null;
   store.del('capsules.token'); store.del('capsules.user');
-  $('#menu').hidden = true;
   showAuth();
 }
 
@@ -2675,13 +2686,12 @@ function bind() {
   $('#reveal-capsule').addEventListener('click', skipAnimation);
   $('#multi-grid').addEventListener('click', (e) => { const f = e.target.closest('.flip'); if (f) flipCard(f); });
 
-  $('#menu-btn').onclick = (e) => { e.stopPropagation(); $('#menu').hidden = !$('#menu').hidden; };
-  document.addEventListener('click', (e) => { if (!e.target.closest('#menu')) $('#menu').hidden = true; });
-  $('#sound-toggle').onclick = () => { S.sound = !S.sound; store.set('capsules.sound', S.sound ? 'on' : 'off'); $('#sound-toggle').textContent = `Son : ${S.sound ? 'activé' : 'coupé'}`; };
-  $('#sound-toggle').textContent = `Son : ${S.sound ? 'activé' : 'coupé'}`;
-  $('#odds-btn').onclick = () => { $('#menu').hidden = true; if (S.cat) showOdds(); };
-  $('#profile-menu').onclick = () => { $('#menu').hidden = true; if (S.user) showProfile(S.user.id); };
-  $('#guide-menu').onclick = () => { $('#menu').hidden = true; showGuide(); };
+  const soundLabel = () => { $('#sound-toggle span').textContent = `Son : ${S.sound ? 'activé' : 'coupé'}`; };
+  $('#sound-toggle').onclick = () => { S.sound = !S.sound; store.set('capsules.sound', S.sound ? 'on' : 'off'); soundLabel(); };
+  soundLabel();
+  $('#odds-btn').onclick = () => { if (S.cat) showOdds(); };
+  $('#profile-menu').onclick = () => { if (S.user) showProfile(S.user.id); };
+  $('#guide-menu').onclick = () => showGuide();
   $('#logout-btn').onclick = logout;
 
   // Cartes cliquables partout (collection, derniers tirages, fiches).
@@ -2736,7 +2746,7 @@ function bind() {
   };
   $('#sheet').addEventListener('click', (e) => { if (e.target.closest('[data-close]') && !$('#sheet').classList.contains('locked')) closeSheet(); });
   addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#tuto').hidden && !$('#sheet').classList.contains('locked')) closeSheet(); });
-  $('#avatar-menu').onclick = () => { $('#menu').hidden = true; if (S.cat) showAvatarPicker(); };
+  $('#avatar-menu').onclick = () => { if (S.cat) showAvatarPicker(); };
 
   $$('.coll-controls .segmented button').forEach((b) => (b.onclick = () => { S.coll.group = b.dataset.group; if (b.dataset.group !== 'rarity') S.coll.rarity = null; syncSegmented(); renderCollection(); }));
   let t;
@@ -2790,7 +2800,7 @@ setInterval(tick, 1000);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {});
 const params = new URLSearchParams(location.search);
 const startView = params.get('view');
-if (startView === 'collection' || startView === 'arena') S.view = startView;
+if (['collection', 'arena', 'friends', 'profile'].includes(startView)) S.view = startView;
 if (['foes', 'ladder', 'history', 'boss'].includes(params.get('tab'))) S.arenaTab = params.get('tab');
 if (S.token) { start(); setView(S.view); } else showAuth();
 if (params.get('replay')) openSharedReplay(params.get('replay'));

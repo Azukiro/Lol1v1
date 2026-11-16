@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Reliques · Duelyst</title>
   <meta name="description" content="Une relique par heure : ouvre-la, collectionne, complète tes gammes.">
-  <meta name="theme-color" content="#0b0e14">
+  <meta name="theme-color" content="#0a0f16">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -16,7 +16,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://ddragon.leagueoflegends.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -45,25 +45,13 @@
     <header class="topbar">
       <div class="brand"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="#capsule-mini"/></svg><span>Reliques</span></div>
       <nav class="tabs" aria-label="Sections">
-        <button class="tab" data-view="open" aria-current="page">Ouvrir</button>
+        <button class="tab" data-view="friends">Club</button>
         <button class="tab" data-view="collection">Collection</button>
+        <button class="tab" data-view="open" aria-current="page">Reliques</button>
         <button class="tab" data-view="arena">Arène</button>
-        <button class="tab" data-view="friends">Amis</button>
+        <button class="tab" data-view="profile">Profil</button>
       </nav>
       <div class="essence-pill" title="Essence (doublons)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 13 8 8 15 3 8z"/></svg><b id="essence">0</b></div>
-      <button class="icon-btn" id="menu-btn" aria-label="Menu" aria-haspopup="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button>
-      <div class="menu" id="menu" hidden>
-        <div class="menu-user" id="menu-user"></div>
-        <button id="profile-menu">Mon profil</button>
-        <button id="avatar-menu">Changer d'icône</button>
-        <button id="install-menu" hidden>Installer l'app</button>
-        <button id="sound-toggle">Son : activé</button>
-        <button id="odds-btn">Taux de drop</button>
-        <button id="tuto-menu">Comment marchent les combats</button>
-        <button id="guide-menu">Guide des règles</button>
-        <button id="logout-btn">Se déconnecter</button>
-        <div class="menu-version" id="menu-version"></div>
-      </div>
     </header>
 
     <!-- Vue ouverture -->
@@ -216,11 +204,31 @@
       </section>
     </main>
 
-    <nav class="bottom-nav four" aria-label="Sections">
-      <button data-view="open" aria-current="page"><svg viewBox="0 0 24 24"><use href="#capsule-mini-24"/></svg>Ouvrir<i class="badge" id="nav-badge" hidden></i></button>
-      <button data-view="collection"><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>Collection</button>
-      <button data-view="arena"><svg viewBox="0 0 24 24"><use href="#ico-arena"/></svg>Arène<i class="badge" id="arena-badge" hidden></i></button>
-      <button data-view="friends"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6z"/><circle cx="17" cy="9" r="2.8"/><path d="M15.5 14.2c3.3-.4 6 1.8 6 5.8h-4.4c0-2.3-.6-4.3-1.6-5.8z"/></svg>Amis</button>
+    <!-- Vue profil (remplace l'ancien menu) -->
+    <main id="view-profile" class="view view-profile" hidden>
+      <section class="me-card">
+        <div class="menu-user" id="menu-user"></div>
+        <div class="me-stats" id="me-stats"></div>
+        <button class="btn block" id="profile-menu">Voir mon profil complet</button>
+      </section>
+      <section class="settings" aria-label="Réglages">
+        <button id="avatar-menu"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.5 3.6-7 8-7s8 2.5 8 7"/></svg><span>Changer d'icône</span></button>
+        <button id="install-menu" hidden><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span>Installer l'app</span></button>
+        <button id="sound-toggle"><svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg><span>Son : activé</span></button>
+        <button id="odds-btn"><svg viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg><span>Taux de drop</span></button>
+        <button id="tuto-menu"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.6M12 17v.01"/></svg><span>Comment marchent les combats</span></button>
+        <button id="guide-menu"><svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5zM9 10h6M9 14h6"/></svg><span>Guide des règles</span></button>
+        <button id="logout-btn" class="danger"><svg viewBox="0 0 24 24"><path d="M10 5H5v14h5M14 8l4 4-4 4M18 12H9"/></svg><span>Se déconnecter</span></button>
+      </section>
+      <div class="menu-version" id="menu-version"></div>
+    </main>
+
+    <nav class="bottom-nav five" aria-label="Sections">
+      <button data-view="friends"><svg viewBox="0 0 24 24" class="stroke"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.5 2.7-5.5 6-5.5s6 2 6 5.5"/><circle cx="17" cy="9" r="2.6"/><path d="M16.5 14.6c2.7 0 4.5 1.8 4.5 5.4"/></svg>Club</button>
+      <button data-view="collection"><svg viewBox="0 0 24 24" class="stroke"><rect x="4" y="4" width="7" height="9" rx="2"/><rect x="13" y="4" width="7" height="5" rx="2"/><rect x="4" y="15" width="7" height="5" rx="2"/><rect x="13" y="11" width="7" height="9" rx="2"/></svg>Collection</button>
+      <button data-view="open" class="fab" aria-current="page" aria-label="Reliques"><span class="fab-in"><svg viewBox="0 0 100 100"><use href="#relic-ink"/></svg></span><i class="badge" id="nav-badge" hidden></i></button>
+      <button data-view="arena"><svg viewBox="0 0 24 24" class="stroke"><use href="#ico-arena"/></svg>Arène<i class="badge" id="arena-badge" hidden></i></button>
+      <button data-view="profile"><svg viewBox="0 0 24 24" class="stroke"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.5 3.6-7 8-7s8 2.5 8 7"/></svg>Profil</button>
     </nav>
   </div>
 
@@ -255,8 +263,8 @@
       <div class="map" id="b-map">
         <svg class="map-bg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
           <defs>
-            <radialGradient id="map-glow-me" cx=".1" cy=".9" r=".45"><stop offset="0" stop-color="#19e3ff" stop-opacity=".28"/><stop offset="1" stop-color="#19e3ff" stop-opacity="0"/></radialGradient>
-            <radialGradient id="map-glow-them" cx=".9" cy=".1" r=".45"><stop offset="0" stop-color="#ff3366" stop-opacity=".28"/><stop offset="1" stop-color="#ff3366" stop-opacity="0"/></radialGradient>
+            <radialGradient id="map-glow-me" cx=".1" cy=".9" r=".45"><stop offset="0" stop-color="#6fb7ff" stop-opacity=".28"/><stop offset="1" stop-color="#19e3ff" stop-opacity="0"/></radialGradient>
+            <radialGradient id="map-glow-them" cx=".9" cy=".1" r=".45"><stop offset="0" stop-color="#e5534b" stop-opacity=".28"/><stop offset="1" stop-color="#ff3366" stop-opacity="0"/></radialGradient>
             <pattern id="map-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M5 0H0V5" fill="none" stroke="#ffffff" stroke-opacity=".035" stroke-width=".3"/></pattern>
           </defs>
           <rect width="100" height="100" fill="#0c1a1c"/>
@@ -339,23 +347,33 @@
         <stop offset="0" stop-color="#2a3550"/><stop offset=".5" stop-color="#141a28"/><stop offset="1" stop-color="#0a0d14"/>
       </linearGradient>
       <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#e9f6ff"/><stop offset=".35" stop-color="var(--glow, #19e3ff)"/><stop offset="1" stop-color="#2a3550"/>
+        <stop offset="0" stop-color="#e9f6ff"/><stop offset=".35" stop-color="var(--glow, #6aa7e0)"/><stop offset="1" stop-color="#2a3550"/>
       </linearGradient>
       <radialGradient id="core" cx=".5" cy=".42" r=".6">
-        <stop offset="0" stop-color="#ffffff"/><stop offset=".25" stop-color="var(--glow, #19e3ff)"/><stop offset="1" stop-color="var(--glow, #19e3ff)" stop-opacity="0"/>
+        <stop offset="0" stop-color="#ffffff"/><stop offset=".25" stop-color="var(--glow, #6aa7e0)"/><stop offset="1" stop-color="var(--glow, #6aa7e0)" stop-opacity="0"/>
       </radialGradient>
-      <symbol id="capsule-art" viewBox="0 0 200 220">
-        <path d="M100 8 186 58v104l-86 50-86-50V58z" fill="url(#shell)" stroke="url(#rim)" stroke-width="4"/>
-        <path d="M100 8 186 58 100 108 14 58z" fill="#ffffff" opacity=".05"/>
-        <path d="M100 30 166 68v84l-66 38-66-38V68z" fill="none" stroke="var(--glow, #19e3ff)" stroke-opacity=".35" stroke-width="1.5"/>
-        <circle cx="100" cy="110" r="44" fill="url(#core)" class="core"/>
-        <circle cx="100" cy="110" r="22" fill="#fff" opacity=".9" class="core-hot"/>
-        <path d="M14 58 100 108 186 58M100 108v104" stroke="#000" stroke-opacity=".25" stroke-width="2" fill="none"/>
-        <path d="M44 74 60 64M156 74 140 64M100 190v-14" stroke="var(--glow, #19e3ff)" stroke-width="4" stroke-linecap="round"/>
+      <linearGradient id="g-gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6e2a8"/><stop offset="1" stop-color="#a07b35"/></linearGradient>
+      <!-- Relique : cristal serti d'or (mêmes id que l'ancienne capsule, pour le JS) -->
+      <symbol id="crystal" viewBox="0 0 100 100">
+        <path d="M50 4 26 30 50 40z" fill="#9ed2ff"/><path d="M50 4 74 30 50 40z" fill="#e3f3ff"/>
+        <path d="M26 30 32 76 50 62 50 40z" fill="#3c6fae"/><path d="M74 30 68 76 50 62 50 40z" fill="#78b4ec"/>
+        <path d="M32 76 50 96 50 62z" fill="#21416f"/><path d="M68 76 50 96 50 62z" fill="#4f88c8"/>
+        <path d="M50 4 74 30 68 76 50 96 32 76 26 30z" fill="none" stroke="url(#g-gold)" stroke-width="2.4" stroke-linejoin="round"/>
+        <path d="M22 47 Q50 61 78 47" fill="none" stroke="url(#g-gold)" stroke-width="5" stroke-linecap="round"/>
+        <path d="M25 55 Q50 68 75 55" fill="none" stroke="#a07b35" stroke-width="2" stroke-linecap="round" opacity=".8"/>
+        <circle cx="50" cy="55" r="3.6" fill="#f6e2a8" stroke="#a07b35"/>
+        <path d="M41 15 50 4 59 15M41 86 50 96 59 86" fill="none" stroke="url(#g-gold)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M60 14 66 24" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity=".8"/>
       </symbol>
-      <symbol id="capsule-mini" viewBox="0 0 64 64">
-        <path d="M32 3 59 18v28L32 61 5 46V18z" fill="#141a28" stroke="#19e3ff" stroke-width="3"/>
-        <circle cx="32" cy="33" r="11" fill="#19e3ff"/><circle cx="32" cy="33" r="5" fill="#fff"/>
+      <symbol id="capsule-art" viewBox="0 0 200 220">
+        <circle cx="100" cy="110" r="60" fill="url(#core)" class="core" opacity=".55"/>
+        <use href="#crystal" x="0" y="10" width="200" height="200"/>
+      </symbol>
+      <symbol id="capsule-mini" viewBox="0 0 64 64"><use href="#crystal" width="64" height="64"/></symbol>
+      <symbol id="relic-ink" viewBox="0 0 100 100">
+        <path d="M50 6 73 31 67 75 50 94 33 75 27 31z" fill="none" stroke="currentColor" stroke-width="7" stroke-linejoin="round"/>
+        <path d="M27 31 50 41 73 31M50 41v53" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
+        <path d="M22 50 Q50 64 78 50" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
       </symbol>
       <symbol id="ico-arena" viewBox="0 0 24 24">
         <path d="M5 3l8.5 8.5M3 5l2-2M4.5 9.5l5 5M19 3l-8.5 8.5M21 5l-2-2M19.5 9.5l-5 5M7 17l-3 3M17 17l3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -369,10 +387,7 @@
       <symbol id="cls-TANK" viewBox="0 0 24 24"><path d="M12 2.8 4.5 5.6v5.8c0 4.6 3.1 8.4 7.5 9.8 4.4-1.4 7.5-5.2 7.5-9.8V5.6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
       <symbol id="cls-FIGHTER" viewBox="0 0 24 24"><path d="M5 5l13 13M19 5 6 18M3.5 16.5l4 4M16.5 20.5l4-4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
       <symbol id="cls-SUPPORT" viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-8.6-9.6A4.6 4.6 0 0 1 12 7.4a4.6 4.6 0 0 1 8.6 3.5c-1.1 5-8.6 9.6-8.6 9.6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
-      <symbol id="capsule-mini-24" viewBox="0 0 24 24">
-        <path d="M12 2 21 7v10l-9 5-9-5V7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-        <circle cx="12" cy="12.5" r="3.5" fill="currentColor"/>
-      </symbol>
+      <symbol id="capsule-mini-24" viewBox="0 0 100 100"><use href="#relic-ink"/></symbol>
     </defs>
   </svg>
 

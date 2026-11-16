@@ -32,7 +32,7 @@ const S = {
   type: 'STANDARD',
   busy: false,
   sound: store.get('capsules.sound') !== 'off',
-  coll: { group: 'rarity', q: '', missing: false, rarity: null, role: null, open: new Set(), limits: {} },
+  coll: { group: 'line', q: '', missing: false, rarity: null, role: null, open: new Set(), limits: {} },
   pushKey: null,
   roster: [null, null, null, null, null],
   teams: [],
@@ -622,12 +622,13 @@ function renderSummary() {
   const all = RARITIES.reduce((s, r) => s + t[r].total, 0);
   const own = RARITIES.reduce((s, r) => s + t[r].owned, 0);
   const pct = all ? (own / all) * 100 : 0;
-  $('#ring-fg').style.strokeDasharray = `${pct} 100`;
-  $('#ring-pct').textContent = `${pct < 10 ? pct.toFixed(1) : Math.round(pct)}%`;
+  $('#ring-pct').textContent = `${pct < 10 ? pct.toFixed(1) : Math.round(pct)} %`;
+  $('#coll-own').textContent = fmtInt(own);
+  $('#coll-all').textContent = fmtInt(all);
+  // Une barre : chaque rareté y prend la place de ses objets possédés, le reste en gris.
+  $('#rstack').innerHTML = RARITIES.map((r) => `<i class="r-${r}" style="flex:${t[r].owned}"></i>`).join('') + `<i class="rest" style="flex:${all - own}"></i>`;
   $('#rarity-bars').innerHTML = [...RARITIES].reverse().map((r) => `
-    <button class="rbar r-${r}" data-rarity="${r}" aria-pressed="${S.coll.rarity === r}">
-      <span class="name">${LABEL[r]}</span><span class="track"><i style="width:${t[r].total ? (t[r].owned / t[r].total) * 100 : 0}%"></i></span>
-      <span class="num">${t[r].owned} / ${t[r].total}</span></button>`).join('');
+    <button class="rbar r-${r}" data-rarity="${r}" aria-pressed="${S.coll.rarity === r}"><b class="num">${t[r].owned}</b><span class="name">${LABEL[r]}</span></button>`).join('');
 }
 
 // Filtre par poste : le champion y joue en poste principal ou secondaire.
@@ -680,16 +681,16 @@ function renderByLine(q, missing) {
     && (!q || l.name.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').includes(q) || its.some((it) => matches(it, q))))
     .sort((a, b) => (b.owned.length / b.its.length) - (a.owned.length / a.its.length) || b.owned.length - a.owned.length || a.l.name.localeCompare(b.l.name, 'fr'));
   if (!rows.length) return emptyColl();
-  return `<div class="lines">${rows.slice(0, S.coll.limits.lines || 80).map(({ l, its, owned }) => {
-    const open = S.coll.open.has(l.id);
+  const limit = S.coll.limits.lines || 30;
+  return `<div class="shelves">${rows.slice(0, limit).map(({ l, its, owned }) => {
     const complete = owned.length === its.length;
-    return `<div class="line-row${complete ? ' complete' : ''}">
-      <button data-line="${l.id}" aria-expanded="${open}"><span class="lname">${esc(l.name)}${complete ? ' ✦' : ''}</span><span class="lnum">${owned.length} / ${its.length}</span>
-      <span class="ltrack"><i style="width:${(owned.length / its.length) * 100}%"></i></span></button>
-      ${open ? `<div class="grid">${its.sort((a, b) => rank(b.rarity) - rank(a.rarity)).map((it) => { const o = ownedOf(it.key); return cardHTML(it, { missing: !o, count: o?.count }); }).join('')}</div>`
-        : owned.length ? `<div class="thumbs">${owned.slice(0, 10).map((it) => `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt="">`).join('')}</div>` : ''}
-    </div>`;
-  }).join('')}</div>${rows.length > (S.coll.limits.lines || 80) ? '<button class="btn small more" data-more="lines">Voir plus de gammes</button>' : ''}`;
+    // Possédés d'abord (du plus rare au plus commun), puis les manquants en ombre.
+    const sorted = its.slice().sort((a, b) => (lens().has(b.key) - lens().has(a.key)) || rank(b.rarity) - rank(a.rarity));
+    return `<section class="shelf${complete ? ' complete' : ''}">
+      <div class="shelf-head"><h3>${esc(l.name)}</h3><span class="shelf-num"><b>${owned.length}</b> / ${its.length}${complete ? ' · complète' : ''}</span></div>
+      <div class="shelf-row">${sorted.map((it) => { const o = ownedOf(it.key); return cardHTML(it, { missing: !o, count: o?.count }); }).join('')}</div>
+    </section>`;
+  }).join('')}</div>${rows.length > limit ? '<button class="btn small more" data-more="lines">Voir plus de gammes</button>' : ''}`;
 }
 
 function renderByChampion(q, missing) {
@@ -734,9 +735,32 @@ function showItem(key) {
         <div><b>${o ? new Date(o.firstObtainedAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : 'Jamais'}</b><span>Obtenu</span></div>
         <div><b>${fmt(chanceIn('STANDARD'))}</b><span>Chance / relique</span></div>
       </div>
+      ${unitBlock(it, o)}
       <p class="muted">Chance par relique prestige : ${fmt(chanceIn('PREMIUM'))}</p>
       ${o ? `<p class="muted">Un doublon rapporte ${odds?.duplicateEssence ?? 0} essence.</p>` : '<p class="muted">Pas encore obtenu. Continue d\'ouvrir !</p>'}
     </div>`);
+}
+
+/** Puissance d'une unité seule à un poste (rareté, poste, méta), comme dans teamPower. */
+const unitPower = (it, i) => Math.round(100 * (1 + rank(it.rarity) * 0.02) * (1 + fitOf(it.champ, i) / 100) * (1 + metaOf(it.champ) / 100));
+
+/** Bloc « en équipe » de la fiche : puissance au poste conseillé, bonus et bouton pour l'équiper. */
+function unitBlock(it, o) {
+  if (!it?.champ || S.friend) return '';
+  const role = it.champ.profile?.main ?? 0;
+  const up = o ? bestUpgrade(it) : null;
+  const slot = up ? up.slot : role;
+  const fit = fitOf(it.champ, slot), meta = metaOf(it.champ);
+  const chip = (cls, txt) => `<span class="tchip ${cls}">${txt}</span>`;
+  const equipped = S.roster?.some((x) => keyOf(x) === it.key);
+  return `<div class="unit-block">
+    <div class="ub-head"><span class="muted">Puissance en ${ROLES[slot]}</span><b class="num">${unitPower(it, slot)}</b></div>
+    <div class="ub-chips">${it.champ.profile ? chip(fit > 0 ? 'p' : 'm', `${fit === FIT.main ? 'Poste principal' : fit === FIT.secondary ? 'Poste secondaire' : 'Hors poste'} ${signed(fit)} %`) : ''}
+      ${meta ? chip(meta > 0 ? 'p' : 'm', `Méta ${signed(meta)} %`) : chip('z', 'Méta 0 %')}${it.champ.talent ? chip('z', `Talent ${esc(it.champ.talent.spell || '')}`) : ''}</div>
+    ${o ? `<div class="ub-actions">${equipped ? '<span class="btn small" aria-disabled="true">Dans ton équipe</span>'
+      : `<button class="btn primary small" type="button" data-equip-sheet="${slot}" data-key="${it.key}">Équiper en ${ROLES[slot]}${up ? ` · +${up.gain}` : ''}</button>`}
+      <button class="btn small" type="button" data-avatar-champ="${it.champ.id}">Mettre en avatar</button></div>` : ''}
+  </div>`;
 }
 
 function showChampion(id) {
@@ -793,6 +817,7 @@ function renderRoster() {
   const editable = !friend;
   $('#roster-title').textContent = friend ? `Roster de ${friend.name}` : 'Mon roster';
   $('#roster-hint').textContent = editable ? 'Touche un poste' : '';
+  $('#compose-btn').hidden = !editable;
   $('#team-tabs').hidden = !editable || !S.teams.length;
   $('#team-tabs').innerHTML = editable ? S.teams.map((t, i) => `<button type="button" role="tab" data-team="${i}" aria-selected="${i === S.activeTeam}"
     title="${i === S.activeTeam ? 'Équipe active (touche pour renommer)' : 'Jouer avec cette équipe'}">${esc(t.name)}</button>`).join('') : '';
@@ -806,7 +831,9 @@ function renderRoster() {
         : `<span class="plus">${editable ? '+' : '—'}</span>`}
       <span class="role">${role}</span></${tag}>`;
   }).join('');
-  $('#team-coach').innerHTML = editable ? coachHTML(S.roster) : '';
+  // L'analyse détaillée se replie : la puissance reste visible.
+  const wasOpen = $('#team-coach .coach-wrap')?.open;
+  $('#team-coach').innerHTML = editable ? `<details class="coach-wrap"${wasOpen ? ' open' : ''}><summary><span>Analyse de l'équipe</span><span>Puissance <b>${teamPower(rosterItems(S.roster))}</b></span></summary>${coachHTML(S.roster)}</details>` : '';
 }
 
 // ---------- Aide à la composition (miroir des règles du serveur, BattleRules) ----------
@@ -2802,6 +2829,10 @@ function bind() {
     if (unfriend) { api(`/capsules/friends/${unfriend.dataset.unfriend}`, { method: 'DELETE' }).then(loadFriends).catch((err) => toast(err.message, true)); return; }
     const befriend = e.target.closest('[data-befriend]');
     if (befriend) { addFriend({ userId: befriend.dataset.befriend }); return; }
+    const eqs = e.target.closest('[data-equip-sheet]');
+    if (eqs) { setSlot(+eqs.dataset.equipSheet, eqs.dataset.key).then(() => toast('Équipé.')); return; }
+    const av = e.target.closest('[data-avatar-champ]');
+    if (av) { api('/capsules/avatar', { method: 'PUT', body: { championId: +av.dataset.avatarChamp } }).then((u) => { setUser(u); toast('Avatar changé.'); }).catch((err) => toast(err.message, true)); return; }
     const card = e.target.closest('button.card');
     if (card) { showItem(card.dataset.key); return; }
     const champ = e.target.closest('[data-champ]');
@@ -2819,6 +2850,7 @@ function bind() {
     if (await addFriend({ query: input.value })) input.value = '';
   });
   $('#owner-back').onclick = () => setView('friends');
+  $('#compose-btn').onclick = () => showComposer(0);
   bindArena();
   $('#owner-follow').onclick = async () => {
     const p = await addFriend({ userId: S.friend.userId });
@@ -2846,7 +2878,7 @@ function bind() {
     const line = e.target.closest('[data-line]');
     if (line) { const id = +line.dataset.line; S.coll.open.has(id) ? S.coll.open.delete(id) : S.coll.open.add(id); renderCollection(); return; }
     const more = e.target.closest('[data-more]');
-    if (more) { const k = more.dataset.more; S.coll.limits[k] = (S.coll.limits[k] || (k === 'lines' ? 80 : 60)) + (k === 'lines' ? 80 : 120); renderCollection(); }
+    if (more) { const k = more.dataset.more; S.coll.limits[k] = (S.coll.limits[k] || (k === 'lines' ? 30 : 60)) + (k === 'lines' ? 30 : 120); renderCollection(); }
   });
 
   $('#debug').addEventListener('click', (e) => {
@@ -2866,6 +2898,37 @@ function bind() {
     // Un événement a pu commencer pendant que l'app dormait.
     loadMeta().then(maybeShowEvent);
   });
+}
+
+/** Compositeur d'équipe : carrousel des 5 postes, chaque skin en grand avec ce qu'il apporte. */
+function showComposer(start = 0) {
+  let i = start;
+  const draw = () => {
+    const its = rosterItems(Array.from({ length: 5 }, (_, k) => S.roster?.[k] ?? null));
+    const it = its[i], prev = its[(i + 4) % 5], next = its[(i + 1) % 5];
+    const side = (x, cls) => `<div class="cp-side ${cls}${x ? ` r-${x.rarity}` : ''}">${x ? `<img src="${esc(x.art)}" ${x.fb ? `data-fb="${esc(x.fb)}"` : ''} alt="">` : ''}</div>`;
+    const fit = it ? fitOf(it.champ, i) : 0, meta = it ? metaOf(it.champ) : 0;
+    $('#sheet-body').innerHTML = `<div class="composer">
+      <div class="cp-head"><span class="kicker">${esc(S.teams?.[S.activeTeam]?.name || 'Équipe')}</span><span>Puissance <b class="num">${teamPower(its)}</b></span></div>
+      <div class="cp-stage">${side(prev, 'l')}${side(next, 'r')}
+        <div class="cp-main${it ? ` r-${it.rarity}` : ' empty'}" data-slot="${i}" role="button" tabindex="0" aria-label="Changer le ${ROLES[i]}">
+          ${it ? `<img src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt=""><div class="cp-cap"><div class="cp-role"><span>${ROLES[i]}</span><b class="num">${unitPower(it, i)}</b></div><b>${esc(it.name)}</b><span>${esc(it.sub)}</span></div>`
+            : `<div class="cp-empty"><b>+</b><span>${ROLES[i]} libre</span></div>`}
+        </div></div>
+      <div class="cp-roles">${ROLES.map((r, k) => `<button type="button" data-cp="${k}" aria-pressed="${k === i}">${r}</button>`).join('')}</div>
+      ${it ? `<div class="ub-chips">${it.champ.profile ? `<span class="tchip ${fit > 0 ? 'p' : 'm'}">${fit === FIT.main ? 'Poste principal' : fit === FIT.secondary ? 'Poste secondaire' : 'Hors poste'} ${signed(fit)} %</span>` : ''}<span class="tchip ${meta > 0 ? 'p' : meta < 0 ? 'm' : 'z'}">Méta ${signed(meta)} %</span></div>` : ''}
+      <button class="btn primary block" type="button" data-slot="${i}">${it ? `Changer ${esc(it.champ.name)}` : `Choisir un ${ROLES[i]}`}</button>
+    </div>`;
+    $$('[data-cp]').forEach((b) => (b.onclick = () => { i = +b.dataset.cp; draw(); }));
+    const st = $('.cp-stage');
+    let x0 = null;
+    st.ontouchstart = (e) => { x0 = e.touches[0].clientX; };
+    st.ontouchend = (e) => { if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 40) { i = (i + (dx < 0 ? 1 : 4)) % 5; draw(); } };
+    $('.cp-side.l').onclick = () => { i = (i + 4) % 5; draw(); };
+    $('.cp-side.r').onclick = () => { i = (i + 1) % 5; draw(); };
+  };
+  $('#sheet').hidden = false;
+  draw();
 }
 
 function syncSegmented() { $$('.coll-controls .segmented button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.group === S.coll.group))); }

@@ -125,22 +125,23 @@
       </section>
 
       <section class="roster-block">
-        <div class="section-head"><h2 id="roster-title">Mon roster</h2><span class="muted" id="roster-hint">Touche un poste</span></div>
+        <div class="section-head"><h2 id="roster-title">Mon roster</h2><span class="muted" id="roster-hint">Touche un poste</span><button class="btn small" type="button" id="compose-btn">Composer</button></div>
         <div class="segmented team-tabs" id="team-tabs" role="tablist" aria-label="Équipes" hidden></div>
         <div class="roster" id="roster"></div>
         <div class="team-coach" id="team-coach"></div>
       </section>
 
       <section class="coll-summary">
-        <div class="ring" id="ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.9" class="ring-bg"/><circle cx="18" cy="18" r="15.9" class="ring-fg" id="ring-fg"/></svg><div><b id="ring-pct">0%</b><span>complété</span></div></div>
+        <div class="coll-count"><b class="num" id="coll-own">0</b><span class="muted">/ <span id="coll-all">0</span> objets</span><b class="num coll-pct" id="ring-pct">0%</b></div>
+        <div class="rstack" id="rstack"></div>
         <div class="rarity-bars" id="rarity-bars"></div>
       </section>
 
       <section class="coll-controls">
         <div class="segmented" role="tablist">
-          <button data-group="rarity" aria-selected="true">Rareté</button>
-          <button data-group="line">Gammes</button>
+          <button data-group="line" aria-selected="true">Gammes</button>
           <button data-group="champion">Champions</button>
+          <button data-group="rarity">Raretés</button>
         </div>
         <div class="coll-filters">
           <input type="search" id="search" placeholder="Champion, skin, gamme…" autocomplete="off">

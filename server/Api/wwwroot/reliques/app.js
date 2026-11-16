@@ -1318,9 +1318,14 @@ function renderArenaHead() {
   const next = Object.keys(TIER)[Object.keys(TIER).indexOf(s.tier) + 1];
   const extras = $('#arena-extras');
   if (extras) extras.innerHTML = rookieBanner(a) + eventBanner(a.event) + passHTML(a.pass);
-  $('#arena-season').innerHTML = `<div class="season-top">${S.user ? avatarHTML({ ...S.user, frame: a.frame, legend: a.legend }) : ''}${tierBadge(s.tier)}<span class="muted">Saison ${s.number} · fin dans ${daysLeft(s.endsAt)}</span></div>
-    <div class="tier-bar" style="--tc:${TIER[s.tier].color}"><i style="width:${pct}%"></i></div>
-    <span class="tier-next">${s.nextTierAt ? `${TIER[next].label} à ${s.nextTierAt} pts · encore ${s.nextTierAt - a.rating}` : 'Palier maximal atteint'}</span>`;
+  const tc = TIER[s.tier].color, nc = next ? TIER[next].color : tc;
+  $('#arena-hero').style.setProperty('--tc', tc);
+  $('#arena-season').innerHTML = `<div class="tier-head" style="--tc:${tc};--nc:${nc}">
+      <svg class="tier-emblem" viewBox="0 0 64 64" aria-hidden="true"><use href="#emblem"/></svg>
+      <div class="tier-main"><div class="tier-line"><b class="tier-name">${TIER[s.tier].label}</b><span><b class="num">${fmtInt(a.rating)}</b>${a.rank ? ` <span class="muted">#${a.rank}</span>` : ''}</span></div>
+        <div class="tier-bar"><i style="width:${pct}%"></i></div>
+        <div class="tier-sub"><span>${s.nextTierAt ? `${s.nextTierAt - a.rating} pts avant <b style="color:${nc}">${TIER[next].label}</b>` : 'Palier maximal atteint'}</span><span class="muted">${a.wins} V – ${a.losses} D · saison ${s.number}, ${daysLeft(s.endsAt)}</span></div></div>
+    </div>`;
   if (a.lastSeason && !S.seasonShown) { S.seasonShown = true; showSeasonEnd(a.lastSeason); }
   else if (a.lastBoss && !S.bossShown && $('#sheet').hidden) { S.bossShown = true; showBossResult(a.lastBoss); }
   $('#reward-pips').innerHTML = Array.from({ length: a.rewardedPerDay }, (_, i) => `<i class="${i < a.rewardedToday ? 'on' : ''}${i % 2 ? ' pair' : ''}"></i>`).join('');
@@ -1537,9 +1542,14 @@ function foeHTML(o) {
   const wait = o.availableAt ? Date.parse(o.availableAt) - now() : 0;
   const status = o.revenge ? '<span class="cta revenge">Revanche</span>'
     : wait > 0 ? `<span class="cta wait">${fmtWait(wait)}</span>` : '<span class="cta">Défier</span>';
+  // Puissance de son roster estimée côté client (rareté, poste, méta), comparée à la tienne : un repère, pas une prédiction.
+  const theirs = S.cat ? teamPower(rosterItems(p.roster)) : 0, mine = S.arena?.team?.power || 0;
+  const gap = mine && theirs ? (theirs - mine) / mine : 0;
+  const cmp = !mine || !theirs ? '' : gap > 0.05 ? '<span class="tchip m">Plus fort</span>' : gap < -0.05 ? '<span class="tchip p">Moins fort</span>' : '<span class="tchip z">Même niveau</span>';
   return `<button class="foe${o.revenge ? ' hot' : ''}" data-foe="${p.userId}" type="button">
     ${avatarHTML(p)}
-    <span class="who"><b>${esc(p.displayName)}${o.rookie ? ' <span class="foe-rookie">Recrue</span>' : ''}</b><span>${o.rating} pts${o.friend ? ' · ami' : ''}</span></span>
+    <span class="who"><b>${esc(p.displayName)}${o.rookie ? ' <span class="foe-rookie">Recrue</span>' : ''}</b><span>${o.rating} pts${o.friend ? ' · ami' : ''}${theirs ? ` · équipe ${theirs}` : ''}</span></span>
+    ${cmp}
     <span class="mini-roster">${p.roster.map((s) => { const it = S.cat && slotItem(s); return it ? `<img loading="lazy" class="r-${it.rarity}" src="${esc(it.art)}" alt="">` : '<i></i>'; }).join('')}</span>
     ${status}
   </button>`;
@@ -1649,6 +1659,7 @@ function forecastHTML(f, mine, theirs) {
   if (!f) return '';
   const keys = (list) => (list.length ? `<ul>${list.map((k) => `<li>${esc(k)}</li>`).join('')}</ul>` : '<p class="muted">Rien de marquant</p>');
   return `<div class="forecast">
+    <div class="tr-big">${trendRow('Tendance du match', f.tendency)}</div>
     <div class="tr-list">
       ${trendRow('Lanes', f.lanes)}${trendRow('Objectifs', f.objectives)}${trendRow('1er teamfight', f.earlyFight)}${trendRow('Teamfights suivants', f.lateFight)}
     </div>
@@ -1717,9 +1728,9 @@ const MAP = {
   rest: [[9, 32], [28, 66], [40, 60], [70, 91], [64, 88]],
   duel: { top: { 0: [9, 17] }, mid: { 2: [45, 55] }, bot: { 3: [82, 91], 4: [77, 87] } },
   gank: { top: [12, 24], mid: [41, 52], bot: [73, 89] },
-  pit: { dragon: [66, 66], ancient: [34, 34] },
-  pitSide: { dragon: [[0, 0], [61, 71], [0, 0], [0, 0], [57, 74]], ancient: [[0, 0], [29, 39], [0, 0], [0, 0], [25, 42]] },
-  fight: { 'fight-dragon': [66, 66], 'fight-mid': [50, 50], 'fight-ancient': [34, 34] },
+  pit: { dragon: [64, 66], ancient: [31, 28] },
+  pitSide: { dragon: [[0, 0], [58, 72], [0, 0], [0, 0], [55, 76]], ancient: [[0, 0], [25, 34], [0, 0], [0, 0], [22, 38]] },
+  fight: { 'fight-dragon': [64, 66], 'fight-mid': [50, 50], 'fight-ancient': [31, 28] },
   cluster: [[-7, 3], [-3, 7], [-10, 9], [-5, 12], [-12, 14]],
   siege: [[-14, 4], [-10, 9], [-6, 13], [-17, 10], [-12, 16]],
   towers: [['top', [9, 36]], ['top', [9, 60]], ['mid', [38, 62]], ['mid', [26, 74]], ['bot', [64, 91]], ['bot', [40, 91]]],

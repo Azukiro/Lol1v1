@@ -268,27 +268,9 @@
 
     <div class="b-stage" id="b-stage">
       <div class="map" id="b-map">
-        <svg class="map-bg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-          <defs>
-            <radialGradient id="map-glow-me" cx=".1" cy=".9" r=".45"><stop offset="0" stop-color="#6fb7ff" stop-opacity=".28"/><stop offset="1" stop-color="#19e3ff" stop-opacity="0"/></radialGradient>
-            <radialGradient id="map-glow-them" cx=".9" cy=".1" r=".45"><stop offset="0" stop-color="#e5534b" stop-opacity=".28"/><stop offset="1" stop-color="#ff3366" stop-opacity="0"/></radialGradient>
-            <pattern id="map-grid" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M5 0H0V5" fill="none" stroke="#ffffff" stroke-opacity=".035" stroke-width=".3"/></pattern>
-          </defs>
-          <rect width="100" height="100" fill="#0c1a1c"/>
-          <rect width="100" height="100" fill="url(#map-grid)"/>
-          <rect width="100" height="100" fill="url(#map-glow-me)"/>
-          <rect width="100" height="100" fill="url(#map-glow-them)"/>
-          <path class="river" d="M2 2 L98 98"/>
-          <path class="lane" d="M9 90 L9 9 L90 9"/>
-          <path class="lane" d="M12 88 L88 12"/>
-          <path class="lane" d="M10 91 L91 91 L91 10"/>
-          <circle class="pit" cx="66" cy="66" r="5"/>
-          <circle class="pit" cx="34" cy="34" r="5"/>
-          <circle class="base me" cx="10" cy="90" r="9"/>
-          <circle class="base them" cx="90" cy="10" r="9"/>
-        </svg>
-        <div class="pit-icon dragon" id="b-dragon"><svg viewBox="0 0 24 24"><path d="M12 2c2 3 6 4 8 3-1 3-3 4-3 6 2 0 3 1 4 2-3 1-5 0-6 0 0 3-2 6-3 9-1-3-3-6-3-9-1 0-3 1-6 0 1-1 2-2 4-2 0-2-2-3-3-6 2 1 6 0 8-3z"/></svg></div>
-        <div class="pit-icon ancient" id="b-ancient"><svg viewBox="0 0 24 24"><path d="M12 2 15 9l7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z"/></svg></div>
+        <img class="map-img" src="https://ddragon.leagueoflegends.com/cdn/16.22.1/img/map/map11.png" alt="" aria-hidden="true"><div class="map-vig"></div>
+        <div class="pit-icon dragon" id="b-dragon"><img src="https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-match-history/global/default/dragon-100.png" alt="Dragon"></div>
+        <div class="pit-icon ancient" id="b-ancient"><img src="https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-match-history/global/default/baron-100.png" alt="Baron Nashor"></div>
         <div class="map-layer" id="b-towers"></div>
         <div class="map-layer" id="b-tokens"></div>
         <canvas class="map-fx" id="b-fx"></canvas>
@@ -382,6 +364,7 @@
         <path d="M27 31 50 41 73 31M50 41v53" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
         <path d="M22 50 Q50 64 78 50" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
       </symbol>
+      <symbol id="emblem" viewBox="0 0 64 64"><path d="M32 3 56 14v18c0 14-10 24-24 29C18 56 8 46 8 32V14z" fill="currentColor"/><path d="M32 3 56 14v18c0 14-10 24-24 29z" fill="#000" opacity=".2"/><path d="M32 11 49 19v13c0 10-7 18-17 22-10-4-17-12-17-22V19z" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="1.5"/><path d="M32 22 40 32 32 44 24 32z" fill="#fff" opacity=".92"/></symbol>
       <symbol id="ico-arena" viewBox="0 0 24 24">
         <path d="M5 3l8.5 8.5M3 5l2-2M4.5 9.5l5 5M19 3l-8.5 8.5M21 5l-2-2M19.5 9.5l-5 5M7 17l-3 3M17 17l3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       </symbol>

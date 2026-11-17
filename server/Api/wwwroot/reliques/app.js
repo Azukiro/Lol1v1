@@ -510,21 +510,25 @@ function showSingle(d) {
   const it = item(d.kind, d.itemId);
   const el = $('#reveal-single');
   const more = stockOf() > 0 && !S.queenReveal;
-  const queen = isAhriItem(it);
+  const theme = themeOfItem(it)?.key;
+  const queen = theme === 'ahri', rage = theme === 'tryn';
   $('#reveal').classList.toggle('ahri', queen);
+  $('#reveal').classList.toggle('tryn', rage);
+  const star = /<svg viewBox="0 0 24 24"><path d="M12 2\.5[^"]*"\/><\/svg>/g;
   el.innerHTML = `<div class="summon r-${d.rarity}"><div class="summon-in">
-      <div class="summon-back"><svg viewBox="0 0 100 100"><use href="#${queen ? 'crystal-queen' : 'crystal'}"/></svg></div>
+      <div class="summon-back"><svg viewBox="0 0 100 100"><use href="#${queen ? 'crystal-queen' : rage ? 'crystal-rage' : 'crystal'}"/></svg></div>
       <div class="summon-front big-card${more ? ' tappable' : ''}" ${more ? 'role="button" tabindex="0" aria-label="Ouvrir la relique suivante"' : ''}>${cardHTML(it, { isNew: d.isNew, tag: 'div' })}</div>
     </div></div>
-    <div class="summon-after">${queen ? starsHTML(d.rarity).replace(/<svg viewBox="0 0 24 24"><path d="M12 2\.5[^"]*"\/><\/svg>/g, HEART_SVG) : starsHTML(d.rarity)}${dropInfo(d, it)}${queen ? '<p class="queen">La reine est arrivée ♡</p>' : ''}${impactHTML(d, it)}
+    <div class="summon-after">${queen ? starsHTML(d.rarity).replace(star, HEART_SVG) : rage ? starsHTML(d.rarity).replace(star, DROP_SVG) : starsHTML(d.rarity)}${dropInfo(d, it)}${queen ? '<p class="queen">La reine est arrivée ♡</p>' : rage ? '<p class="rage-line">Il refuse de mourir.</p>' : ''}${impactHTML(d, it)}
     ${more ? '<p class="tap-again">Touche la carte pour ouvrir la suivante</p>' : ''}</div>`;
   el.hidden = false;
   const sm = $('.summon', el);
-  // La carte arrive face cachée, se retourne sur la silhouette, puis la couleur revient.
+  // La carte arrive face cachée, se retourne sur la silhouette, puis la couleur revient. Tryndamere entre d'abord en rage.
+  const pre = rage && !skipper.on ? rageIntro() : 0;
   requestAnimationFrame(() => sm.classList.add('in'));
-  setTimeout(() => { sm.classList.add('turn'); audio.chime(rank(d.rarity)); }, skipper.on ? 0 : 900);
-  setTimeout(() => { sm.classList.add('color'); if (queen) heartBurst(14); }, skipper.on ? 150 : 1450);
-  setTimeout(() => { el.classList.add('done'); showRevealActions(false); }, skipper.on ? 200 : 1650);
+  setTimeout(() => { sm.classList.add('turn'); audio.chime(rank(d.rarity)); }, skipper.on ? 0 : 900 + pre);
+  setTimeout(() => { sm.classList.add('color'); if (queen) heartBurst(14); }, skipper.on ? 150 : 1450 + pre);
+  setTimeout(() => { el.classList.add('done'); showRevealActions(false); }, skipper.on ? 200 : 1650 + pre);
   const eq = $('[data-equip]', el);
   if (eq) eq.onclick = async (e) => { e.stopPropagation(); eq.disabled = true; await setSlot(+eq.dataset.equip, eq.dataset.key); eq.textContent = 'Équipé'; toast(`${it.name} rejoint ton équipe en ${ROLES[+eq.dataset.equip]}.`); };
   $('#reveal-actions').hidden = true;
@@ -614,7 +618,8 @@ function heartBurst(n) {
 
 function closeReveal() {
   S.queenReveal = false;
-  $('#reveal').classList.remove('ahri');
+  $('#reveal').classList.remove('ahri', 'tryn', 'rage-shake');
+  $('#reveal .rage-fx')?.remove();
   $('#reveal').hidden = true; $('#rays').className = 'rays'; $('#reveal-single').classList.remove('done');
   S.busy = false; renderWallet();
 }
@@ -3071,6 +3076,19 @@ async function debugCall(path, body) {
   } catch (e) { toast(e.message, true); }
 }
 
+/** Debug : rejoue la révélation d'un champion à thème sur son skin le plus rare, sans rien ajouter à la collection. */
+function debugReveal(alias) {
+  const c = S.cat?.champions.find((x) => x.alias === alias);
+  if (!c || S.busy) return;
+  const best = (S.cat.byChamp.get(c.id) || []).map((id) => item('SKIN', id)).filter(Boolean).sort((a, b) => rank(b.rarity) - rank(a.rarity))[0];
+  if (!best) return;
+  S.busy = true;
+  const reveal = $('#reveal');
+  reveal.hidden = false; $('#reveal-multi').hidden = true; $('#reveal-capsule').hidden = true;
+  skipper.on = false; S.queenReveal = true;
+  showSingle({ kind: 'SKIN', itemId: best.id, rarity: best.rarity, isNew: true, count: 1, essence: 0, guaranteed: false });
+}
+
 // ---------- Authentification ----------
 let registering = false;
 function showAuth() {
@@ -3285,6 +3303,7 @@ function bind() {
     const b = e.target.closest('[data-debug]'); if (!b) return;
     const [kind, n] = b.dataset.debug.split(':');
     if (kind === 'reset') { if (confirm('Vider collection, historique et stock ?')) debugCall('reset'); }
+    else if (kind === 'show') debugReveal(n);
     else debugCall('grant', { count: kind === 'cap' ? +n : 0, essence: kind === 'ess' ? +n : 0, premium: kind === 'prem' ? +n : 0 });
   });
 
@@ -3358,49 +3377,116 @@ function drawComposer() {
 
 function syncSegmented() { $$('.coll-controls .segmented button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.group === S.coll.group))); }
 
-// ---------- Ahri, la reine : oreilles de renarde, sticker et cœurs partout où elle apparaît ----------
+// ---------- Champions à thème : Ahri la reine (kawaii), Tryndamere la rage (sanglant) ----------
+// Un seul mécanisme : chaque thème décore les avatars ronds, les cartes et anime quelques particules sur les cartes visibles.
 const HEART_SVG = '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 21s-7.5-4.6-9.6-9.2C.9 8.5 3 5 6.4 5c2.1 0 3.6 1.2 4.6 2.6C12 6.2 13.5 5 15.6 5 19 5 21.1 8.5 19.6 11.8 17.5 16.4 12 21 12 21z"/></svg>';
 const FOX_SVG = '<svg viewBox="0 0 40 40"><path d="M6 19 9 3l9 9z" fill="#ff8ad8"/><path d="M34 19 31 3l-9 9z" fill="#ff8ad8"/><path d="M9.5 13 10.5 6.5l4.5 4.5z" fill="#ffe1f3"/><path d="M30.5 13 29.5 6.5 25 11z" fill="#ffe1f3"/><path d="M5 21c0-9 8-11.5 15-11.5S35 12 35 21c0 9-7.5 14-15 14S5 30 5 21z" fill="#fff4fa" stroke="#ff8ad8" stroke-width="1.6"/><path d="M11 22q3-4 6 0M23 22q3-4 6 0" stroke="#5a2a45" stroke-width="2" fill="none" stroke-linecap="round"/><ellipse cx="11" cy="27" rx="3" ry="1.8" fill="#ff9fd6" opacity=".85"/><ellipse cx="29" cy="27" rx="3" ry="1.8" fill="#ff9fd6" opacity=".85"/><path d="M17 27.5q1.5 2 3 0 1.5 2 3 0" stroke="#5a2a45" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>';
-const AHRI_ID = () => S.cat?.champions?.find((c) => c.alias === 'Ahri')?.id ?? 103;
-const isAhriSrc = (src) => /\/Ahri_\d/.test(src) || src.endsWith(`/champion-icons/${AHRI_ID()}.png`);
-const isAhriItem = (it) => it?.champ?.alias === 'Ahri';
-const ROUND = '.avatar, .sring, .fc-av, .vf-av, .pd-av, .token, .kf-face-wrap';
-const CARDS = '.card, .tport, .tb-p, .pk-art, .cp-main, .cp-side, .unit-art, .pg-mvp, .me-sig, .pf-champ';
+/** Griffure : trois entailles rouge sombre. */
+const CLAW_SVG = '<svg viewBox="0 0 40 40"><g fill="#c3161c"><path d="M8 4c3 9 9 20 20 31-6-4-14-14-20-31z"/><path d="M16 2c3 9 9 20 19 30-6-4-13-13-19-30z" fill="#e0302a"/><path d="M2 12c4 8 10 17 19 26-7-3-14-11-19-26z" fill="#8e0f14"/></g></svg>';
+/** Épée de la rage, en sticker. */
+const SWORD_SVG = '<svg viewBox="0 0 40 40"><g transform="rotate(45 20 20)"><path d="M18 2h4l1 24h-6z" fill="#e8ecf2" stroke="#3a0507" stroke-width="1"/><path d="M20 3v22" stroke="#9aa4b1" stroke-width="1"/><path d="M19 8l1 10 1-10z" fill="#c3161c"/><path d="M11 26h18v3H11z" fill="#c8a96a" stroke="#3a0507" stroke-width="1"/><path d="M18.5 29h3v7h-3z" fill="#5a1a14"/><circle cx="20" cy="37" r="2" fill="#c8a96a"/></g></svg>';
+const DROP_SVG = '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2s7 8.2 7 13a7 7 0 0 1-14 0c0-4.8 7-13 7-13z"/></svg>';
 
-function ahrify(root = document) {
+const THEMES = {
+  Ahri: {
+    key: 'ahri', round: 'ahri-av', card: 'ahri-card',
+    roundHTML: () => `<span class="ear l"></span><span class="ear r"></span><span class="mini-heart">${HEART_SVG}</span>`,
+    cardHTML: () => `<span class="fox-sticker">${FOX_SVG}</span>`,
+    // Petits cœurs qui sautent de la carte.
+    particle(c) {
+      const h = document.createElement('span'); h.className = 'kheart'; h.innerHTML = HEART_SVG;
+      h.style.left = `${15 + Math.random() * 70}%`; h.style.top = `${45 + Math.random() * 35}%`;
+      h.style.setProperty('--x', `${(Math.random() - 0.5) * 30}px`); h.style.setProperty('--sz', `${10 + Math.random() * 7}px`);
+      return h;
+    },
+  },
+  Tryndamere: {
+    key: 'tryn', round: 'tryn-av', card: 'tryn-card',
+    roundHTML: () => `<span class="claw">${CLAW_SVG}</span><span class="drop"></span>`,
+    cardHTML: () => `<span class="tryn-slash">${CLAW_SVG}</span><span class="fox-sticker tryn-sticker">${SWORD_SVG}</span>`,
+    // Une goutte qui coule du haut de la carte.
+    particle() {
+      const d = document.createElement('span'); d.className = 'tdrip'; d.style.left = `${12 + Math.random() * 76}%`;
+      return d;
+    },
+  },
+};
+const champIdOf = (alias) => S.cat?.champions?.find((c) => c.alias === alias)?.id;
+/** Thème d'une image (écran de chargement, splash ou icône de champion), ou null. */
+function themeOfSrc(src) {
+  const m = src.match(/\/champion\/(?:loading|splash)\/([A-Za-z]+)_\d+\./);
+  if (m) return THEMES[m[1]] || null;
+  const icon = src.match(/\/champion-icons\/(\d+)\.png$/);
+  if (!icon) return null;
+  return Object.entries(THEMES).find(([alias]) => champIdOf(alias) === +icon[1])?.[1] || null;
+}
+const themeOfItem = (it) => THEMES[it?.champ?.alias] || null;
+const isAhriItem = (it) => themeOfItem(it)?.key === 'ahri';
+const ROUND = '.avatar, .sring, .fc-av, .vf-av, .pd-av, .token, .kf-face-wrap';
+const CARDS = '.card, .tport, .tb-p, .pk-art, .cp-main, .cp-side, .unit-art, .pg-mvp, .me-sig, .pf-champ, .mx-pic';
+const ALL_THEMES = Object.values(THEMES);
+
+function themify(root = document) {
   if (!root.querySelectorAll) return;
   root.querySelectorAll('img').forEach((img) => {
-    if (img.dataset.ahri || !isAhriSrc(img.getAttribute('src') || '')) return;
-    img.dataset.ahri = '1';
+    if (img.dataset.theme) return;
+    const t = themeOfSrc(img.getAttribute('src') || '');
+    if (!t) return;
+    img.dataset.theme = t.key;
     const round = img.closest(ROUND);
-    if (round && !round.classList.contains('ahri-av')) {
-      round.classList.add('ahri-av');
-      round.insertAdjacentHTML('beforeend', '<span class="ear l"></span><span class="ear r"></span><span class="mini-heart">' + HEART_SVG + '</span>');
+    if (round) {
+      if (!ALL_THEMES.some((x) => round.classList.contains(x.round))) {
+        round.classList.add(t.round);
+        round.insertAdjacentHTML('beforeend', t.roundHTML());
+      }
       return;
     }
     const card = img.closest(CARDS);
-    if (card && !card.classList.contains('ahri-card')) {
-      card.classList.add('ahri-card');
-      card.insertAdjacentHTML('beforeend', `<span class="fox-sticker">${FOX_SVG}</span>`);
+    if (card && !ALL_THEMES.some((x) => card.classList.contains(x.card))) {
+      card.classList.add(t.card);
+      card.insertAdjacentHTML('beforeend', t.cardHTML());
     }
   });
 }
 
-/** Petits cœurs qui sautent des cartes d'Ahri visibles (quelques-uns à la fois). */
-function ahriHearts() {
+/** Quelques particules sur les cartes à thème visibles (cœurs d'Ahri, gouttes de Tryndamere). */
+function themeParticles() {
   if (reduceMotion() || document.hidden) return;
-  const vis = $$('.ahri-card').filter((c) => { const r = c.getBoundingClientRect(); return r.width > 40 && r.bottom > 0 && r.top < innerHeight; }).slice(0, 4);
-  vis.forEach((c) => {
-    if (Math.random() < 0.4) return;
-    const h = document.createElement('span'); h.className = 'kheart'; h.innerHTML = HEART_SVG;
-    h.style.left = `${15 + Math.random() * 70}%`; h.style.top = `${45 + Math.random() * 35}%`;
-    h.style.setProperty('--x', `${(Math.random() - 0.5) * 30}px`); h.style.setProperty('--sz', `${10 + Math.random() * 7}px`);
-    c.appendChild(h); setTimeout(() => h.remove(), 2400);
-  });
+  for (const t of ALL_THEMES) {
+    const vis = $$(`.${t.card}`).filter((c) => { const r = c.getBoundingClientRect(); return r.width > 40 && r.bottom > 0 && r.top < innerHeight; }).slice(0, 4);
+    vis.forEach((c) => {
+      if (Math.random() < 0.4) return;
+      const p = t.particle(c);
+      c.appendChild(p); setTimeout(() => p.remove(), 2600);
+    });
+  }
 }
-new MutationObserver((ms) => { for (const m of ms) m.addedNodes.forEach((n) => { if (n.nodeType === 1) ahrify(n.parentElement || n); }); })
+
+/**
+ * Entrée de Tryndamere avant sa carte (environ 1,3 s) : vignette rouge qui bat, jauge de Rage qui se remplit,
+ * trois entailles d'épée, éclaboussure graphique. Rien en mode animations réduites.
+ */
+function rageIntro() {
+  const host = $('#reveal');
+  host.querySelector('.rage-fx')?.remove();
+  if (reduceMotion()) return 0;
+  host.insertAdjacentHTML('beforeend', `<div class="rage-fx" aria-hidden="true"><div class="rf-vign"></div>
+    <span class="rf-slash s1"></span><span class="rf-slash s2"></span><span class="rf-slash s3"></span>
+    <span class="rf-splat">${CLAW_SVG}</span>
+    <div class="rf-meter"><span class="kicker"><span>Rage</span><b class="num">0</b></span><span class="rf-bar"><i></i></span></div></div>`);
+  const fx = host.querySelector('.rage-fx'), n = fx.querySelector('.rf-meter b'), t0 = performance.now();
+  const tick = () => { const p = Math.min(1, (performance.now() - t0) / 1100); n.textContent = Math.round(100 * p * p); if (p < 1 && fx.isConnected) requestAnimationFrame(tick); };
+  tick();
+  [0, 500, 900].forEach((t) => setTimeout(() => audio.tone(90 + t / 10, 0.18, 'sawtooth', 0.08), t));
+  setTimeout(() => { fx.classList.add('cut'); restart(host, 'rage-shake'); audio.burst(4); buzz([40, 30, 90]); }, 1100);
+  setTimeout(() => fx.classList.add('out'), 1700);
+  setTimeout(() => fx.remove(), 2600);
+  return 1300;
+}
+
+new MutationObserver((ms) => { for (const m of ms) m.addedNodes.forEach((n) => { if (n.nodeType === 1) themify(n.parentElement || n); }); })
   .observe(document.body, { childList: true, subtree: true });
-setInterval(ahriHearts, 1300);
+setInterval(themeParticles, 1300);
 
 // ---------- Démarrage ----------
 fetch('/health', { cache: 'no-store' }).catch(() => {});

@@ -2194,3 +2194,52 @@ button.tb-p { transition: transform .12s; } button.tb-p:active { transform: scal
 .qscene.calm .q-tail { animation: none; transform: rotate(var(--a)) scaleY(1); opacity: 0; transition: opacity 1s; }
 .qscene.calm.q1 .q-tail { opacity: .9; }
 .qscene.calm .q-orbit, .qscene.calm .q-orb, .qscene.calm .q-charm, .qscene.calm .q-dash, .qscene.calm .q-chibi, .qscene.calm .q-tint, .qscene.calm .q-lb, .qscene.calm .q-title { display: none; }
+
+
+/* ===================== Tryndamere, version rage (sanglant mais propre) ===================== */
+.tryn-av { position: relative; overflow: visible !important; border-radius: 50%; box-shadow: 0 0 0 2px #c3161c, 0 0 10px 1px rgba(195, 22, 28, .4) !important; animation: rage-beat 1.4s ease-in-out infinite; }
+.tryn-av img { border-radius: 50%; }
+@keyframes rage-beat { 0%, 100% { box-shadow: 0 0 0 2px #c3161c, 0 0 10px 1px rgba(195, 22, 28, .4); } 12% { box-shadow: 0 0 0 2px #ff3b2f, 0 0 18px 4px rgba(255, 59, 47, .6); } }
+.tryn-av .claw { position: absolute; z-index: 3; right: -12%; top: -8%; width: 46%; height: 46%; min-width: 12px; min-height: 12px; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .6)); }
+.tryn-av .claw svg, .tryn-slash svg, .tryn-sticker svg, .rf-splat svg { width: 100%; height: 100%; display: block; }
+.tryn-av .drop { position: absolute; z-index: 3; left: 22%; bottom: -4%; width: 14%; min-width: 4px; aspect-ratio: 2 / 3; background: #c3161c; border-radius: 50% 50% 50% 50% / 30% 30% 70% 70%; pointer-events: none; animation: rage-drip 3.4s ease-in infinite; }
+@keyframes rage-drip { 0%, 55% { transform: translateY(-6px) scale(.4); opacity: 0; } 65% { transform: none; opacity: 1; } 95% { transform: translateY(14px) scale(.9); opacity: 1; } 100% { transform: translateY(18px); opacity: 0; } }
+.tryn-card { position: relative; box-shadow: 0 0 0 1.5px #c3161c, 0 6px 18px rgba(0, 0, 0, .45) !important; }
+.tryn-card::after { content: ''; position: absolute; inset: 0; z-index: 2; pointer-events: none; background: radial-gradient(120% 70% at 50% 0%, transparent 55%, rgba(110, 8, 12, .5)); }
+.tryn-slash { position: absolute; z-index: 3; left: 4%; top: 16%; width: 60%; aspect-ratio: 1; opacity: .8; pointer-events: none; }
+.tryn-sticker { animation: rage-twitch 2.6s ease-in-out infinite; }
+@keyframes rage-twitch { 0%, 80%, 100% { rotate: 0deg; } 84% { rotate: -10deg; } 88% { rotate: 8deg; } 92% { rotate: -4deg; } }
+.tdrip { position: absolute; z-index: 4; top: 0; width: 5px; height: 0; border-radius: 0 0 4px 4px; background: #c3161c; pointer-events: none; animation: tdrip 2.5s ease-in forwards; }
+@keyframes tdrip { 0% { height: 0; } 50% { height: 16px; } 100% { height: 20px; transform: translateY(60px); opacity: 0; } }
+.mx-pic.tryn-card .tryn-slash, .mx-pic.ahri-card .fox-sticker { display: none; }
+.mx-pic .tryn-sticker, .mx-pic .fox-sticker { display: none; }
+
+/* Révélation de Tryndamere */
+.reveal.tryn { --glow: #c3161c !important; }
+.reveal.tryn .summon-back { border-color: #c3161c; background: radial-gradient(circle at 50% 42%, #3a0d10, #0a0f16 70%); box-shadow: 0 0 0 4px #0a0f16, 0 0 0 5px rgba(195, 22, 28, .6), 0 20px 50px rgba(0, 0, 0, .6); }
+.reveal.tryn .summon-front .card { box-shadow: 0 0 0 2px #c3161c, 0 30px 60px rgba(0, 0, 0, .6); }
+.reveal.tryn .stars i { color: #c3161c; }
+.rage-line { margin: 0; font-size: 12px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: #ff8a80; }
+.rage-shake { animation: rage-shake .45s linear; }
+@keyframes rage-shake { 0%, 100% { translate: 0; } 15% { translate: -6px 3px; } 35% { translate: 6px -3px; } 55% { translate: -4px -2px; } 75% { translate: 3px 2px; } }
+.rage-fx { position: absolute; inset: 0; z-index: 5; pointer-events: none; transition: opacity .8s; }
+.rage-fx.out { opacity: 0; }
+.rf-vign { position: absolute; inset: 0; background: radial-gradient(circle, transparent 35%, rgba(142, 15, 20, .7)); animation: rf-vign 1.3s ease-in-out forwards; }
+@keyframes rf-vign { 0% { opacity: 0; } 25% { opacity: 1; } 45% { opacity: .5; } 70% { opacity: 1; } 100% { opacity: .6; } }
+.rf-slash { position: absolute; left: -10%; width: 120%; height: 7px; opacity: 0; transform-origin: 0 50%; rotate: 32deg;
+  background: linear-gradient(90deg, transparent, #8e0f14 15%, #ff3b2f 50%, #ffd2c8 60%, #8e0f14 85%, transparent); clip-path: polygon(0 50%, 10% 0, 90% 20%, 100% 50%, 90% 80%, 10% 100%); }
+.rf-slash.s1 { top: 30%; } .rf-slash.s2 { top: 40%; } .rf-slash.s3 { top: 50%; }
+.rage-fx.cut .rf-slash { animation: rf-slash .3s cubic-bezier(.7, 0, .2, 1) forwards; }
+.rage-fx.cut .rf-slash.s2 { animation-delay: .08s; } .rage-fx.cut .rf-slash.s3 { animation-delay: .16s; }
+@keyframes rf-slash { from { opacity: 1; transform: scaleX(0); } to { opacity: 1; transform: scaleX(1); } }
+.rf-splat { position: absolute; left: 50%; top: 42%; width: 220px; height: 220px; margin: -110px; opacity: 0; transform: scale(.4) rotate(-20deg); }
+.rage-fx.cut .rf-splat { animation: rf-splat .35s .2s cubic-bezier(.1, .9, .3, 1) forwards; }
+@keyframes rf-splat { to { opacity: .55; transform: rotate(-20deg); } }
+.rf-meter { position: absolute; left: 18%; right: 18%; bottom: 22%; display: grid; gap: 6px; transition: opacity .3s; }
+.rage-fx.cut .rf-meter { opacity: 0; }
+.rf-meter .kicker { display: flex; justify-content: space-between; color: #ff8a80; }
+.rf-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+.rf-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #8e0f14, #ff3b2f); animation: rf-fill 1.1s cubic-bezier(.5, 0, .9, .4) forwards; }
+@keyframes rf-fill { to { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .tryn-av, .tryn-av .drop, .tryn-sticker { animation: none; } }
+.tryn-av .claw, .tryn-av .drop, .ahri-av .ear, .ahri-av .mini-heart { z-index: 5; }

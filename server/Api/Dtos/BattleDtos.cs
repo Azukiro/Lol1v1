@@ -6,7 +6,8 @@ namespace Api.Dtos;
 public sealed record AttackRequest(Guid OpponentId);
 
 /// <summary>Adversaire proposé : AvailableAt non nul = déjà attaqué, en attente de sa riposte ou du délai.</summary>
-public sealed record ArenaOpponentDto(PlayerCardDto Player, int Rating, bool Friend, bool Revenge, DateTimeOffset? AvailableAt, bool Rookie = false);
+/// <summary>LastWon : issue du dernier duel de la paire dans la fenêtre de revanche, vue du joueur (null si aucun).</summary>
+public sealed record ArenaOpponentDto(PlayerCardDto Player, int Rating, bool Friend, bool Revenge, DateTimeOffset? AvailableAt, bool Rookie = false, bool? LastWon = null);
 
 /// <summary>Arène : cote, récompenses du jour, analyse de son roster et adversaires.</summary>
 public sealed record ArenaDto(
@@ -56,7 +57,8 @@ public sealed record ShareDto(string Code);
 
 /// <summary>Aperçu avant l'attaque : vis-à-vis, contres et synergies des deux rosters, et tendance du match en crans (vue de Mine).</summary>
 public sealed record BattlePreviewDto(
-    PlayerCardDto Opponent, int Rating, TeamReport Mine, TeamReport Theirs, DateTimeOffset? AvailableAt, MatchForecast? Forecast = null);
+    PlayerCardDto Opponent, int Rating, TeamReport Mine, TeamReport Theirs, DateTimeOffset? AvailableAt, MatchForecast? Forecast = null,
+    bool Revenge = false, bool? LastWon = null);
 
 /// <summary>Frame = palier final de la saison précédente (cadre de l'icône), null si pas classé.</summary>
 public sealed record BattlePlayerDto(

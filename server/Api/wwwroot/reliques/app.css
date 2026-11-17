@@ -2006,3 +2006,66 @@ button.tb-p { transition: transform .12s; } button.tb-p:active { transform: scal
 .tb-foot .btn { flex: none; }
 .pf .tbanner { margin: 4px 0 2px; }
 .roster-block { padding: 0 !important; background: none !important; border: 0 !important; }
+
+/* ---------- Duels : statut sur chaque ligne, action explicite ---------- */
+.foe { gap: 12px !important; }
+.foe .who { display: grid; gap: 4px; }
+.foe-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: var(--muted); }
+.foe-meta b { color: var(--text); font-size: 13px; }
+.foe-meta i { font-style: normal; font-weight: 700; } .foe-meta i.m { color: var(--pink); } .foe-meta i.p { color: var(--green); }
+.dstat { font-style: normal; font-weight: 700; font-size: 11px; line-height: 1.5; padding: 1px 7px; border-radius: 6px; white-space: nowrap; }
+.dstat.free { color: var(--green); background: rgba(76, 195, 138, .12); }
+.dstat.rev { color: #ff8a80; background: rgba(229, 83, 75, .16); }
+.dstat.riposte { color: var(--gold-2); background: rgba(200, 169, 106, .14); }
+.dstat.wait { color: var(--muted); background: rgba(255, 255, 255, .06); }
+.foe-cta { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 12px; border-radius: 11px; font-weight: 700; font-size: 13px; white-space: nowrap; }
+.foe-cta .fight-ic { width: 15px; height: 15px; }
+.foe-cta.go { background: var(--cyan); color: var(--ink); }
+.foe.st-rev .foe-cta.go { background: var(--pink); color: #fff; }
+.foe-cta.wait { color: var(--muted); background: rgba(255, 255, 255, .05); font-weight: 600; font-size: 12px; }
+.foe.st-wait .fring, .foe.st-wait .who b { opacity: .7; }
+
+/* ---------- Aperçu : son équipe d'abord, puis le rapport de force ---------- */
+.pv-head { display: flex; align-items: flex-end; gap: 10px; padding-right: 44px; }
+.pv-head > div { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.preview .pv-head h2 { padding-right: 0; }
+.pv-status { margin: 0; padding: 10px 12px; border-radius: 12px; font-size: 13px; background: rgba(255, 255, 255, .05); color: var(--muted); }
+.pv-status.rev { background: rgba(229, 83, 75, .12); color: #ffb3ad; }
+.pv-status.riposte { background: rgba(200, 169, 106, .12); color: var(--gold-2); }
+.pv-duel { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 16px; background: var(--panel); }
+.pv-duel .pv-me, .pv-duel .pv-them { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pv-duel .pv-them { justify-content: flex-end; text-align: right; }
+.pv-duel .pv-me > span:last-child, .pv-duel .pv-them > span:first-child { display: grid; min-width: 0; line-height: 1.1; }
+.pv-duel b:not(.num) { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-duel .num { font-size: 22px; }
+.pv-me .num { color: var(--blue); } .pv-them .num { color: var(--pink); }
+.pv-duel .vf-av { width: 40px; height: 40px; flex: none; }
+
+/* ---------- Vis-à-vis poste par poste (v4) ---------- */
+.mx-wrap[open] { display: grid; gap: 10px; }
+.mx-legend { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; font-size: 11px; color: var(--muted); }
+.mx-legend .me { color: var(--blue); font-weight: 700; } .mx-legend .them { color: var(--pink); font-weight: 700; text-align: right; }
+.mx-list { display: grid; gap: 6px; }
+.mx { display: grid; grid-template-columns: minmax(0, 1fr) 70px minmax(0, 1fr); align-items: center; gap: 8px; padding: 8px; border-radius: 14px; background: var(--panel); }
+.mx-side { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mx-side.them { flex-direction: row-reverse; text-align: right; }
+.mx-pic { position: relative; flex: none; width: 40px; height: 54px; border-radius: 9px; overflow: hidden; background: var(--bg-2); box-shadow: 0 0 0 1.5px var(--rc, var(--line-2)); }
+.mx-pic img { width: 100%; height: 100%; object-fit: cover; object-position: center 18%; }
+.mx-txt { display: grid; min-width: 0; gap: 1px; }
+.mx-txt b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mx-txt > span { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mx-txt em { font-style: normal; font-weight: 700; } .mx-txt em.up { color: var(--green); } .mx-txt em.down { color: var(--pink); }
+.mx-mid { display: grid; justify-items: center; gap: 4px; }
+.mx-mid .ricon { width: 16px; height: 16px; color: var(--muted); }
+.mx-bar { position: relative; width: 100%; height: 4px; border-radius: 2px; background: var(--line); }
+.mx-bar i { position: absolute; top: 0; bottom: 0; left: 50%; width: var(--w, 0%); border-radius: 2px; background: var(--blue); translate: -100% 0; }
+.mx.lose .mx-bar i { background: var(--pink); left: 50%; translate: 0 0; }
+.mx-mid em { font-style: normal; font-size: 11px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.mx.win .mx-mid em { color: var(--blue); } .mx.lose .mx-mid em { color: var(--pink); }
+.mx.win { box-shadow: inset 3px 0 0 var(--blue); } .mx.lose { box-shadow: inset -3px 0 0 var(--pink); }
+.foe .who b { white-space: normal; overflow: visible; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+.pv-duel { grid-template-columns: 1fr 1fr !important; row-gap: 10px !important; }
+.pv-bar { grid-column: 1 / -1; display: block; height: 6px; border-radius: 3px; background: var(--pink); overflow: hidden; }
+.pv-bar i { display: block; height: 100%; background: var(--blue); border-right: 2px solid var(--panel); }
+.mx-pic em { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; font-style: normal; font-size: 10px; font-weight: 800; text-align: center; line-height: 1.5; background: rgba(5, 8, 12, .82); }
+.mx-pic em.up { color: var(--green); } .mx-pic em.down { color: var(--pink); }

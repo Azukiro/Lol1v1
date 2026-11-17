@@ -210,6 +210,18 @@ public class ArenaFeaturesTests
         Assert.Equal(bId, stats.Nemesis!.UserId);
         Assert.Equal((cId, 1), (stats.Revenge!.UserId, stats.Revenge.Count));
 
+        // Statut lisible dans la liste des duels : C peut être défié en revanche, D attend sa riposte, B est libre.
+        var foes = (await a.GetFromJsonAsync<ArenaDto>("/api/v1/capsules/arena", ApiJson.Options))!.Opponents.ToDictionary(o => o.Player.UserId);
+        Assert.True(foes[cId].Revenge);
+        Assert.Equal(false, foes[cId].LastWon);
+        Assert.NotNull(foes[dId].AvailableAt);
+        Assert.Equal(false, foes[dId].LastWon);
+        Assert.Null(foes[bId].LastWon);
+        Assert.Null(foes[bId].AvailableAt);
+        var preview = (await a.GetFromJsonAsync<BattlePreviewDto>($"/api/v1/capsules/battles/preview/{cId}", ApiJson.Options))!;
+        Assert.True(preview.Revenge);
+        Assert.Equal(false, preview.LastWon);
+
         // Après le délai de revanche, D redevient défiable et compte deux défaites : il passe devant.
         factory.Clock.Advance(TimeSpan.FromDays(1));
         stats = (await a.GetFromJsonAsync<PlayerStatsDto>($"/api/v1/capsules/players/{aId}/stats", ApiJson.Options))!;

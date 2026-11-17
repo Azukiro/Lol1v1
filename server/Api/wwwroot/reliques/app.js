@@ -1695,18 +1695,31 @@ function renderArenaBody() {
   else renderHistory();
 }
 
+/**
+ * Statut d'un duel, lisible sans ouvrir l'aperçu (règle anti-farm de BattleService) :
+ * attente de riposte après mon attaque, revanche ouverte après la sienne, sinon libre.
+ */
+function duelStatus(o, name) {
+  const wait = o.availableAt ? Date.parse(o.availableAt) - now() : 0;
+  if (wait > 0) return { key: 'wait', chip: o.lastWon ? 'Battu · attend sa riposte' : 'Perdu · attend sa riposte', cta: fmtWait(wait), go: false,
+    long: `Tu l'as déjà attaqué. Nouveau duel quand ${esc(name)} riposte, ou ${fmtWait(wait)}.` };
+  if (o.revenge) return o.lastWon === false
+    ? { key: 'rev', chip: 'T’a battu', cta: 'Prendre ma revanche', go: true, long: `${esc(name)} t'a attaqué et gagné. À toi de répondre.` }
+    : { key: 'riposte', chip: 'T’a attaqué', cta: 'Riposter', go: true, long: `${esc(name)} t'a attaqué et perdu. Tu peux riposter.` };
+  return { key: 'free', chip: 'Défiable', cta: 'Défier', go: true, long: '' };
+}
+
 function foeHTML(o) {
   const p = o.player;
-  const wait = o.availableAt ? Date.parse(o.availableAt) - now() : 0;
-  const status = wait > 0 ? `<span class="tchip z">${fmtWait(wait)}</span>` : '';
+  const st = duelStatus(o, p.displayName);
   // Puissance de son roster estimée côté client (rareté, poste, méta), comparée à la tienne : un repère, pas une prédiction.
-  const theirs = S.cat ? teamPower(rosterItems(p.roster)) : 0, mine = S.arena?.team?.power || 0;
-  const gap = mine && theirs ? (theirs - mine) / mine : 0;
-  const cmp = !mine || !theirs ? '' : gap > 0.05 ? '<span class="tchip m">Plus fort</span>' : gap < -0.05 ? '<span class="tchip p">Moins fort</span>' : '<span class="tchip z">Même niveau</span>';
-  return `<button class="foe${o.revenge ? ' hot' : ''}" data-foe="${p.userId}" type="button">
+  const theirs = S.cat ? teamPower(rosterItems(fullSlots(p.roster))) : 0, mine = S.arena?.team?.power || 0;
+  const gap = mine && theirs ? theirs - mine : 0;
+  return `<button class="foe st-${st.key}" data-foe="${p.userId}" type="button" aria-label="${esc(p.displayName)} : ${st.chip}, ${st.cta}">
     <span class="fring" style="--tc:${p.frame ? TIER[p.frame].color : TIER[tierOf(o.rating)].color}">${avatarInner(p)}</span>
-    <span class="who"><b>${esc(p.displayName)}${o.revenge ? ' <em class="tg rev">Revanche</em>' : ''}${o.rookie ? ' <em class="tg new">Recrue</em>' : ''}</b><span>${fmtInt(o.rating)}${theirs ? ` · équipe ${theirs}` : ''}</span></span>
-    ${status || cmp}
+    <span class="who"><b>${esc(p.displayName)}${o.rookie ? ' <em class="tg new">Recrue</em>' : ''}${o.friend ? '' : ' <em class="tg eq">Suggéré</em>'}</b>
+      <span class="foe-meta"><em class="dstat ${st.key}">${st.chip}</em>${theirs ? `<span>équipe <b class="num">${theirs}</b>${gap ? ` <i class="${gap > 0 ? 'm' : 'p'}">${signed(gap)}</i>` : ''}</span>` : ''}</span></span>
+    <span class="foe-cta ${st.go ? 'go' : 'wait'}">${st.go ? SWORD_ICON : ''}${st.cta}</span>
   </button>`;
 }
 
@@ -1776,24 +1789,24 @@ async function renderHistory() {
 }
 
 // Aperçu : vis-à-vis poste par poste, contres et synergies, avant de lancer.
-function muSide(u, right = false) {
-  return `<span class="mu-side${right ? ' right' : ''} r-${u.rarity}">
-    <span class="mu-pic">${unitImg(u)}</span>
-    <span class="mu-txt"><b>${esc(u.champion)}</b>
-      <span>${u.classes.slice(0, 1).map((c) => `${clsIcon(c, 'sm')}${CLASS[c].label}`).join('')}${u.fitPercent ? ` <em class="${u.fitPercent > 0 ? 'up' : 'down'}" title="${fitLabel(u.fitPercent)}">${signed(u.fitPercent)} %</em>` : ''}</span>
-      ${profileHTML(u.profile)}
-      ${talentHTML(u.talent)}
-    </span></span>`;
+/** Un côté du vis-à-vis : portrait, champion, classe et adaptation au poste. */
+function mxSide(u, them = false) {
+  const fit = u.fitPercent ? `<em class="${u.fitPercent > 0 ? 'up' : 'down'}" title="${fitLabel(u.fitPercent)}">${signed(u.fitPercent)} %</em>` : '';
+  return `<span class="mx-side${them ? ' them' : ''} r-${u.rarity}">
+    <span class="mx-pic">${unitImg(u)}${fit}</span>
+    <span class="mx-txt"><b>${esc(u.champion)}</b><span>${u.classes.slice(0, 1).map((c) => `${clsIcon(c, 'sm')}${CLASS[c].label}`).join('')}</span></span>
+  </span>`;
 }
 
-// Contre de classe en teamfight, lu face à toute la composition adverse : chaque camp a le sien.
+// Contre de classe en teamfight, lu face à toute la composition adverse : chaque camp a le sien. La barre penche du côté avantagé.
 function matchupRow(role, a, b) {
   const d = a.counterPercent - b.counterPercent;
-  return `<div class="mu ${d > 0 ? 'win' : d < 0 ? 'lose' : ''}">
-    ${muSide(a)}
-    <span class="mu-mid"><span class="role">${role}</span>${a.counterPercent || b.counterPercent
-      ? `<em title="Contre de classe en teamfight">Teamfight<br>+${a.counterPercent} · +${b.counterPercent} %</em>` : '<em class="eq">=</em>'}</span>
-    ${muSide(b, true)}
+  const lean = Math.max(-1, Math.min(1, d / 15));
+  return `<div class="mx ${d > 0 ? 'win' : d < 0 ? 'lose' : 'eq'}">
+    ${mxSide(a)}
+    <span class="mx-mid">${roleIcon(role)}<span class="mx-bar" style="--w:${Math.round(Math.abs(lean) * 50)}%"><i></i></span>
+      <em>${d ? `${d > 0 ? 'Toi' : 'Lui'} +${Math.abs(d)} %` : 'Égal'}</em></span>
+    ${mxSide(b, true)}
   </div>`;
 }
 
@@ -1834,31 +1847,33 @@ function forecastHTML(f, mine, theirs) {
 async function openFoe(id) {
   try {
     const p = await api(`/capsules/battles/preview/${id}`);
-    const wait = p.availableAt ? Date.parse(p.availableAt) - now() : 0;
-    const diff = p.mine.power - p.theirs.power;
-    const [trend, trendCls] = p.forecast ? TREND[p.forecast.tendency] : [diff >= 0 ? 'Favori' : 'Outsider', diff >= 0 ? 'up' : 'down'];
+    const name = p.opponent.displayName;
+    const st = duelStatus(p, name);
+    const theirs = p.theirs.units.map(unitItem);
     openSheet(`<div class="preview">
-      <span class="kicker">Aperçu du combat</span>
-      <h2>Toi contre ${esc(p.opponent.displayName)}</h2>
-      <button class="btn ghost small" type="button" data-profile="${id}">Voir son profil</button>
-      <div class="vs-face">
-        <div><span class="vf-av me">${S.user ? avatarInner(S.user) : ''}</span><b>Toi</b><span class="num">${p.mine.power}</span></div>
-        <div class="vf-mid"><span class="vf-vs">VS</span><span class="vs-badge ${trendCls}">${trend}</span></div>
-        <div><span class="vf-av them">${avatarInner(p.opponent)}</span><b>${esc(p.opponent.displayName)}</b><span class="num">${p.theirs.power}</span></div>
+      <div class="pv-head"><div><span class="kicker">Aperçu du duel</span><h2>Toi contre ${esc(name)}</h2></div>
+        <button class="btn ghost small" type="button" data-profile="${id}">Profil</button></div>
+      ${st.long ? `<p class="pv-status ${st.key}">${st.long}</p>` : ''}
+      ${teamBannerHTML(theirs, { kicker: `Son équipe · ${fmtInt(p.rating)}`, name, power: p.theirs.power, side: 'them', vs: p.mine.power })}
+      <div class="pv-duel" aria-label="Puissance : toi ${p.mine.power}, ${esc(name)} ${p.theirs.power}">
+        <span class="pv-me">${S.user ? `<span class="vf-av me">${avatarInner(S.user)}</span>` : ''}<span><b>Toi</b><b class="num">${p.mine.power}</b></span></span>
+        <span class="pv-them"><span><b>${esc(name)}</b><b class="num">${p.theirs.power}</b></span><span class="vf-av them">${avatarInner(p.opponent)}</span></span>
+        <span class="pv-bar"><i style="width:${Math.round((p.mine.power / Math.max(1, p.mine.power + p.theirs.power)) * 100)}%"></i></span>
       </div>
       ${forecastHTML(p.forecast, p.mine, p.theirs)}
-      <details class="vs-more"><summary>Vis-à-vis poste par poste</summary>
-      <div class="matchups">${ROLES.map((r, i) => matchupRow(r, p.mine.units[i], p.theirs.units[i])).join('')}</div>
-      <div class="vs-syn"><div><span class="kicker">Tes bonus</span>${synergyHTML(p.mine.synergies)}</div>
-        <div><span class="kicker">Ses bonus</span>${synergyHTML(p.theirs.synergies)}</div></div>
+      <details class="vs-more mx-wrap"><summary>Vis-à-vis poste par poste</summary>
+        <div class="mx-legend"><span class="me">Toi</span><span>Avantage de classe en teamfight</span><span class="them">${esc(name)}</span></div>
+        <div class="mx-list">${ROLES.map((r, i) => matchupRow(i, p.mine.units[i], p.theirs.units[i])).join('')}</div>
+        <div class="vs-syn"><div><span class="kicker">Tes bonus</span>${synergyHTML(p.mine.synergies)}</div>
+          <div><span class="kicker">Ses bonus</span>${synergyHTML(p.theirs.synergies)}</div></div>
       </details>
       <details class="talents-vs"><summary>Talents en jeu</summary>
         <div><span class="kicker">Ton équipe</span>${p.mine.units.map((u) => `<div class="tv-row"><b>${esc(u.champion)}</b>${talentHTML(u.talent, true)}</div>`).join('')}</div>
         <div><span class="kicker">En face</span>${p.theirs.units.map((u) => `<div class="tv-row"><b>${esc(u.champion)}</b>${talentHTML(u.talent, true)}</div>`).join('')}</div>
       </details>
-      <p class="hint">Astuce : ton roster défend aussi. Le changer pour contrer ce joueur change aussi ta défense.</p>
-      <button class="btn primary big block" id="attack-go" ${wait > 0 ? 'disabled' : ''}>${wait > 0 ? `Attends sa riposte · ${fmtWait(wait)}` : 'Lancer le combat'}</button>
-      <button class="btn ghost block" data-goto="collection">Ajuster mon roster</button>
+      <p class="hint">Ton équipe défend aussi : la changer pour contrer ${esc(name)} change aussi ta défense.</p>
+      <button class="btn primary big block" id="attack-go" ${st.go ? '' : 'disabled'}>${st.go ? `${SWORD_ICON}${st.key === 'free' ? `Défier ${esc(name)}` : st.cta}` : `Attends sa riposte · ${st.cta}`}</button>
+      <button class="btn ghost block" data-goto="collection">Ajuster mon équipe</button>
     </div>`);
     $('#attack-go').onclick = () => attack(id);
   } catch (e) { toast(e.message, true); }

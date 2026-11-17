@@ -111,8 +111,9 @@ public sealed class BattleService(
         var recent = await RecentPairsAsync(userId, ids, now);
         var opponents = ids.Where(cards.ContainsKey).Select(id =>
         {
-            var (availableAt, revenge) = Availability(userId, recent.GetValueOrDefault(id));
-            return new ArenaOpponentDto(cards[id], RatingOf(id), friendSet.Contains(id), revenge, availableAt, rookies.Contains(id));
+            var last = recent.GetValueOrDefault(id);
+            var (availableAt, revenge) = Availability(userId, last);
+            return new ArenaOpponentDto(cards[id], RatingOf(id), friendSet.Contains(id), revenge, availableAt, rookies.Contains(id), LastWon(userId, last));
         })
             .OrderByDescending(o => o.Revenge).ThenBy(o => o.AvailableAt is not null).ThenByDescending(o => o.Friend).ThenByDescending(o => o.Rating)
             .ToList();
@@ -212,8 +213,9 @@ public sealed class BattleService(
         var card = (await social.CardsAsync([opponentId], friend ? [opponentId] : [])).GetValueOrDefault(opponentId)
             ?? throw new AppException("Joueur introuvable.", 404);
         var rating = await db.BattleProfiles.Where(p => p.UserId == opponentId).Select(p => (int?)p.Rating).FirstOrDefaultAsync() ?? _o.StartRating;
-        var recent = await RecentPairsAsync(userId, [opponentId], clock.GetUtcNow());
-        return new BattlePreviewDto(card, rating, a, b, Availability(userId, recent.GetValueOrDefault(opponentId)).AvailableAt, forecast);
+        var last = (await RecentPairsAsync(userId, [opponentId], clock.GetUtcNow())).GetValueOrDefault(opponentId);
+        var (availableAt, revenge) = Availability(userId, last);
+        return new BattlePreviewDto(card, rating, a, b, availableAt, forecast, revenge, LastWon(userId, last));
     }
 
     public async Task<BattleDto> AttackAsync(Guid userId, Guid opponentId)
@@ -606,6 +608,8 @@ public sealed class BattleService(
         last is null ? (null, false)
         : last.AttackerId == userId ? (last.CreatedAt + Rematch, false)
         : (null, true);
+
+    private static bool? LastWon(Guid userId, RelicBattle? last) => last is null ? null : (last.AttackerId == userId) == last.AttackerWon;
 
     private async Task<BattleProfile> GetOrCreateProfileAsync(Guid userId, DateTimeOffset now)
     {

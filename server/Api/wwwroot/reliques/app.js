@@ -1752,6 +1752,10 @@ function bossHTML(b) {
   </section>`;
 }
 
+/** Coquille de combat pour une partie contre le boss en cours (avant la fin, pas de score). */
+const bossShell = (s) => ({ id: s.runId, attacker: s.me, defender: s.boss, a: s.a, b: s.b, events: s.events, attackerWon: false,
+  boss: true, essence: 0, passXp: 0, minutes: 0 });
+
 async function attackBoss() {
   const btn = $('#boss-go'); btn.disabled = true; btn.textContent = 'Combat en cours…';
   try {

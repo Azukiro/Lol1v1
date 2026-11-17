@@ -95,4 +95,6 @@ public sealed record PlayerStatsDto(
     int Kills, int Deaths, int Aces, int FirstBloods, int Flawless, int? FastestWin, int BestGain, int Essence,
     RivalDto? BestUpset, RivalDto? Victim, RivalDto? Nemesis, ChampionStatDto? Signature, ChampionStatDto? Killer,
     Tier? BestTier, int SeasonsPlayed, int Podiums, int Titles, DateTimeOffset? FirstBattleAt,
-    List<int>? TitleSeasons = null, int ShameLosses = 0, string? ShameAccount = null, List<int>? LegendSeasons = null, int PassLevel = 0);
+    List<int>? TitleSeasons = null, int ShameLosses = 0, string? ShameAccount = null, List<int>? LegendSeasons = null, int PassLevel = 0,
+    /// <summary>Joueur à affronter pour prendre sa revanche (dernier duel perdu, défiable maintenant) ; seulement sur son propre profil.</summary>
+    RivalDto? Revenge = null);

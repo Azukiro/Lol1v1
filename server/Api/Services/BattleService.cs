@@ -417,6 +417,20 @@ public sealed class BattleService(
             }
         }
 
+        // Revanche à prendre (carte Rivalité du Club, sur son propre profil) : seulement les joueurs dont le dernier duel
+        // est une défaite non vengée et qu'on peut affronter maintenant (règle anti-farm). Le décompte historique reste dans Nemesis.
+        Guid? revengeId = null;
+        if (viewerId == playerId)
+        {
+            var now = clock.GetUtcNow();
+            revengeId = battles.GroupBy(b => b.AttackerId == playerId ? b.DefenderId : b.AttackerId)
+                .Select(g => (Other: g.Key, Last: g.Last()))
+                .Where(x => (x.Last.AttackerId == playerId) != x.Last.AttackerWon
+                    && (x.Last.CreatedAt <= now - Rematch || Availability(playerId, x.Last).AvailableAt is null))
+                .OrderByDescending(x => lostTo.GetValueOrDefault(x.Other)).ThenByDescending(x => x.Last.CreatedAt)
+                .Select(x => (Guid?)x.Other).FirstOrDefault();
+        }
+
         var rivals = beaten.Keys.Concat(lostTo.Keys).Append(upset?.Id ?? Guid.Empty).Distinct().ToList();
         var names = await db.Users.Where(u => rivals.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.DisplayName);
         RivalDto? Rival(Dictionary<Guid, int> counts) => counts.Count == 0 ? null
@@ -447,7 +461,8 @@ public sealed class BattleService(
             seasons.Where(s => s.Rank == 1).Select(s => Seasons.Number(s.SeasonId)).OrderBy(n => n).ToList(),
             shameLosses, shameLosses > 0 ? (shameId is { } sId ? names.GetValueOrDefault(sId, _o.ShameAccount) : _o.ShameAccount) : null,
             seasons.Where(s => s.PassLevel >= SeasonPass.MaxLevel).Select(s => Seasons.Number(s.SeasonId)).OrderBy(n => n).ToList(),
-            profile?.PassLevel ?? 0);
+            profile?.PassLevel ?? 0,
+            revengeId is { } rid && names.ContainsKey(rid) ? new RivalDto(rid, names[rid], lostTo.GetValueOrDefault(rid)) : null);
     }
 
     private async Task<Guid?> ShameIdAsync() =>

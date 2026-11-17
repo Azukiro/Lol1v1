@@ -826,6 +826,8 @@ const ROLE_ICON = ['r-top', 'r-jgl', 'r-mid', 'r-bot', 'r-sup'];
 const roleIcon = (i, cls = '') => `<svg viewBox="0 0 24 24" class="ricon ${cls}" aria-hidden="true"><use href="#${ROLE_ICON[i]}"/></svg>`;
 const fullSlots = (slots) => Array.from({ length: 5 }, (_, k) => slots?.[k] ?? null);
 const warnIcon = '<svg viewBox="0 0 24 24" class="wicon"><path d="M12 4 21 20H3z"/><path d="M12 10v4M12 17v.01"/></svg>';
+/** Icône de combat (épées croisées) pour les actions qui lancent un duel. */
+const SWORD_ICON = '<svg viewBox="0 0 24 24" class="fight-ic" aria-hidden="true"><use href="#cls-FIGHTER"/></svg>';
 const boltIcon = '<svg viewBox="0 0 24 24" class="wicon ok"><path d="M13 3 5 14h6l-1 7 8-11h-6z"/></svg>';
 
 /** Malus de composition à corriger (frontline, dégâts, protection) et bonus de gamme, en lignes courtes. */
@@ -1168,13 +1170,14 @@ async function loadRival() {
   try {
     const st = await api(`/capsules/players/${S.user.id}/stats`);
     S.myStats = st;
-    const n = st.nemesis;
+    // Seulement une défaite non vengée contre un joueur défiable maintenant (calculé par le serveur).
+    const n = st.revenge;
     if (!n) { el.hidden = true; return; }
     el.hidden = false;
-    el.innerHTML = `<div class="rv-top"><span class="kicker">Rivalité</span><span class="muted">ta bête noire</span></div>
-      <div class="rv-main"><div class="rv-txt"><b>Toi contre ${esc(n.displayName)}</b><span>${n.count} défaite${n.count > 1 ? 's' : ''} contre ${esc(n.displayName)}</span></div>
+    el.innerHTML = `<div class="rv-top"><span class="kicker">Rivalité</span><span class="muted">dernier duel perdu</span></div>
+      <div class="rv-main"><div class="rv-txt"><b>Toi contre ${esc(n.displayName)}</b><span>${n.count} défaite${n.count > 1 ? 's' : ''} contre ${esc(n.displayName)}, à toi de répondre</span></div>
       <b class="num rv-score">${n.count}</b></div>
-      <button class="btn primary block" type="button" data-foe="${n.userId}">Prendre ta revanche</button>`;
+      <button class="btn primary block" type="button" data-foe="${n.userId}">${SWORD_ICON}Prendre ma revanche</button>`;
   } catch { el.hidden = true; }
 }
 

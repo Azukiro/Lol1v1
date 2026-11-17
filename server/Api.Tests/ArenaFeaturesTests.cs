@@ -181,6 +181,46 @@ public class ArenaFeaturesTests
     }
 
     [Fact]
+    public async Task Rivalry_only_offers_an_unavenged_loss_that_can_be_fought_now()
+    {
+        await using var factory = new ApiFactory();
+        SeedCatalog(factory);
+        var (a, aId) = await Player(factory, "rivA");
+        var (_, bId) = await Player(factory, "rivB");
+        var (_, cId) = await Player(factory, "rivC");
+        var (_, dId) = await Player(factory, "rivD");
+        var now = factory.Clock.GetUtcNow();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            RelicBattle Fight(Guid attacker, Guid defender, bool attackerWon, TimeSpan ago) =>
+                new() { AttackerId = attacker, DefenderId = defender, AttackerWon = attackerWon, CreatedAt = now - ago };
+            db.RelicBattles.AddRange(
+                // B l'a battu trois fois, mais A a pris sa revanche ensuite : bête noire historique, plus de revanche à prendre.
+                Fight(bId, aId, true, TimeSpan.FromDays(6)), Fight(bId, aId, true, TimeSpan.FromDays(3)), Fight(bId, aId, true, TimeSpan.FromDays(2)),
+                Fight(aId, bId, true, TimeSpan.FromDays(1)),
+                // C l'a battu une fois : revanche ouverte.
+                Fight(cId, aId, true, TimeSpan.FromHours(5)),
+                // A a attaqué D et perdu il y a une heure : défaite non vengée mais D n'est pas encore réattaquable.
+                Fight(aId, dId, false, TimeSpan.FromHours(1)), Fight(dId, aId, true, TimeSpan.FromDays(4)));
+            await db.SaveChangesAsync();
+        }
+
+        var stats = (await a.GetFromJsonAsync<PlayerStatsDto>($"/api/v1/capsules/players/{aId}/stats", ApiJson.Options))!;
+        Assert.Equal(bId, stats.Nemesis!.UserId);
+        Assert.Equal((cId, 1), (stats.Revenge!.UserId, stats.Revenge.Count));
+
+        // Après le délai de revanche, D redevient défiable et compte deux défaites : il passe devant.
+        factory.Clock.Advance(TimeSpan.FromDays(1));
+        stats = (await a.GetFromJsonAsync<PlayerStatsDto>($"/api/v1/capsules/players/{aId}/stats", ApiJson.Options))!;
+        Assert.Equal((dId, 2), (stats.Revenge!.UserId, stats.Revenge.Count));
+
+        // Vu par quelqu'un d'autre : pas de revanche à proposer.
+        var (other, _) = await Player(factory, "rivE");
+        Assert.Null((await other.GetFromJsonAsync<PlayerStatsDto>($"/api/v1/capsules/players/{aId}/stats", ApiJson.Options))!.Revenge);
+    }
+
+    [Fact]
     public async Task Fights_fill_the_pass_and_season_end_resets_it()
     {
         await using var factory = new ApiFactory();

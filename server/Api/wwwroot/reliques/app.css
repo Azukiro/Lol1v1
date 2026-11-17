@@ -1965,3 +1965,7 @@ button.tport { transition: transform .12s; } button.tport:active { transform: sc
 .pf-big b { color: var(--text); }
 .pk-art .fox-sticker { width: 22px; min-width: 0; right: 3px; top: 3px; }
 .tport .fox-sticker { width: 40%; right: 3px; top: 3px; }
+
+/* Icône de combat dans les boutons qui lancent un duel */
+.fight-ic { width: 18px; height: 18px; flex: none; }
+.btn.small .fight-ic { width: 15px; height: 15px; }

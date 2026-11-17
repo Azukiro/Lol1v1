@@ -845,14 +845,40 @@ function teamNotes(its) {
 }
 const notesHTML = (notes) => notes.map(([k, t]) => `<div class="tnote ${k}">${k === 'ok' ? boltIcon : warnIcon}<span>${t}</span></div>`).join('');
 
-/** Rangée de 5 portraits : skin, poste, liseré de rareté. */
-function teamRowHTML(slots, editable) {
-  return `<div class="trow">${fullSlots(slots).map((sl, i) => {
-    const it = slotItem(sl);
-    const tag = editable ? 'button' : 'div';
-    return `<${tag} class="tport${it ? ` r-${it.rarity}` : ' empty'}" ${editable ? `type="button" data-compose="${i}"` : ''} aria-label="${ROLES[i]}${it ? ` : ${esc(it.name)}` : ' libre'}">
-      ${it ? `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt="">` : '<b class="tplus">+</b>'}${roleIcon(i)}</${tag}>`;
-  }).join('')}</div>`;
+/** Pièce maîtresse d'une équipe : la plus rare, le mid en cas d'égalité. Son splash sert de fond à la bannière. */
+function teamLead(its) {
+  let best = -1;
+  its.forEach((it, i) => {
+    if (!it) return;
+    if (best < 0 || rank(it.rarity) > rank(its[best].rarity) || (rank(it.rarity) === rank(its[best].rarity) && i === 2)) best = i;
+  });
+  return best;
+}
+
+/**
+ * Bannière d'équipe façon boss : splash de la pièce maîtresse en fond, nom et puissance en grand, cinq portraits avec leur poste.
+ * side : 'me' (bleu) ou 'them' (rouge). editable : portraits et bouton Composer ouvrent le compositeur.
+ */
+function teamBannerHTML(its, { kicker = '', name = '', power = 0, side = 'me', editable = false, vs = null, foot = '' } = {}) {
+  const lead = teamLead(its);
+  const L = its[lead];
+  const filled = its.filter(Boolean).length;
+  const tag = editable ? 'button' : 'div';
+  const ports = its.map((it, i) => `<${tag} class="tb-p${it ? ` r-${it.rarity}` : ' empty'}${i === lead ? ' lead' : ''}" ${editable ? `type="button" data-compose="${i}"` : ''}
+      aria-label="${ROLES[i]}${it ? ` : ${esc(it.name)}` : ' libre'}">
+      ${it ? `<img loading="lazy" src="${esc(it.art)}" ${it.fb ? `data-fb="${esc(it.fb)}"` : ''} alt="">` : '<b class="tplus">+</b>'}${roleIcon(i)}</${tag}>`).join('');
+  const gap = vs ? power - vs : 0;
+  const cmp = !vs ? '' : `<span class="tb-cmp ${gap > 0 ? 'up' : gap < 0 ? 'down' : ''}">${gap ? `${signed(gap)} vs toi` : 'même puissance'}</span>`;
+  return `<section class="tbanner ${side}">
+    ${L ? `<img class="tb-art" src="${esc(L.splash)}" data-fb="${esc(L.art)}" alt="">` : ''}
+    <div class="tb-top">
+      <div class="tb-id"><span class="kicker">${kicker}</span><h2>${esc(name)}</h2>
+        ${L ? `<span class="tb-lead">${esc(L.name)}<i class="r-${L.rarity}">${LABEL[L.rarity]}</i></span>` : `<span class="tb-lead">${filled} / 5 postes</span>`}</div>
+      <div class="tb-pow"><b class="num">${fmtInt(power)}</b><span>Puissance</span>${cmp}</div>
+    </div>
+    <div class="tb-row">${ports}</div>
+    ${foot}
+  </section>`;
 }
 
 function renderRoster() {
@@ -860,12 +886,13 @@ function renderRoster() {
   const slots = friend ? friend.roster : S.roster;
   const editable = !friend;
   const its = rosterItems(fullSlots(slots));
-  $('#roster-title').textContent = friend ? `Équipe de ${friend.name}` : 'Mon équipe';
-  $('#roster-hint').innerHTML = `Puissance <b class="num">${teamPower(its)}</b>`;
-  $('#compose-btn').hidden = !editable;
-  $('#team-tabs').hidden = true;
-  $('#roster').innerHTML = teamRowHTML(slots, editable);
-  $('#team-coach').innerHTML = editable ? notesHTML(teamNotes(its).slice(0, 2)) : '';
+  const team = !friend && S.teams?.[S.activeTeam];
+  $('#roster').innerHTML = teamBannerHTML(its, {
+    kicker: friend ? 'Son équipe' : `Mon équipe${team?.name ? ` · ${esc(team.name)}` : ''}`, name: friend ? friend.name : (S.user?.displayName || 'Moi'),
+    power: teamPower(its), side: friend ? 'them' : 'me', editable,
+    foot: editable ? `<div class="tb-foot"><div class="tb-notes">${notesHTML(teamNotes(its).slice(0, 2))}</div>
+      <button class="btn primary small" type="button" data-compose="0">Composer</button></div>` : '' });
+  $('#team-coach').innerHTML = '';
   if ($('#composer') && !$('#composer').hidden) drawComposer();
 }
 
@@ -1261,6 +1288,7 @@ async function showProfile(userId) {
     const gem = (coll?.items || []).filter((i) => i.kind === 'SKIN').map((i) => item(i.kind, i.itemId)).filter(Boolean)
       .sort((a, b) => rank(b.rarity) - rank(a.rarity))[0];
     const top = s.rank ? Math.ceil((s.rank / s.ranked) * 100) : null;
+    const team = rosterItems(fullSlots(me ? S.roster : coll?.player?.roster));
     const fact = (v, label) => `<div><b>${v}</b><span>${label}</span></div>`;
     const sec = (title, body) => `<section class="pf-sec"><span class="kicker">${title}</span>${body}</section>`;
     const champ = (c, label, line) => {
@@ -1280,6 +1308,8 @@ async function showProfile(userId) {
           <span class="muted pf-best">record ${fmtInt(s.bestRating)}${top && s.rank > 1 && top <= 50 ? ` · top ${top} %` : ''}</span></div>
       </div>
       <div class="pf-titles">${profileTitles(s, collPct).map(([t, c]) => `<span class="pf-title ${c}">${t}</span>`).join('')}</div>
+      ${team.some(Boolean) ? teamBannerHTML(team, { kicker: me ? 'Mon équipe' : 'Son équipe', name: p.displayName, power: teamPower(team), side: me ? 'me' : 'them',
+        vs: me || !S.roster ? null : teamPower(rosterItems(fullSlots(S.roster))) }) : ''}
       ${games ? `
       ${sec('Bilan', `<div class="pf-big"><b>${pctOf(s.wins, s.losses)} %</b><span>de victoires sur ${games} combat${games > 1 ? 's' : ''}</span></div>
         <div class="pf-form" aria-label="Forme récente">${s.form.map((w) => `<i class="${w ? 'w' : 'l'}">${w ? 'V' : 'D'}</i>`).join('')}</div>
@@ -1649,11 +1679,11 @@ function renderArenaTeam() {
     return;
   }
   const its = rosterItems(fullSlots(S.roster));
-  el.innerHTML = `<div class="team-strip">
-      <div class="ts-head"><b>Mon équipe</b><span class="ts-pow">Puissance <b class="num">${a.team.power}</b></span><button class="btn small" type="button" data-compose="0">Composer</button></div>
-      ${teamRowHTML(S.roster, true)}
-      ${notesHTML(teamNotes(its).slice(0, 2))}
-    </div>`;
+  const team = S.teams?.[S.activeTeam];
+  el.innerHTML = teamBannerHTML(its, {
+    kicker: `Mon équipe${team?.name ? ` · ${esc(team.name)}` : ''}`, name: S.user?.displayName || 'Moi', power: a.team.power, side: 'me', editable: true,
+    foot: `<div class="tb-foot"><div class="tb-notes">${notesHTML(teamNotes(its).slice(0, 2))}</div>
+      <button class="btn primary small" type="button" data-compose="0">Composer</button></div>` });
 }
 
 function renderArenaBody() {
@@ -3073,7 +3103,6 @@ function bind() {
     if (await addFriend({ query: input.value })) input.value = '';
   });
   $('#owner-back').onclick = () => setView('friends');
-  $('#compose-btn').onclick = () => showComposer(0);
   bindArena();
   $('#owner-follow').onclick = async () => {
     const p = await addFriend({ userId: S.friend.userId });
@@ -3188,7 +3217,7 @@ const AHRI_ID = () => S.cat?.champions?.find((c) => c.alias === 'Ahri')?.id ?? 1
 const isAhriSrc = (src) => /\/Ahri_\d/.test(src) || src.endsWith(`/champion-icons/${AHRI_ID()}.png`);
 const isAhriItem = (it) => it?.champ?.alias === 'Ahri';
 const ROUND = '.avatar, .sring, .fc-av, .vf-av, .pd-av, .token, .kf-face-wrap';
-const CARDS = '.card, .tport, .pk-art, .cp-main, .cp-side, .unit-art, .pg-mvp, .me-sig, .pf-champ';
+const CARDS = '.card, .tport, .tb-p, .pk-art, .cp-main, .cp-side, .unit-art, .pg-mvp, .me-sig, .pf-champ';
 
 function ahrify(root = document) {
   if (!root.querySelectorAll) return;

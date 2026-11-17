@@ -1217,34 +1217,77 @@ const avatarSrc = (p) => (p.avatarChampionId ? `${CD}v1/champion-icons/${+p.avat
   : p.profileIconId ? `https://ddragon.leagueoflegends.com/cdn/img/profileicon/${+p.profileIconId}.png` : null);
 const fold = (s) => s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').trim();
 
-/** Choix de l'icône ; forcé (sans fermeture possible) tant que le joueur n'en a pas. Résolu une fois l'icône enregistrée ou la feuille fermée. */
+const AVATAR_FILTERS = [['mine', 'Mes champions'], ['', 'Tous'], ['fighter', 'Combattants'], ['mage', 'Mages'], ['marksman', 'Tireurs'],
+  ['assassin', 'Assassins'], ['tank', 'Tanks'], ['support', 'Soutiens']];
+
+/**
+ * Choix de l'icône ; forcé (sans fermeture possible) tant que le joueur n'en a pas. Aperçu en direct, puis Valider :
+ * on voit l'icône comme au classement avant de l'enregistrer. Résolu une fois l'icône enregistrée ou la feuille fermée.
+ */
 function showAvatarPicker(force = false) {
   const champs = [...S.cat.champions].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
-  const current = S.user?.avatarChampionId;
+  // Mes champions : ceux dont je possède le champion ou un skin, les plus collectionnés d'abord.
+  const owned = new Map();
+  for (const key of S.owned.keys()) { const it = fromKey(key); if (it) owned.set(it.champ.id, (owned.get(it.champ.id) || 0) + 1); }
+  const current = S.user?.avatarChampionId || null;
+  let pick = current;
+  let filter = owned.size ? 'mine' : '';
   $('#sheet').classList.toggle('locked', force);
-  openSheet(`<div class="picker avatar-picker">
-    <h2>${force ? 'Choisis ton icône' : 'Changer d\'icône'}</h2>
-    <p class="muted">Le champion choisi s'affiche à côté de ton nom : classement, arène, amis.</p>
-    <input type="search" id="avatar-search" placeholder="Rechercher un champion" autocomplete="off">
-    <div class="avatar-grid">${champs.map((c) => `<button type="button" class="avatar-opt${c.id === current ? ' selected' : ''}" data-avatar="${c.id}" title="${esc(c.name)}" aria-label="${esc(c.name)}">
-      <img loading="lazy" src="${CD}v1/champion-icons/${c.id}.png" alt=""><span>${esc(c.name)}</span></button>`).join('')}</div>
+  const opt = (c) => `<button type="button" class="avatar-opt${c.id === current ? ' selected' : ''}" data-avatar="${c.id}" data-roles="${esc((c.roles || []).join(' '))}"
+      data-mine="${owned.has(c.id) ? owned.get(c.id) : 0}" title="${esc(c.name)}" aria-label="${esc(c.name)}" aria-pressed="${c.id === current}">
+      <img loading="lazy" src="${CD}v1/champion-icons/${c.id}.png" alt=""><span>${esc(c.name)}</span></button>`;
+  const mineFirst = [...champs].sort((a, b) => (owned.get(b.id) || 0) - (owned.get(a.id) || 0));
+  openSheet(`<div class="picker avatar-picker ap">
+    <div class="ap-head"><span class="kicker">${force ? 'Avant de commencer' : 'Profil'}</span><h2>${force ? 'Choisis ton icône' : 'Changer d\'icône'}</h2>
+      <p class="muted">Elle s'affiche à côté de ton nom : classement, arène, Club.</p></div>
+    <div class="ap-preview" aria-live="polite">
+      <span class="ap-rank num">#1</span>
+      <span class="fring ap-av" style="--tc:${TIER[S.arena?.season?.tier || 'BRONZE'].color}"><span class="avatar" id="ap-av">${current ? `<img src="${CD}v1/champion-icons/${current}.png" alt="">` : esc((S.user?.displayName || '?')[0])}</span></span>
+      <span class="ap-who"><b>${esc(S.user?.displayName || 'Toi')}</b><span id="ap-name">${current ? esc(S.cat.champ.get(current)?.name || '') : 'Aucune icône'}</span></span>
+      <button class="btn primary small" type="button" id="ap-save" disabled>Valider</button>
+    </div>
+    <input type="search" id="avatar-search" placeholder="Rechercher parmi ${champs.length} champions" autocomplete="off">
+    <div class="ap-filters" role="group" aria-label="Filtrer">${AVATAR_FILTERS.filter(([k]) => k !== 'mine' || owned.size)
+      .map(([k, l]) => `<button type="button" data-apf="${k}" aria-pressed="${k === filter}">${l}${k === 'mine' ? ` <em>${owned.size}</em>` : ''}</button>`).join('')}</div>
+    <div class="avatar-grid">${mineFirst.map(opt).join('')}</div>
+    <p class="empty-note" id="ap-empty" hidden>Aucun champion ne correspond.</p>
   </div>`);
-  $('#avatar-search').addEventListener('input', (e) => {
-    const q = fold(e.target.value);
-    $$('.avatar-opt').forEach((b) => { b.hidden = !!q && !fold(b.title).includes(q); });
-  });
+  const apply = () => {
+    const q = fold($('#avatar-search').value);
+    let shown = 0;
+    $$('.avatar-opt').forEach((b) => {
+      const ok = (!q || fold(b.title).includes(q)) && (q || !filter || (filter === 'mine' ? +b.dataset.mine > 0 : b.dataset.roles.split(' ').includes(filter)));
+      b.hidden = !ok; if (ok) shown++;
+    });
+    $('#ap-empty').hidden = shown > 0;
+  };
+  apply();
+  $('#avatar-search').addEventListener('input', apply);
+  $$('[data-apf]').forEach((b) => (b.onclick = () => {
+    filter = b.dataset.apf;
+    $$('[data-apf]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    apply();
+  }));
   let saving = false;
   return new Promise((resolve) => {
-    $$('.avatar-opt').forEach((b) => (b.onclick = async () => {
-      if (saving) return;
-      saving = true;
+    $$('.avatar-opt').forEach((b) => (b.onclick = () => {
+      pick = +b.dataset.avatar;
+      $$('.avatar-opt').forEach((x) => { x.classList.toggle('selected', x === b); x.setAttribute('aria-pressed', String(x === b)); });
+      $('#ap-av').innerHTML = `<img src="${CD}v1/champion-icons/${pick}.png" alt="">`;
+      $('#ap-name').textContent = S.cat.champ.get(pick)?.name || '';
+      $('#ap-save').disabled = pick === current;
+      buzz(8);
+    }));
+    $('#ap-save').onclick = async () => {
+      if (saving || !pick) return;
+      saving = true; $('#ap-save').disabled = true;
       try {
-        setUser(await api('/capsules/avatar', { method: 'PUT', body: { championId: +b.dataset.avatar } }));
+        setUser(await api('/capsules/avatar', { method: 'PUT', body: { championId: pick } }));
         $('#sheet').classList.remove('locked'); closeSheet(); buzz(20);
         if (S.view === 'arena') loadArena({ quiet: true });
         resolve();
-      } catch (e) { toast(e.message, true); } finally { saving = false; }
-    }));
+      } catch (e) { toast(e.message, true); $('#ap-save').disabled = false; } finally { saving = false; }
+    };
     const wait = setInterval(() => { if ($('#sheet').hidden) { clearInterval(wait); resolve(); } }, 300);
   });
 }
@@ -1497,7 +1540,7 @@ const STYLE = {
   SOLO: { label: 'Solo', text: 'Gagne ses duels et pousse les side lanes.' },
   TEAMFIGHT: { label: 'Teamfight', text: 'Brille dans les combats à cinq.' },
 };
-const TUTO_KEY = 'capsules.tuto.arena.v3';
+const TUTO_KEY = 'capsules.tuto.arena.v4';
 const TIER = {
   BRONZE: { label: 'Bronze', color: '#d08a5b' },
   SILVER: { label: 'Argent', color: '#c3cfe2' },
@@ -1605,11 +1648,16 @@ function renderArenaHead() {
     </div>`;
   if (a.lastSeason && !S.seasonShown) { S.seasonShown = true; showSeasonEnd(a.lastSeason); }
   else if (a.lastBoss && !S.bossShown && $('#sheet').hidden) { S.bossShown = true; showBossResult(a.lastBoss); }
-  $('#reward-pips').innerHTML = Array.from({ length: a.rewardedPerDay }, (_, i) => `<i class="${i < a.rewardedToday ? 'on' : ''}${i % 2 ? ' pair' : ''}"></i>`).join('');
+  // Essence du jour : une case par victoire payée, remplie quand elle est gagnée ; 2 cases = 1 relique.
   const left = a.rewardedPerDay - a.rewardedToday;
-  $('#reward-text').innerHTML = left > 0
-    ? `<b>+${a.winEssence}</b> essence par victoire${a.catchUpPercent ? ` <span class="catchup" title="Bonus de rattrapage : ta collection est encore petite">dont +${a.catchUpPercent} % rattrapage</span>` : ''} · encore <b>${left}</b> aujourd'hui`
-    : 'Essence du jour empochée · la cote compte toujours';
+  const reset = Date.parse(a.resetAt) - now();
+  $('#reward-day').innerHTML = `<div class="rw-head"><span class="kicker">Essence du jour</span>
+      <span class="rw-count"><b class="num">${a.rewardedToday}</b> / ${a.rewardedPerDay} victoires payées</span></div>
+    <div class="rw-slots">${Array.from({ length: a.rewardedPerDay }, (_, i) => `<span class="rw-slot${i < a.rewardedToday ? ' on' : ''}${i % 2 ? ' pair' : ''}">
+      <svg viewBox="0 0 100 100" aria-hidden="true"><use href="#crystal"/></svg><b class="num">+${a.winEssence}</b></span>`).join('')}</div>
+    <p class="rw-note">${left > 0
+      ? `Victoire en attaque : <b>+${a.winEssence}</b> essence${a.catchUpPercent ? `, dont <b class="rw-catch">+${a.catchUpPercent} %</b> de rattrapage` : ''}. Deux victoires valent une relique.`
+      : `Essence du jour empochée. La cote compte toujours, nouvelles cases ${reset > 0 ? fmtWait(reset) : 'à minuit'}.`}</p>`;
 }
 
 const fmtInt = (n) => Number(n || 0).toLocaleString('fr-FR');
@@ -2487,12 +2535,14 @@ async function playBattle(b, { spectator = false, live = null } = {}) {
   const title = spectator ? `Victoire de ${(b.attackerWon ? b.attacker : b.defender).displayName}`
     : b.boss ? (won ? 'Boss terrassé' : 'Le boss tient bon') : won ? 'Victoire' : 'Défaite';
   $('#b-end').innerHTML = `<div class="pg-title ${spectator || won ? 'win' : 'loss'}">${esc(title)}</div>
-    <div class="end-chips">
-      ${spectator ? `<span class="chip">${b.minutes} min</span>` : b.boss ? `<span class="chip gold">${fmtInt(b.bossScore)} dégâts${b.bossScore >= b.bossBest ? ' · record' : ''}</span>`
-        : `<span class="chip ${delta >= 0 ? 'up' : 'down'}">${signed(delta)} pts · ${pMe.ratingAfter}</span>`}
-      ${!spectator && mineA && b.essence ? `<span class="chip ess">+${b.essence} essence</span>` : ''}
-      ${b.tactics?.length ? `<span class="chip">${b.tactics.filter((t) => t.outcome > 0).length} / ${b.tactics.length} calls réussis</span>` : ''}
-</div>
+    <div class="end-stats">
+      ${spectator ? `<div><b class="num">${b.minutes}</b><span>minutes</span></div>`
+        : b.boss ? `<div class="gold"><b class="num">${fmtInt(b.bossScore)}</b><span>${b.bossScore >= b.bossBest ? 'dégâts · record' : 'dégâts'}</span></div>`
+        : `<div class="${delta >= 0 ? 'up' : 'down'}"><b class="num">${signed(delta)}</b><span>cote · ${fmtInt(pMe.ratingAfter)}</span></div>`}
+      ${!spectator && mineA && b.essence ? `<div class="ess"><b class="num">+${b.essence}</b><span>essence</span></div>` : ''}
+      ${b.tactics?.length ? `<div><b class="num">${b.tactics.filter((t) => t.outcome > 0).length}/${b.tactics.length}</b><span>calls réussis</span></div>` : ''}
+      ${!spectator && !b.boss ? `<div><b class="num">${mine.units.reduce((s, u) => s + u.kills, 0)}–${theirs.units.reduce((s, u) => s + u.kills, 0)}</b><span>kills</span></div>` : ''}
+    </div>
     ${!spectator && mineA && b.passXp && S.arena?.pass ? (() => {
       const pa = S.arena.pass, xp = pa.xp + b.passXp, lvl = Math.min(pa.maxLevel, Math.floor(xp / pa.xpPerLevel)), into = lvl >= pa.maxLevel ? pa.xpPerLevel : xp - lvl * pa.xpPerLevel;
       return `<div class="pg-pass"><div class="pg-pass-head"><b>Pass · niveau ${lvl}${lvl > pa.level ? ' atteint' : ''}</b><span class="num">+${b.passXp} XP</span></div>
@@ -2619,70 +2669,68 @@ function showUnitTalent(role) {
     ${profileHTML(u.profile, true)}${talentHTML(u.talent, true)}</div>`);
 }
 
-// ---------- Tuto (stories) ----------
+// ---------- Tuto (stories) : chaque règle montrée sur l'équipe du joueur quand il en a une ----------
 const TUTO = [
-  { kicker: 'L\'arène', title: 'Ton roster part au combat', text: 'Tes 5 champions affrontent ceux d\'un autre joueur, poste contre poste. Son roster se défend même quand il dort.', art: () => tutoRoster() },
-  { kicker: 'Règle 1', title: 'Chacun à sa place', text: 'Chaque champion a un poste principal, parfois un secondaire. Tous les postes restent ouverts, mais hors poste il perd de la puissance.', art: () => tutoRoles() },
-  { kicker: 'Règle 2', title: 'Early, mid ou late', text: 'Un champion early écrase les lanes, un late gagne les derniers teamfights. Les solos gagnent leurs duels, les teamfights brillent à cinq.', art: () => tutoCurves() },
-  { kicker: 'Règle 3', title: 'Une vraie compo', text: 'Une frontline, des dégâts, de quoi protéger. Les tireurs font fondre les tanks, les assassins plongent sur les carrys mal protégés.', art: () => tutoClasses() },
-  { kicker: 'Règle 4', title: 'Les bonus s\'empilent', text: 'Skins d\'une même gamme, comp teamfight, rareté : tout ajoute de la puissance.', art: () => tutoSynergy() },
-  { kicker: 'Règle 5', title: 'Chaque champion a son talent', text: 'Le sort qui fait son identité change la partie : Destinée rejoint une autre lane, Retour temporel renverse un combat, Grappin attrape une cible.', art: () => tutoTalents() },
-  { kicker: 'Le match', title: 'Lanes, dragons, teamfights', text: 'Gagner ses lanes rapporte de l\'or. L\'or et les dragons font pencher les teamfights. Le premier à 2 l\'emporte.', art: () => tutoTimeline() },
-  { kicker: 'Récompenses', title: 'Grimpe et remplis ta forge', text: '2 victoires = 1 relique, jusqu\'à 4 victoires payées par jour. Un seul défi par joueur jusqu\'à sa riposte (ou 24 h).', art: () => tutoRewards() },
-  { kicker: 'Saisons', title: 'Deux semaines, un classement', text: 'Grimpe de Bronze à Challenger. En fin de saison, ton palier te rapporte des reliques et devient le cadre de ton icône, puis tout le monde repart.', art: () => tutoSeasons(), cta: 'Entrer dans l\'arène' },
+  { kicker: 'L\'arène', title: 'Ton équipe part au combat', text: 'Tes 5 champions affrontent ceux d\'un autre joueur, poste contre poste. Ton équipe se défend même quand tu dors.', art: () => tutoTeam() },
+  { kicker: 'Règle 1', title: 'Chacun à son poste', text: 'Poste principal +12 %, secondaire +8 %, hors poste −10 %. Tous les postes restent ouverts.', art: () => tutoFit() },
+  { kicker: 'Règle 2', title: 'Une vraie compo', text: 'Une frontline, des dégâts, de quoi protéger. Chaque classe en contre une autre en teamfight.', art: () => tutoComp() },
+  { kicker: 'Le match', title: 'Lanes, dragons, teamfights', text: 'Les champions early gagnent les lanes, les late les derniers teamfights. Le premier à 2 teamfights l\'emporte.', art: () => tutoPhases() },
+  { kicker: 'Règle 3', title: 'Bonus et talents', text: 'Skins d\'une même gamme, comp teamfight et méta s\'ajoutent. Chaque champion a un talent tiré de son kit.', art: () => tutoBonus() },
+  { kicker: 'Récompenses', title: 'Grimpe et remplis ta forge', text: '2 victoires en attaque = 1 relique, 4 payées par jour. Un seul défi par joueur jusqu\'à sa riposte (ou 24 h). Saisons de deux semaines, de Bronze à Challenger.', art: () => tutoRewards(), cta: 'Entrer dans l\'arène' },
 ];
 const tuto = { i: 0, x: 0 };
+const tutoUnits = () => S.arena?.team?.units || null;
 
-function tutoRoster() {
-  const arts = S.arena?.team?.units ? S.arena.team.units.map(unitItem) : S.roster.map((s) => S.cat && slotItem(s));
-  return `<div class="ta-roster">${ROLES.map((r, i) => `<span class="ta-card${arts[i] ? ` r-${arts[i].rarity}` : ''}" style="--i:${i}">
-    ${arts[i] ? `<img src="${esc(arts[i].art)}" alt="">` : ''}<em>${r}</em></span>`).join('')}</div>
-    <div class="ta-vs">VS</div>`;
+function tutoTeam() {
+  const its = tutoUnits() ? tutoUnits().map(unitItem) : rosterItems(fullSlots(S.roster));
+  return `<div class="tt-team">${teamBannerHTML(its, { kicker: 'Ton équipe', name: S.user?.displayName || 'Toi', power: S.arena?.team?.power || teamPower(its) })}
+    <div class="tt-vs"><span>VS</span><em>une autre équipe de 5</em></div></div>`;
 }
 
-function tutoRoles() {
-  const rows = [['Poste principal', 'Leona support', '+12 %', 'up'], ['Poste secondaire', 'Malphite support', '+8 %', 'up'], ['Hors poste', 'Sion support', '−10 %', 'down']];
-  return `<div class="ta-roles">${rows.map(([r, ex, v, c], i) => `<div class="ta-role" style="--i:${i}"><b>${r}</b><span><span class="ta-cls">${ex}</span><span class="fit ${c}">${v}</span></span></div>`).join('')}</div>`;
+function tutoFit() {
+  const us = tutoUnits();
+  if (!us) return `<div class="tt-rows">${[['Poste principal', FIT.main], ['Poste secondaire', FIT.secondary], ['Hors poste', FIT.off]]
+    .map(([l, v], i) => `<div class="tt-row" style="--i:${i}"><b>${l}</b><em class="${v > 0 ? 'up' : 'down'}">${signed(v)} %</em></div>`).join('')}</div>`;
+  return `<div class="tt-rows">${us.map((u, i) => `<div class="tt-row" style="--i:${i}">${roleIcon(i)}<span class="tt-pic">${unitImg(u)}</span>
+    <span class="tt-name"><b>${esc(u.champion)}</b><span>${u.fitPercent === FIT.main ? 'Poste principal' : u.fitPercent === FIT.secondary ? 'Poste secondaire' : 'Hors poste'}</span></span>
+    <em class="${u.fitPercent > 0 ? 'up' : 'down'}">${signed(u.fitPercent)} %</em></div>`).join('')}</div>`;
 }
 
-function tutoCurves() {
-  const rows = [['EARLY', 'Lanes'], ['MID', 'Dragons et 1er teamfight'], ['LATE', 'Derniers teamfights']];
-  return `<div class="ta-roles">${rows.map(([c, when], i) => `<div class="ta-role" style="--i:${i}"><b style="color:${CURVE[c].color}">${CURVE[c].label}</b><span><span class="ta-cls">${when}</span></span></div>`).join('')}</div>`;
+function tutoComp() {
+  const us = tutoUnits() || [];
+  const count = (c) => us.filter((u) => u.classes[0] === c).length;
+  const rows = [['TANK', 'Encaisse assassins et combattants'], ['FIGHTER', 'Tient la ligne, punit les mages'], ['MARKSMAN', 'Fait fondre la frontline'],
+    ['ASSASSIN', 'Plonge sur les carrys'], ['MAGE', 'Écrase les compos mêlée'], ['SUPPORT', 'Protège des assassins']];
+  return `<div class="tt-rows">${rows.map(([c, t], i) => `<div class="tt-row" style="--i:${i}"><span class="tt-cls" style="color:${CLASS[c].color}">${clsIcon(c)}</span>
+    <span class="tt-name"><b>${CLASS[c].label}</b><span>${t}</span></span>${us.length ? `<em class="${count(c) ? 'eq' : 'none'}">${count(c) ? `×${count(c)}` : '—'}</em>` : ''}</div>`).join('')}</div>`;
 }
 
-function tutoClasses() {
-  const rows = [['TANK', 'Encaisse assassins et combattants'], ['MARKSMAN', 'Fait fondre la frontline'], ['ASSASSIN', 'Plonge sur les carrys'], ['SUPPORT', 'Protège des assassins']];
-  return `<div class="ta-roles">${rows.map(([c, t], i) => `<div class="ta-role" style="--i:${i}"><span class="ta-cls">${clsIcon(c)}${CLASS[c].label}</span><span><span class="ta-cls">${t}</span></span></div>`).join('')}</div>`;
+function tutoPhases() {
+  const us = tutoUnits() || [];
+  const phases = [['EARLY', 'Lanes', '3\''], ['MID', 'Dragons · 1er teamfight', '12\''], ['LATE', 'Derniers teamfights', '20\'']];
+  return `<div class="tt-phases">${phases.map(([c, l, t], i) => {
+    const who = us.filter((u) => u.profile?.curve === c);
+    return `<div class="tt-phase" style="--i:${i};--pc:${CURVE[c].color}"><span class="tt-t num">${t}</span><div><b>${l}</b>
+      <span>${CURVE[c].label}${who.length ? ` · ${who.map((u) => esc(u.champion)).join(', ')}` : ''}</span></div></div>`;
+  }).join('')}</div>`;
 }
 
-function tutoSynergy() {
-  const rows = [['Gamme ×3', '+6 %', 'var(--violet)'], ['Comp teamfight', '+5 %', 'var(--green)'], ['Exalté', '+12 %', 'var(--yellow)']];
-  return `<div class="ta-syn">${rows.map(([l, v, c], i) => `<div class="ta-chip" style="--i:${i};--c:${c}"><span>${l}</span><b>${v}</b></div>`).join('')}
-    <div class="ta-power"><span class="kicker">Puissance</span><i><i></i></i></div></div>`;
-}
-
-function tutoTalents() {
-  const picks = [4, 26, 53].map((id) => S.cat?.champ.get(id)).filter((c) => c?.talent);
-  return `<div class="ta-talents">${picks.map((c, i) => `<div class="ta-talent" style="--i:${i}">
-    <span class="ta-portrait"><img src="${esc(`${DD}/loading/${c.alias}_0.jpg`)}" alt=""></span>
-    <div><b>${esc(c.name)}</b>${talentHTML(c.talent, true)}</div></div>`).join('')}</div>`;
-}
-
-function tutoSeasons() {
-  return `<div class="ta-tiers">${Object.keys(TIER).map((t, i) => `<span class="ta-tier" style="--i:${i};--tc:${TIER[t].color};--h:${28 + i * 10}%">${TIER[t].label}</span>`).join('')}</div>`;
-}
-
-function tutoTimeline() {
-  const steps = [['3\'', 'Lanes', 'Duels et ganks'], ['12\'', 'Dragons', 'Bonus d\'équipe'], ['20\'', 'Teamfights', 'Premier à 2']];
-  return `<div class="ta-time">${steps.map(([t, l, s], i) => `<div class="ta-step" style="--i:${i}"><span class="dot">${t}</span><b>${l}</b><span>${s}</span></div>`).join('')}</div>`;
+function tutoBonus() {
+  const team = S.arena?.team;
+  const mid = team?.units?.[2];
+  return `<div class="tt-bonus">${team ? synergyHTML(team.synergies) : synergyHTML(['Gamme ×3 : +6 %', 'Comp teamfight : +5 %'])}
+    ${mid?.talent ? `<div class="tt-talent"><span class="tt-pic">${unitImg(mid)}</span><div><span class="kicker">Talent de ton mid</span><b>${esc(mid.champion)}</b>${talentHTML(mid.talent, true)}</div></div>` : ''}</div>`;
 }
 
 function tutoRewards() {
-  return `<div class="ta-rew">
-    <div class="ta-eq"><span class="ta-win">V</span><span class="op">+</span><span class="ta-win">V</span><span class="op">=</span>
-      <svg viewBox="0 0 64 64"><use href="#capsule-mini"/></svg></div>
-    <div class="ta-elo"><span class="kicker">Cote</span><b>1000 → 1016</b></div>
-    <div class="ta-podium"><i style="--h:60%"></i><i style="--h:90%"></i><i style="--h:40%"></i></div></div>`;
+  const a = S.arena;
+  const tiers = Object.keys(TIER);
+  const cur = a?.season?.tier || 'BRONZE';
+  return `<div class="tt-rew">
+    <div class="tt-eq"><span class="tt-win">V</span><span>+</span><span class="tt-win">V</span><span>=</span><svg viewBox="0 0 100 100"><use href="#crystal"/></svg>
+      <b class="num">${a ? `+${a.winEssence * 2}` : '+300'}</b></div>
+    <div class="tt-ladder" aria-label="Paliers de Bronze à Challenger">${tiers.map((t, i) => `<span class="${t === cur ? 'cur' : ''}" style="--tc:${TIER[t].color};--h:${30 + i * 10}%"><i></i></span>`).join('')}</div>
+    <p class="tt-cap">Tu es <b style="color:${TIER[cur].color}">${TIER[cur].label}</b>${a?.season?.nextTierAt ? ` · ${a.season.nextTierAt - a.rating} pts avant ${TIER[tiers[tiers.indexOf(cur) + 1]]?.label || ''}` : ''}</p></div>`;
 }
 
 function showTuto() {
@@ -2933,62 +2981,69 @@ const GUIDE_TALENTS = [
   ['Vol', 'Copie le talent de l\'adversaire le plus puissant.'],
 ];
 
+/** Bilan de l'équipe face à la check-list du guide : chaque règle cochée ou non, avec le compte. */
+function guideAudit() {
+  const us = S.arena?.team?.units;
+  if (!us) return '';
+  const cls = (list) => us.filter((u) => list.includes(u.classes[0])).length;
+  const checks = [
+    [us.filter((u) => u.fitPercent === FIT.main).length, 5, 'à leur poste principal'],
+    [cls(['TANK', 'FIGHTER']) ? 1 : 0, 1, 'frontline (tank ou combattant)'],
+    [cls(['MARKSMAN', 'MAGE', 'ASSASSIN']) ? 1 : 0, 1, 'source de dégâts'],
+    [cls(['SUPPORT', 'TANK']) ? 1 : 0, 1, 'support ou tank pour protéger'],
+    [Math.min(3, us.filter((u) => u.profile?.style === 'TEAMFIGHT').length), 3, 'champions teamfight'],
+    [Math.min(4, us.filter((u) => u.profile && u.profile.curve !== 'EARLY').length), 4, 'champions mid ou late'],
+    [us.filter((u) => (u.metaPercent || 0) >= 0).length, 5, 'sans nerf de la semaine'],
+  ];
+  const ok = checks.filter(([v, max]) => v >= max).length;
+  return `<div class="g-audit"><div class="g-audit-head"><span class="kicker">Ton équipe</span><b class="num">${ok} / ${checks.length}</b></div>
+    ${checks.map(([v, max, label]) => `<div class="g-check ${v >= max ? 'ok' : 'warn'}">${v >= max ? boltIcon : warnIcon}<span>${label}</span><b class="num">${max > 1 ? `${v}/${max}` : v ? 'oui' : 'non'}</b></div>`).join('')}</div>`;
+}
+
 function showGuide() {
   const pct = (v) => `<b class="g-num ${v > 0 ? 'up' : v < 0 ? 'down' : ''}">${signed(v)} %</b>`;
   const rows = (list) => `<div class="g-rows">${list.map(([l, v]) => `<div class="g-row"><span>${l}</span>${typeof v === 'number' ? pct(v) : `<b class="g-num">${v}</b>`}</div>`).join('')}</div>`;
-  const sec = (title, body, open = false) => `<details class="g-sec"${open ? ' open' : ''}><summary>${title}</summary><div class="g-body">${body}</div></details>`;
-  openSheet(`<div class="guide">
-    <span class="kicker">Arène</span>
-    <h2>Guide des règles</h2>
-    <p class="muted">Tous les chiffres du moteur de combat, pour monter la meilleure équipe.</p>
-    ${sec('1. La puissance d\'un champion', `<p>Chaque champion part de <b>100</b>, multiplié par ses bonus :</p>
-      <p class="g-formula">100 × rareté × poste × gamme × méta</p>
-      <p>La puissance de l'équipe est la somme des 5. Elle pèse dans chaque duel, objectif et teamfight.</p>`, true)}
-    ${sec('2. Le poste', `${rows([['Poste principal', FIT.main], ['Poste secondaire', FIT.secondary], ['Hors poste', FIT.off]])}
-      <p>Tous les postes sont ouverts. Le badge en % sur chaque case de ton roster montre le bonus.</p>`)}
-    ${sec('3. La rareté', `${rows(RARITIES.map((r) => [LABEL[r], rank(r) * 2]))}
-      <p><b>Un champion de base compte comme Exalté</b> (+12 %). Un skin prend la rareté du skin, mais peut apporter un bonus de gamme.</p>`)}
-    ${sec('4. Gammes et doublons', `${rows([['Gamme commune ×2', 3], ['Gamme commune ×3', 6], ['Gamme commune ×4', 9], ['Gamme commune ×5', 12], ['Champion en double', -10]])}
-      <p>Seule ta gamme la plus représentée compte : +3 % par skin au-delà du premier, pour toute l'équipe.</p>`)}
-    ${sec('5. La méta de la semaine', `<p>Chaque lundi (heure de Paris), un patch est figé à partir des rosters du moment :</p>
-      ${rows([['Les 4 champions les plus joués', -8], ['4 champions peu joués', 8], ['Classe principale la plus jouée', -4], ['Classe principale la moins jouée', 4]])}
-      <p>Le bonus d'un champion et celui de sa classe se cumulent (ex. un tireur nerfé : −8 % puis −4 %).</p>
-      ${S.meta?.changes.length ? '<button class="btn ghost small" type="button" data-guide-meta>Voir le patch de la semaine</button>' : ''}`)}
-    ${sec('6. Courbe et style', `<p>Multiplicateur de la courbe selon la phase :</p>
-      <div class="g-table"><span></span><b>Lanes</b><b>1er TF</b><b>TF 2-3</b>
-        ${Object.entries({ EARLY: [1.18, 1.02, 0.88], MID: [0.98, 1.08, 0.98], LATE: [0.88, 0.98, 1.18] }).map(([c, v]) => `<b style="color:${CURVE[c].color}">${CURVE[c].label}</b>${v.map((x) => `<span>×${x.toFixed(2).replace('.', ',')}</span>`).join('')}`).join('')}</div>
-      <p>Le style s'ajoute : <b>Solo</b> ×1,10 en lane et ×0,97 en teamfight ; <b>Teamfight</b> ×0,95 en lane et ×1,04 en teamfight.</p>
-      <p>Les teamfights décident la partie : les champions late et teamfight y sont les plus forts.</p>`)}
-    ${sec('7. La compo', `${rows([['Pas de frontline (tank ou combattant)', -10], ['Pas de dégâts (tireur, mage ou assassin)', -10], ['Ni support ni tank', -5], ['3 champions teamfight ou plus', 5], ['2 champions solo ou plus', '+1 tour / TF']])}
-      <p>Ces bonus et malus s'appliquent en teamfight. La classe principale est la première listée sur le champion.</p>`)}
-    ${sec('8. Les contres de classe', `<p>En teamfight, chaque champion gagne un bonus selon la compo adverse (classe principale, plafond +12 %) :</p>
-      ${rows([['Tireur', '+4 % par tank ou combattant'], ['Assassin', '+4 % par carry adverse non protégé'], ['Tank', '+3 % par assassin ou combattant'], ['Combattant', '+3 % par mage ou assassin'], ['Support', '+4 % par assassin, +2 % par combattant'], ['Mage', '+8 % face à 3 mêlées ou plus']])}`)}
-    ${sec('9. Les talents', `<p>Chaque champion a un talent, nommé d'après un de ses sorts :</p>${rows(GUIDE_TALENTS)}`)}
-    ${sec('10. Le déroulé d\'un match', `<ul class="g-list">
-      <li><b>Lanes</b> : top, mid et bot (tireur + support) en duel, poste contre poste. Le jungler adverse peut ganker (35 % de chances).</li>
-      <li><b>Dragons</b> : disputés par le jungler et le support. Chaque dragon donne +4 % à l'équipe, le gardien ancien +8 % avant le 3e teamfight.</li>
-      <li><b>Or</b> : kills, tours et objectifs donnent de l'or. L'avance en or vaut au plus ±15 % de puissance.</li>
-      <li><b>Teamfights</b> : au meilleur des 3. Le premier se joue en milieu de partie, les suivants en fin de partie.</li>
-      <li>Une part de hasard reste : à puissance égale, c'est du 50/50.</li>
-      <li><b>Aperçu</b> : la tendance (de « Gros désavantage » à « Gros avantage ») vient de parties simulées avec les talents, courbes et contres. Elle indique où chaque équipe est forte, pas qui gagne.</li>
-      <li><b>Coups de poker</b> : Attrape, Résurrection, Scaling et Hypercarry peuvent tout renverser comme ne rien faire. Avec 3 ou plus, ton équipe est <b>Volatile</b> : ça passe ou ça casse.</li></ul>`)}
-    ${sec('11. Cote, récompenses et saisons', `<ul class="g-list">
-      <li><b>Cote</b> : Elo de facteur 32. À cote égale, ±16. Un défenseur battu perd les trois quarts du gain de l'attaquant.</li>
-      <li><b>Essence</b> : 2 victoires en attaque = 1 relique, jusqu'à 4 victoires payées par jour.</li>
-      <li><b>Revanche</b> : un seul défi par joueur jusqu'à sa riposte, ou 24 h.</li>
-      <li><b>Pass de saison</b> : victoire en attaque +30 XP, défaite +15, défense tenue +10, boss +20 ; 80 XP par niveau, 15 niveaux payés tout de suite. Le dernier donne le cadre animé Légende.</li>
-      <li><b>Boss de la semaine</b> : 3 tentatives par jour, sans effet sur la cote. 100 par kill, 250 par tour, 3 000 si tu le bats.
-        Tu fais les calls (plan de jeu, objectifs, chaque teamfight) : contrer l'intention du boss donne +20 % sur la phase et +300 points, te faire contrer −15 %. Le lundi : 1er +3 prestige, 2e +2, 3e +1, les autres +1 relique.</li>
-      <li><b>Week-ends</b> : du samedi au lundi minuit, en rotation : double essence, double XP de pass, méta folle (une classe +15 %, une autre −10 %).</li>
-      <li><b>Saisons</b> : deux semaines, du lundi au lundi. Argent 1050, Or 1150, Platine 1250, Diamant 1400, Maître 1550, Grand maître 1700, Challenger 1850. Récompense de palier dès 5 combats, ton palier final devient le cadre de ton icône pour la saison suivante, puis la cote revient à mi-chemin de 1000.</li></ul>`)}
-    ${sec('Check-list pour maximiser ton équipe', `<ul class="g-list check">
-      <li>Chaque champion à son poste principal (+12 %).</li>
-      <li>Une frontline, des dégâts, un support ou un tank.</li>
-      <li>Au moins 3 champions teamfight, et plutôt mid ou late.</li>
-      <li>3 skins ou plus de la même gamme, sinon des champions de base (Exalté).</li>
-      <li>Évite les nerfs de la semaine, profite des buffs.</li>
-      <li>Des talents de teamfight : Engage, Teamfight, Hypercarry, Attrape, Résurrection.</li></ul>`, true)}
+  const block = (title, body) => `<section class="g-block"><h3>${title}</h3>${body}</section>`;
+  const tabs = {
+    team: ['Ton équipe', `${guideAudit() || '<p class="muted">Complète ton équipe pour voir son bilan face aux règles.</p>'}
+      ${block('La formule', `<p class="g-formula">100 × rareté × poste × gamme × méta</p>
+        <p>Chaque champion part de <b>100</b>. La puissance de l'équipe est la somme des 5 et pèse dans chaque duel, objectif et teamfight.</p>`)}`],
+    power: ['Puissance', `${block('Le poste', `${rows([['Poste principal', FIT.main], ['Poste secondaire', FIT.secondary], ['Hors poste', FIT.off]])}`)}
+      ${block('La rareté', `${rows(RARITIES.map((r) => [LABEL[r], rank(r) * 2]))}<p><b>Un champion de base compte comme Exalté</b> (+12 %). Un skin prend sa rareté, mais peut apporter un bonus de gamme.</p>`)}
+      ${block('Gammes et doublons', `${rows([['Gamme commune ×2', 3], ['×3', 6], ['×4', 9], ['×5', 12], ['Champion en double', -10]])}<p>Seule ta gamme la plus représentée compte, pour toute l'équipe.</p>`)}
+      ${block('La méta de la semaine', `<p>Chaque lundi (heure de Paris), un patch est figé à partir des équipes du moment :</p>
+        ${rows([['4 champions les plus joués', -8], ['4 champions peu joués', 8], ['Classe la plus jouée', -4], ['Classe la moins jouée', 4]])}
+        <p>Le bonus d'un champion et celui de sa classe se cumulent.</p>${S.meta?.changes.length ? '<button class="btn ghost small" type="button" data-guide-meta>Voir le patch de la semaine</button>' : ''}`)}`],
+    match: ['Match', `${block('Le déroulé', `<ol class="g-steps">
+        <li><b>Lanes</b><span>Top, mid et bot (tireur + support) en duel. Le jungler adverse peut ganker (35 %).</span></li>
+        <li><b>Dragons</b><span>Disputés par le jungler et le support. +4 % par dragon, gardien ancien +8 % avant le 3e teamfight.</span></li>
+        <li><b>Or</b><span>Kills, tours et objectifs. L'avance en or vaut au plus ±15 % de puissance.</span></li>
+        <li><b>Teamfights</b><span>Au meilleur des 3 : le premier en milieu de partie, les suivants en fin. À puissance égale, 50/50.</span></li></ol>`)}
+      ${block('Courbe et style', `<div class="g-table"><span></span><b>Lanes</b><b>1er TF</b><b>TF 2-3</b>
+        ${Object.entries({ EARLY: [1.18, 1.02, 0.88], MID: [0.98, 1.08, 0.98], LATE: [0.88, 0.98, 1.18] }).map(([c, v]) => `<b style="color:${CURVE[c].color}">${CURVE[c].label}</b>${v.map((x) => `<span class="${x > 1 ? 'up' : x < 1 ? 'down' : ''}">×${x.toFixed(2).replace('.', ',')}</span>`).join('')}`).join('')}</div>
+        ${rows([['Solo', '×1,10 lane · ×0,97 TF'], ['Teamfight', '×0,95 lane · ×1,04 TF']])}`)}
+      ${block('La compo', rows([['Sans frontline', -10], ['Sans dégâts', -10], ['Ni support ni tank', -5], ['3 teamfight ou plus', 5], ['2 solos ou plus', '+1 tour / TF']]))}
+      ${block('Contres de classe', `${rows([['Tireur', '+4 % / tank ou combattant'], ['Assassin', '+4 % / carry non protégé'], ['Tank', '+3 % / assassin ou combattant'], ['Combattant', '+3 % / mage ou assassin'], ['Support', '+4 % / assassin, +2 % / combattant'], ['Mage', '+8 % face à 3 mêlées']])}<p>En teamfight, plafond +12 %.</p>`)}
+      ${block('Aperçu et coups de poker', `<p>La tendance vient de parties simulées : elle dit où chaque équipe est forte, pas qui gagne. Attrape, Résurrection, Scaling et Hypercarry peuvent tout renverser : avec 3 ou plus, ton équipe est <b>Volatile</b>.</p>`)}`],
+    talents: ['Talents', `<p class="muted">Chaque champion a un talent, nommé d'après un de ses sorts.</p>${rows(GUIDE_TALENTS)}`],
+    season: ['Progression', `${block('Cote et essence', rows([['Elo, facteur', '32'], ['À cote égale', '±16'], ['Défenseur battu', '¾ du gain adverse'], ['Victoires payées / jour', '4'], ['Relique', '2 victoires'], ['Revanche', 'après sa riposte ou 24 h']]))}
+      ${block('Pass de saison', rows([['Victoire en attaque', '+30 XP'], ['Défaite', '+15 XP'], ['Défense tenue', '+10 XP'], ['Boss', '+20 XP'], ['Par niveau', '80 XP'], ['Dernier niveau', 'cadre Légende']]))}
+      ${block('Boss de la semaine', `${rows([['Tentatives / jour', '3'], ['Kill', '100'], ['Tour', '250'], ['Victoire', '3 000'], ['Call réussi', '+20 % · +300'], ['Call contré', '−15 %']])}<p>Lundi : 1er +3 prestige, 2e +2, 3e +1, les autres +1 relique.</p>`)}
+      ${block('Week-ends', '<p>Du samedi au lundi minuit, en rotation : double essence, double XP de pass, méta folle (une classe +15 %, une autre −10 %).</p>')}
+      ${block('Saisons', `<div class="g-tiers">${[['SILVER', 1050], ['GOLD', 1150], ['PLATINUM', 1250], ['DIAMOND', 1400], ['MASTER', 1550], ['GRANDMASTER', 1700], ['CHALLENGER', 1850]]
+        .map(([t, v]) => `<span style="--tc:${TIER[t].color}"><b>${TIER[t].label}</b><em class="num">${v}</em></span>`).join('')}</div>
+        <p>Deux semaines, du lundi au lundi. Récompense de palier dès 5 combats ; ton palier final devient le cadre de ton icône, puis la cote revient à mi-chemin de 1000.</p>`)}`],
+  };
+  openSheet(`<div class="guide g2">
+    <div class="g-head"><span class="kicker">Arène</span><h2>Guide des règles</h2><p class="muted">Tous les chiffres du moteur de combat.</p></div>
+    <div class="g-tabs" role="tablist">${Object.entries(tabs).map(([k, [l]], i) => `<button type="button" role="tab" data-gtab="${k}" aria-selected="${i === 0}">${l}</button>`).join('')}</div>
+    ${Object.entries(tabs).map(([k, [, body]], i) => `<div class="g-panel" data-gpanel="${k}" ${i ? 'hidden' : ''}>${body}</div>`).join('')}
   </div>`);
+  $$('[data-gtab]').forEach((b) => (b.onclick = () => {
+    $$('[data-gtab]').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+    $$('[data-gpanel]').forEach((p) => { p.hidden = p.dataset.gpanel !== b.dataset.gtab; });
+    b.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+  }));
   $('[data-guide-meta]')?.addEventListener('click', showMeta);
 }
 
@@ -3009,15 +3064,25 @@ async function installNow() {
 }
 
 function showInstall(firstLaunch = false) {
+  const share = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 12v8h14v-8"/></svg>';
+  const dots = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
+  const plus = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/></svg>';
+  const step = (n, html, icon) => `<li><span class="is-n num">${n}</span><span class="is-t">${html}</span><span class="is-ic">${icon}</span></li>`;
   const steps = isIOS
-    ? `<ol class="install-steps"><li>Ouvre cette page dans <b>Safari</b>.</li><li>Touche <b>Partager</b> (carré avec une flèche).</li>
-        <li>Choisis <b>« Sur l'écran d'accueil »</b>, puis <b>Ajouter</b>.</li></ol>`
-    : `<ol class="install-steps"><li>Ouvre le menu du navigateur <b>⋮</b>.</li><li>Choisis <b>« Installer l'application »</b> ou <b>« Ajouter à l'écran d'accueil »</b>.</li></ol>`;
-  openSheet(`<div class="install-sheet">
-    <div class="install-icon"><img src="icons/icon-192.png" alt=""></div>
-    <h2>${firstLaunch ? 'Installe Reliques' : 'Installer l\'app'}</h2>
-    <p class="muted">Ouvre tes reliques en un geste depuis l'écran d'accueil, en plein écran.</p>
-    <ul class="install-perks"><li>Notification quand ton stock est plein</li><li>Compteur de reliques sur l'icône</li><li>Chargement instantané</li></ul>
+    ? `<ol class="inst-steps">${step(1, 'Ouvre cette page dans <b>Safari</b>', '')}${step(2, 'Touche <b>Partager</b>', share)}${step(3, '<b>Sur l\'écran d\'accueil</b>, puis Ajouter', plus)}</ol>`
+    : `<ol class="inst-steps">${step(1, 'Ouvre le menu du navigateur', dots)}${step(2, '<b>Installer l\'application</b> ou <b>Ajouter à l\'écran d\'accueil</b>', plus)}</ol>`;
+  const max = S.wallet?.maxStock || 10;
+  const stock = Math.max(1, S.wallet?.available || 0);
+  // Ce que l'installation change, montré plutôt que listé : l'icône avec son compteur et la notification de stock plein.
+  openSheet(`<div class="inst">
+    <div class="inst-phone" aria-hidden="true">
+      <div class="inst-notif"><span class="inst-n-ic"><svg viewBox="0 0 100 100"><use href="#crystal"/></svg></span>
+        <span><b>Reliques</b><span>Stock plein : ${max} reliques t'attendent.</span></span><em>maintenant</em></div>
+      <div class="inst-home"><span class="inst-app"><img src="icons/icon-192.png" alt=""><i class="num">${stock > 99 ? '99+' : stock}</i></span><span>Reliques</span></div>
+    </div>
+    <div class="inst-copy"><span class="kicker">${firstLaunch ? 'Bienvenue' : 'Application'}</span><h2>${firstLaunch ? 'Installe Reliques' : 'Installer l\'app'}</h2>
+      <p class="muted">En plein écran, en un geste depuis ton écran d'accueil.</p></div>
+    <div class="inst-perks"><div><b>Notification</b><span>quand ton stock est plein</span></div><div><b>Compteur</b><span>de reliques sur l'icône</span></div><div><b>Instantané</b><span>au lancement</span></div></div>
     ${installEvent ? '<button class="btn primary big block" id="install-now">Installer</button>' : steps}
     <button class="btn ghost block" data-close>${firstLaunch ? 'Plus tard' : 'Fermer'}</button>
   </div>`);

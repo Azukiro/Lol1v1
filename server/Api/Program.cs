@@ -71,6 +71,7 @@ builder.Services.AddHttpClient("keepawake", c => c.Timeout = TimeSpan.FromSecond
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SeriesLocks>();
+builder.Services.AddSingleton<ActiveSeries>();
 builder.Services.AddSingleton<ReferenceDataService>();
 builder.Services.AddSingleton<TokenService>();
 builder.Services.AddSingleton<LauncherReleaseService>();

@@ -23,7 +23,8 @@ public sealed class SeriesService(
     SeriesLocks locks,
     ISeriesNotifier notifier,
     ReferenceDataService reference,
-    TimeProvider clock)
+    TimeProvider clock,
+    ActiveSeries active)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -408,6 +409,7 @@ public sealed class SeriesService(
         };
         round.Observations.Add(obs);
         db.Observations.Add(obs);
+        active.Add(series.Id);
         RequestVerification(series, round, me, obs);
         Arbitrate(series, round);
         return Task.CompletedTask;
@@ -443,12 +445,13 @@ public sealed class SeriesService(
     }
 
     /// <summary>Réévaluation périodique (événement non confirmé par l'équipe adverse après le délai → litige).</summary>
-    public async Task TickAsync(Guid seriesId)
+    /// <returns>Faux si la série n'a plus de manche en jeu à arbitrer (le ticker cesse alors de la suivre).</returns>
+    public async Task<bool> TickAsync(Guid seriesId)
     {
         using var _ = await locks.AcquireAsync(seriesId);
         var series = await LoadAsync(seriesId);
         var round = CurrentRound(series);
-        if (round is null || round.Status != RoundStatus.IN_GAME || round.Observations.Count == 0) return;
+        if (round is null || round.Status != RoundStatus.IN_GAME || round.Observations.Count == 0) return false;
         var before = round.Status;
         Arbitrate(series, round);
         // Une observation vient-elle d'atteindre le délai de confirmation ? → état à pousser.
@@ -461,6 +464,7 @@ public sealed class SeriesService(
             await notifier.FlushAsync(this, series);
         }
         else notifier.Discard(series);
+        return round.Status == RoundStatus.IN_GAME;
     }
 
     private void Arbitrate(Series series, Round round)

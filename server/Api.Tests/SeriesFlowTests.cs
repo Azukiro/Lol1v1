@@ -447,9 +447,13 @@ public class SeriesFlowTests
         await b.Hub.InvokeAsync("VoteDispute", id, "VOID");
         await a.Hub.InvokeAsync("ReportGameStarted", id, 78L, (int?)null, (int[]?)null);
         await a.Kill(id, "t90000-SELF", 90, "SELF");
+        // La série est suivie par le ticker tant qu'une observation attend ; une fois en litige, il la lâche (la base peut s'endormir).
+        Assert.Contains(id, factory.Services.GetRequiredService<ActiveSeries>().Snapshot());
         factory.Clock.Advance(TimeSpan.FromSeconds(21));
+        bool stillInGame;
         using (var scope = factory.Services.CreateScope())
-            await scope.ServiceProvider.GetRequiredService<SeriesService>().TickAsync(id);
+            stillInGame = await scope.ServiceProvider.GetRequiredService<SeriesService>().TickAsync(id);
+        Assert.False(stillInGame);
         state = await a.State(id);
         Assert.Equal("DISPUTED", state.Rounds[1].Status);
         Assert.Equal(0, state.Players[0].RoundsWon);

@@ -57,7 +57,9 @@ public sealed class CapsuleNotifier(IServiceScopeFactory scopes, PushService pus
             logger.LogInformation("Clés VAPID absentes : notifications des capsules désactivées");
             return;
         }
-        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(5));
+        // Toutes les 30 min : le stock gagne une relique par heure et les revanches préviennent 2 h avant expiration.
+        // Plus souvent, la base (Neon) ne s'endormirait jamais.
+        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(30));
         do
         {
             try { await TickAsync(stoppingToken); }

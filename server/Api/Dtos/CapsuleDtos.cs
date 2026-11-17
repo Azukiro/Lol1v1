@@ -46,7 +46,14 @@ public sealed record RarityOddsDto(Rarity Rarity, double Percent, int DuplicateE
 /// <summary>Taux d'un type de capsule et son prix en essence.</summary>
 public sealed record CapsuleOddsDto(CapsuleType Type, int EssenceCost, List<RarityOddsDto> Rates);
 public sealed record CapsuleCatalogDto(
-    List<CatalogChampionDto> Champions, List<CatalogSkinDto> Skins, List<CatalogLineDto> Lines, List<CapsuleOddsDto> Odds, int PityThreshold);
+    List<CatalogChampionDto> Champions, List<CatalogSkinDto> Skins, List<CatalogLineDto> Lines, List<CapsuleOddsDto> Odds, int PityThreshold,
+    QueenPackDto? Queen = null);
+
+/// <summary>
+/// Relique de la Reine : que des objets d'Ahri (ses skins, et Ahri elle-même au palier Exalté), aux taux de la relique standard
+/// renormalisés sur les raretés où elle a quelque chose. Payée en essence et ouverte aussitôt.
+/// </summary>
+public sealed record QueenPackDto(int ChampionId, int EssenceCost, int Items, List<RarityOddsDto> Rates);
 
 public sealed record DebugGrantRequest(int Count, int Essence = 0, int Premium = 0);
 

@@ -34,6 +34,15 @@ public sealed class CapsulesController(
         return res with { State = WithDebug(res.State) };
     }
 
+    /// <summary>Relique de la Reine : que des objets d'Ahri, payée en essence et ouverte aussitôt.</summary>
+    [HttpPost("queen")]
+    [EnableRateLimiting(RateLimits.RelicWrite)]
+    public async Task<OpenCapsulesResponse> Queen()
+    {
+        var res = await capsules.OpenQueenAsync(User.UserId());
+        return res with { State = WithDebug(res.State) };
+    }
+
     [HttpPost("buy")]
     [EnableRateLimiting(RateLimits.RelicWrite)]
     public async Task<CapsuleStateDto> Buy([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] BuyCapsuleRequest? req) =>

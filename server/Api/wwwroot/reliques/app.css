@@ -2069,3 +2069,128 @@ button.tb-p { transition: transform .12s; } button.tb-p:active { transform: scal
 .pv-bar i { display: block; height: 100%; background: var(--blue); border-right: 2px solid var(--panel); }
 .mx-pic em { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; font-style: normal; font-size: 10px; font-weight: 800; text-align: center; line-height: 1.5; background: rgba(5, 8, 12, .82); }
 .mx-pic em.up { color: var(--green); } .mx-pic em.down { color: var(--pink); }
+
+
+/* ---------- Relique de la Reine : entrée dans l'écran Relique ---------- */
+.queen-pack { display: grid; gap: 10px; padding: 14px; border-radius: 20px; border: 1px solid rgba(255, 138, 216, .35);
+  background: linear-gradient(100deg, rgba(255, 138, 216, .13), transparent 55%), radial-gradient(90% 140% at 100% 0%, rgba(200, 169, 106, .14), transparent 60%), var(--panel); }
+.qp-main { display: grid; grid-template-columns: 52px 1fr auto; gap: 12px; align-items: center; }
+.qp-gem { position: relative; width: 52px; height: 52px; display: grid; place-items: center; }
+.qp-gem::before { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 138, 216, .45), transparent 70%); filter: blur(4px); }
+.qp-gem svg { position: relative; width: 46px; height: 46px; }
+.qp-txt { display: grid; gap: 1px; min-width: 0; }
+.qp-txt .kicker { color: #ffb8e6; }
+.qp-txt b { font-size: 16px; }
+.qp-txt > span:last-child { font-size: 12px; color: var(--muted); }
+.qp-price { display: grid; justify-items: end; text-align: right; }
+.qp-price b { font-size: 22px; color: var(--gold-2); line-height: 1; }
+.qp-price span { font-size: 11px; color: var(--muted); }
+.qp-own { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.qp-own b { color: var(--text); font-size: 13px; }
+.qp-bar { flex: 1; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.qp-bar i { display: block; height: 100%; background: linear-gradient(90deg, #ff8ad8, var(--gold-2)); }
+.qp-odds { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; }
+.qp-odds i { font-style: normal; display: grid; gap: 3px; justify-items: center; font-size: 10px; color: var(--muted); }
+.qp-odds i::before { content: ''; width: 100%; height: 4px; border-radius: 2px; background: var(--rc); }
+.qp-note { margin: 0; font-size: 12px; color: var(--muted); }
+.qp-go { background: linear-gradient(90deg, #ff8ad8, var(--gold-2)); color: #2a0f22; }
+.qp-go.armed { background: #ff8ad8; }
+.qp-go:disabled { background: rgba(255, 255, 255, .07); color: var(--muted); }
+
+/* ---------- Invocation de la Reine (cinématique, 10 s avec la révélation) ---------- */
+.qscene { position: fixed; inset: 0; z-index: 60; overflow: hidden; isolation: isolate; user-select: none; touch-action: none;
+  background: radial-gradient(60% 42% at 50% 44%, #1a1030, #05060b 75%); }
+.qscene .q-bg { position: absolute; inset: 0; z-index: 0; transition: background 1.2s; }
+.qscene.q1 .q-bg { background: radial-gradient(55% 38% at 50% 46%, rgba(255, 138, 216, .22), transparent 72%); }
+.qscene.q4 .q-bg { background: radial-gradient(70% 50% at 50% 46%, rgba(255, 138, 216, .42), rgba(60, 10, 50, .4) 60%, transparent 85%); }
+.q-lb { position: absolute; left: 0; right: 0; height: 11%; z-index: 20; background: #000; transition: transform .7s cubic-bezier(.6, 0, .2, 1); }
+.q-lb.t { top: 0; transform: translateY(-100%); } .q-lb.b { bottom: 0; transform: translateY(100%); }
+.qscene.run .q-lb { transform: none; }
+.qscene.end .q-lb.t { transform: translateY(-100%); } .qscene.end .q-lb.b { transform: translateY(100%); }
+.q-lb.b span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; letter-spacing: .32em; text-transform: uppercase; color: #ffd1ee; opacity: 0; transition: opacity .6s; }
+.qscene.q1 .q-lb.b span { opacity: .85; }
+.q-prog { position: absolute; left: 0; bottom: 0; z-index: 21; height: 2px; width: 0; background: linear-gradient(90deg, #ff8ad8, var(--gold-2)); }
+.qscene.run .q-prog { animation: q-prog 8.4s linear forwards; }
+.qscene.calm.run .q-prog { animation-duration: 2s; }
+@keyframes q-prog { to { width: 100%; } }
+.qscene.end { opacity: 0; transition: opacity .5s; pointer-events: none; }
+
+.q-tails { position: absolute; left: 50%; top: 47%; z-index: 2; width: 0; height: 0; }
+.q-tail { position: absolute; left: 0; top: 0; width: 44px; height: 190px; margin: -190px 0 0 -22px; transform-origin: 50% 100%; transform: rotate(var(--a)) scaleY(0); opacity: 0; }
+.q-tail svg { width: 100%; height: 100%; overflow: visible; transform-origin: 50% 100%; }
+.qscene.q1 .q-tail { animation: q-tail-in .7s cubic-bezier(.2, .9, .25, 1.2) forwards; animation-delay: calc(.1s + var(--i) * .19s); }
+.qscene.q1 .q-tail svg { animation: q-sway 2.4s ease-in-out infinite alternate; animation-delay: calc(var(--i) * -.27s); }
+.qscene.q5 .q-tail { animation: q-tail-out .5s ease-in forwards; animation-delay: calc(var(--i) * .03s); }
+@keyframes q-tail-in { from { opacity: 0; transform: rotate(0deg) scaleY(0); } to { opacity: 1; transform: rotate(var(--a)) scaleY(1); } }
+@keyframes q-sway { from { transform: rotate(-4deg); } to { transform: rotate(4deg); } }
+@keyframes q-tail-out { from { opacity: 1; transform: rotate(var(--a)) scaleY(1); } to { opacity: 0; transform: rotate(calc(var(--a) * 1.4)) scaleY(1.25); } }
+
+.q-core { position: absolute; left: 50%; top: 47%; z-index: 5; width: 130px; height: 130px; margin: -65px 0 0 -65px; transform: translateY(-60vh) scale(.6); opacity: 0; }
+.q-core svg { width: 100%; height: 100%; filter: drop-shadow(0 0 24px rgba(255, 138, 216, .7)); }
+.qscene.q0 .q-core { animation: q-down 1s cubic-bezier(.2, .8, .2, 1) forwards; }
+@keyframes q-down { to { transform: none; opacity: 1; } }
+.qscene.q2 .q-core { transform: none; opacity: 1; animation: q-hum .16s linear infinite; }
+@keyframes q-hum { 0%, 100% { translate: 0 0; } 25% { translate: 1px -1px; } 75% { translate: -1px 1px; } }
+.qscene.q3 .q-core { transform: none; opacity: 1; animation: q-charge 1.3s ease-in-out forwards; }
+@keyframes q-charge { 0% { scale: 1; } 40% { scale: 1.12; } 100% { scale: .9; } }
+.qscene.q5 .q-core { transform: none; opacity: 1; animation: q-pop .45s ease-in forwards; }
+@keyframes q-pop { 0% { scale: .9; } 50% { scale: 1.35; filter: brightness(2); } 100% { scale: 0; opacity: 0; } }
+
+.q-orbit { position: absolute; left: 50%; top: 47%; z-index: 6; width: 0; height: 0; opacity: 0; }
+.qscene.q2 .q-orbit { animation: q-fade .4s forwards, q-spin 2.2s linear infinite; }
+.qscene.q3 .q-orbit { opacity: 1; animation: q-spin .7s linear infinite, q-close 1.5s ease-in forwards; }
+.qscene.q4 .q-orbit { opacity: 0; transition: opacity .2s; }
+@keyframes q-fade { to { opacity: 1; } }
+@keyframes q-spin { to { rotate: 360deg; } }
+@keyframes q-close { to { scale: .2; } }
+.q-orbit span { position: absolute; width: 22px; height: 22px; margin: -11px; border-radius: 50%;
+  background: radial-gradient(circle at 40% 40%, #fff, #ffc6ea 35%, rgba(255, 138, 216, 0) 70%); box-shadow: 0 0 18px 6px rgba(255, 138, 216, .55); }
+.q-orbit span:nth-child(1) { transform: translateX(105px); }
+.q-orbit span:nth-child(2) { transform: rotate(120deg) translateX(105px); }
+.q-orbit span:nth-child(3) { transform: rotate(240deg) translateX(105px); }
+
+.q-orb { position: absolute; left: 50%; top: 47%; z-index: 7; width: 46px; height: 46px; margin: -23px; border-radius: 50%; opacity: 0;
+  background: radial-gradient(circle at 40% 38%, #fff, #b9e3ff 30%, #7c5cff 60%, rgba(124, 92, 255, 0) 72%); box-shadow: 0 0 30px 10px rgba(150, 120, 255, .45); }
+.qscene.q2 .q-orb { animation: q-orb 1.4s .2s cubic-bezier(.45, 0, .55, 1) forwards; }
+@keyframes q-orb { 0% { opacity: 0; transform: none; } 10% { opacity: 1; } 50% { transform: translate(110px, -190px) scale(1.1); } 100% { opacity: 0; transform: scale(.4); } }
+
+.q-charm { position: absolute; left: 50%; top: 47%; z-index: 12; width: 80px; height: 80px; margin: -40px; color: #ff8ad8; opacity: 0; }
+.q-charm svg { width: 100%; height: 100%; filter: drop-shadow(0 0 20px rgba(255, 138, 216, .9)); }
+.qscene.q3 .q-charm { animation: q-charm 1.2s .1s cubic-bezier(.5, 0, .75, 0) forwards; }
+@keyframes q-charm { 0% { opacity: 0; transform: scale(.2); } 20% { opacity: 1; transform: scale(.9) rotate(-8deg); } 55% { transform: scale(1.1) rotate(6deg); } 100% { opacity: 0; transform: scale(14); } }
+.q-tint { position: absolute; inset: 0; z-index: 13; pointer-events: none; opacity: 0; background: radial-gradient(circle, rgba(255, 138, 216, 0) 30%, rgba(255, 138, 216, .55)); }
+.qscene.q4 .q-tint { animation: q-tint 1.4s ease-out forwards; }
+@keyframes q-tint { from { opacity: 1; } to { opacity: .25; } }
+.q-chibi { position: absolute; left: 50%; bottom: 14%; z-index: 14; width: 96px; height: 96px; margin-left: -48px; opacity: 0; transform: translateY(40px) scale(.6); }
+.q-chibi svg { width: 100%; height: 100%; filter: drop-shadow(0 6px 14px rgba(0, 0, 0, .6)); }
+.qscene.q4 .q-chibi { animation: q-chibi 1.7s cubic-bezier(.2, 1.4, .4, 1) forwards; }
+@keyframes q-chibi { 0% { opacity: 0; transform: translateY(40px) scale(.6); } 30%, 80% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-10px) scale(.95); } }
+.q-dash { position: absolute; left: -20%; z-index: 11; width: 140%; height: 3px; opacity: 0; transform-origin: 0 50%;
+  background: linear-gradient(90deg, transparent, #ffd1ee 30%, #fff 55%, var(--gold-2) 75%, transparent); box-shadow: 0 0 14px rgba(255, 138, 216, .9); }
+.q-dash.d1 { top: 30%; rotate: -18deg; } .q-dash.d2 { top: 52%; rotate: 14deg; } .q-dash.d3 { top: 66%; rotate: -8deg; }
+.qscene.q4 .q-dash { animation: q-dash .38s cubic-bezier(.6, 0, .2, 1) forwards; }
+.qscene.q4 .q-dash.d1 { animation-delay: 1.15s; } .qscene.q4 .q-dash.d2 { animation-delay: 1.45s; } .qscene.q4 .q-dash.d3 { animation-delay: 1.75s; }
+@keyframes q-dash { 0% { opacity: 0; transform: scaleX(0); } 40% { opacity: 1; transform: scaleX(1); } 100% { opacity: 0; transform: scaleX(1) translateX(40%); } }
+
+.q-fx { position: absolute; inset: 0; z-index: 9; pointer-events: none; }
+.q-rise { position: absolute; width: var(--s); height: var(--s); color: var(--c); opacity: 0; animation: q-rise var(--d) ease-out forwards; }
+.q-rise svg, .q-burst svg { width: 100%; height: 100%; display: block; }
+@keyframes q-rise { 0% { opacity: 0; transform: scale(.5); } 15% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--x), -260px) rotate(var(--r)); } }
+.q-burst { position: absolute; left: 50%; top: 47%; width: var(--s); height: var(--s); margin: calc(var(--s) / -2); color: var(--c); animation: q-burst 1.3s cubic-bezier(.1, .8, .3, 1) forwards; }
+@keyframes q-burst { from { transform: none; opacity: 1; } to { transform: translate(var(--x), var(--y)) rotate(var(--r)); opacity: 0; } }
+.q-flash { position: absolute; inset: 0; z-index: 15; background: #ffe1f3; opacity: 0; pointer-events: none; }
+.q-flash.go { animation: q-flash .7s ease-out; }
+@keyframes q-flash { from { opacity: .95; } to { opacity: 0; } }
+.qscene.shake { animation: q-shake .4s linear; }
+@keyframes q-shake { 0%, 100% { translate: 0; } 20% { translate: -4px 2px; } 40% { translate: 4px -2px; } 60% { translate: -3px -1px; } 80% { translate: 2px 1px; } }
+.q-title { position: absolute; left: 0; right: 0; top: 15%; z-index: 16; text-align: center; opacity: 0; }
+.q-title .kicker { color: #ffd1ee; letter-spacing: .3em; }
+.q-title h2 { margin-top: 6px; font-size: 28px; background: linear-gradient(180deg, #fff, #ffd1ee 60%, var(--gold-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.qscene.q1 .q-title { animation: q-title 2.6s .1s ease forwards; }
+@keyframes q-title { 0% { opacity: 0; letter-spacing: .2em; } 25%, 75% { opacity: 1; letter-spacing: 0; } 100% { opacity: 0; } }
+
+/* Version sobre : fondu du cristal et des queues, puis la carte. */
+.qscene.calm .q-core { animation: none; transform: none; opacity: 1; }
+.qscene.calm .q-tail { animation: none; transform: rotate(var(--a)) scaleY(1); opacity: 0; transition: opacity 1s; }
+.qscene.calm.q1 .q-tail { opacity: .9; }
+.qscene.calm .q-orbit, .qscene.calm .q-orb, .qscene.calm .q-charm, .qscene.calm .q-dash, .qscene.calm .q-chibi, .qscene.calm .q-tint, .qscene.calm .q-lb, .qscene.calm .q-title { display: none; }

@@ -179,6 +179,87 @@ public class CapsuleFlowTests
         Assert.Equal(3, opened.State.Available);
     }
 
+    private static void SeedQueenCatalog(ApiFactory factory) =>
+        factory.Services.GetRequiredService<CapsuleCatalogService>().Set(new CapsuleCatalog
+        {
+            Champions = [new(1, "Annie", "Annie"), new(103, "Ahri", "Ahri")],
+            Skins =
+            [
+                new(1001, 1, 1, "Annie gothique", Rarity.RARE, [], false, null),
+                new(103001, 103, 1, "Ahri dynastie", Rarity.COMMON, [], false, null), new(103027, 103, 27, "Ahri fleur spirituelle", Rarity.EPIC, [], false, null),
+            ],
+            Lines = [],
+            LoadedAt = DateTimeOffset.UtcNow,
+        });
+
+    private static async Task SetEssence(ApiFactory factory, int essence)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<Api.Data.AppDbContext>();
+        db.CapsuleWallets.Single().Essence = essence;
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task Queen_relic_costs_1500_essence_and_only_drops_ahri()
+    {
+        await using var factory = new ApiFactory();
+        SeedQueenCatalog(factory);
+        var http = await Login(factory, "queenA");
+        await http.GetAsync("/api/v1/capsules/state");
+        Assert.Equal(HttpStatusCode.Conflict, (await http.PostAsync("/api/v1/capsules/queen", null)).StatusCode);
+
+        // Taux standard renormalisés sur les raretés où Ahri a quelque chose (pas de Rare ici) ; Ahri elle-même au palier Exalté.
+        var queen = (await http.GetFromJsonAsync<CapsuleCatalogDto>("/api/v1/capsules/catalog", ApiJson.Options))!.Queen!;
+        Assert.Equal((103, 1500, 3), (queen.ChampionId, queen.EssenceCost, queen.Items));
+        Assert.Equal([Rarity.COMMON, Rarity.EPIC, Rarity.EXALTED], queen.Rates.Select(r => r.Rarity).Order());
+        Assert.Equal(100, queen.Rates.Sum(r => r.Percent), 1);
+
+        const int opens = 12;
+        await SetEssence(factory, 1500 * opens);
+        var essenceBack = 0;
+        for (var i = 0; i < opens; i++)
+        {
+            var res = (await (await http.PostAsync("/api/v1/capsules/queen", null)).EnsureSuccessStatusCode()
+                .Content.ReadFromJsonAsync<OpenCapsulesResponse>(ApiJson.Options))!;
+            var d = Assert.Single(res.Drops);
+            Assert.True(d.Kind == CapsuleItemKind.CHAMPION ? d.ItemId == 103 : d.ItemId is 103001 or 103027, $"{d.Kind} {d.ItemId}");
+            Assert.Equal(d.IsNew ? 0 : CapsuleRules.DuplicateEssence(d.Rarity), d.Essence);
+            essenceBack += d.Essence;
+            Assert.Equal(1500 * (opens - i - 1) + essenceBack, res.State.Essence);
+        }
+        // Garantie : au plus 9 tirages d'affilée sans Épique ou mieux.
+        var history = (await http.GetFromJsonAsync<CollectionResponse>("/api/v1/capsules/collection", ApiJson.Options))!.Recent;
+        Assert.Contains(history, h => h.Rarity >= Rarity.EPIC);
+        Assert.Equal(HttpStatusCode.Conflict, (await http.PostAsync("/api/v1/capsules/queen", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Queen_relic_turns_into_essence_once_every_ahri_item_is_owned()
+    {
+        await using var factory = new ApiFactory();
+        SeedQueenCatalog(factory);
+        var http = await Login(factory, "queenB");
+        await http.GetAsync("/api/v1/capsules/state");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Api.Data.AppDbContext>();
+            var userId = db.CapsuleWallets.Single().UserId;
+            var owned = db.CollectionItems.Where(c => c.UserId == userId).Select(c => new { c.Kind, c.ItemId }).ToList();
+            foreach (var (kind, id) in new[] { (CapsuleItemKind.SKIN, 103001), (CapsuleItemKind.SKIN, 103027), (CapsuleItemKind.CHAMPION, 103) })
+                if (!owned.Any(o => o.Kind == kind && o.ItemId == id))
+                    db.CollectionItems.Add(new Api.Data.CollectionItem { UserId = userId, Kind = kind, ItemId = id, Count = 1, FirstObtainedAt = DateTimeOffset.UtcNow });
+            await db.SaveChangesAsync();
+        }
+        await SetEssence(factory, 1500);
+        var res = (await (await http.PostAsync("/api/v1/capsules/queen", null)).EnsureSuccessStatusCode()
+            .Content.ReadFromJsonAsync<OpenCapsulesResponse>(ApiJson.Options))!;
+        var d = Assert.Single(res.Drops);
+        Assert.False(d.IsNew);
+        Assert.Equal(2, d.Count);
+        Assert.Equal(CapsuleRules.DuplicateEssence(d.Rarity), res.State.Essence);
+    }
+
     [Fact]
     public void Catalog_lists_odds_and_price_of_both_capsules()
     {

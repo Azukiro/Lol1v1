@@ -82,6 +82,17 @@ public static class CapsuleRules
         return pool[^1].Key;
     }
 
+    /// <summary>Champion de la Relique de la Reine (alias Data Dragon).</summary>
+    public const string QueenAlias = "Ahri";
+
+    /// <summary>Taux d'une relique limitée à certaines raretés : poids donnés renormalisés, en pourcentage.</summary>
+    public static IReadOnlyDictionary<Rarity, double> RenormalizedRates(IReadOnlyDictionary<Rarity, int> weights, ISet<Rarity> available)
+    {
+        var pool = weights.Where(w => available.Contains(w.Key)).ToList();
+        var total = (double)pool.Sum(w => w.Value);
+        return pool.ToDictionary(w => w.Key, w => total == 0 ? 0 : Math.Round(w.Value / total * 100, 2));
+    }
+
     /// <summary>Palier des champions : le plus rare.</summary>
     public const Rarity ChampionRarity = Rarity.EXALTED;
 

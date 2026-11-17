@@ -99,6 +99,8 @@
         <button class="rl-row rl-link" type="button" id="odds-row"><div class="rl-main"><b>Taux de drop</b><span class="muted">Raretés, garantie, essence des doublons</span></div><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
       </section>
 
+      <section class="queen-pack" id="queen-pack" hidden></section>
+
       <section class="notify-card" id="notify-card" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a2.5 2.5 0 0 0 2.4-2h-4.8a2.5 2.5 0 0 0 2.4 2zm7-6V11a7 7 0 0 0-5.5-6.8V3a1.5 1.5 0 0 0-3 0v1.2A7 7 0 0 0 5 11v5l-2 2v1h18v-1z"/></svg>
         <div><b>Préviens-moi</b><span id="notify-text">Notification quand tu as 10 reliques en stock.</span></div>
@@ -240,6 +242,24 @@
   </div>
 
   <!-- Révélation -->
+  <!-- Invocation de la Reine : cinématique de 10 s, non interruptible, avant la révélation habituelle -->
+  <div id="queen" class="qscene" hidden role="dialog" aria-modal="true" aria-label="Invocation de la Relique de la Reine">
+    <div class="q-bg"></div>
+    <div class="q-tails" id="q-tails"></div>
+    <div class="q-orbit"><span></span><span></span><span></span></div>
+    <div class="q-orb"></div>
+    <div class="q-core"><svg viewBox="0 0 100 100"><use href="#crystal-queen"/></svg></div>
+    <div class="q-fx" id="q-fx"></div>
+    <div class="q-charm"><svg viewBox="0 0 24 24"><use href="#heart"/></svg></div>
+    <span class="q-dash d1"></span><span class="q-dash d2"></span><span class="q-dash d3"></span>
+    <div class="q-tint"></div>
+    <div class="q-chibi"><svg viewBox="0 0 40 40"><use href="#fox-wink"/></svg></div>
+    <div class="q-title"><span class="kicker">Relique de la Reine</span><h2>Neuf queues s'éveillent</h2></div>
+    <div class="q-flash" id="q-flash"></div>
+    <div class="q-lb t"></div><div class="q-lb b"><span>Ahri · la renarde à neuf queues</span></div>
+    <div class="q-prog"></div>
+  </div>
+
   <div id="reveal" class="reveal" hidden>
     <canvas id="fx"></canvas>
     <div class="pillar" id="pillar"></div>
@@ -390,6 +410,22 @@
       <symbol id="cls-FIGHTER" viewBox="0 0 24 24"><path d="M5 5l13 13M19 5 6 18M3.5 16.5l4 4M16.5 20.5l4-4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
       <symbol id="cls-SUPPORT" viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-8.6-9.6A4.6 4.6 0 0 1 12 7.4a4.6 4.6 0 0 1 8.6 3.5c-1.1 5-8.6 9.6-8.6 9.6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
       <symbol id="capsule-mini-24" viewBox="0 0 100 100"><use href="#relic-ink"/></symbol>
+      <linearGradient id="g-tail" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#ff8ad8" stop-opacity="0"/><stop offset=".25" stop-color="#ff8ad8" stop-opacity=".75"/><stop offset=".75" stop-color="#ffe1f3"/><stop offset="1" stop-color="#f6e2a8"/></linearGradient>
+      <!-- Cristal de la Reine : facettes roses, même sertissage or que la relique -->
+      <symbol id="crystal-queen" viewBox="0 0 100 100">
+        <path d="M50 4 26 30 50 40z" fill="#ffc6ea"/><path d="M50 4 74 30 50 40z" fill="#fff0f8"/>
+        <path d="M26 30 32 76 50 62 50 40z" fill="#b2408a"/><path d="M74 30 68 76 50 62 50 40z" fill="#ff8ad8"/>
+        <path d="M32 76 50 96 50 62z" fill="#6e1f58"/><path d="M68 76 50 96 50 62z" fill="#d45aa8"/>
+        <path d="M50 4 74 30 68 76 50 96 32 76 26 30z" fill="none" stroke="url(#g-gold)" stroke-width="2.4" stroke-linejoin="round"/>
+        <path d="M22 47 Q50 61 78 47" fill="none" stroke="url(#g-gold)" stroke-width="5" stroke-linecap="round"/>
+        <path d="M50 58c-3-2.6-6-4.4-6-7.2 0-1.8 1.4-3 3-3 1.3 0 2.3.7 3 1.7.7-1 1.7-1.7 3-1.7 1.6 0 3 1.2 3 3 0 2.8-3 4.6-6 7.2z" fill="#fff4fa" stroke="#a07b35" stroke-width=".8"/>
+        <path d="M41 15 50 4 59 15M41 86 50 96 59 86" fill="none" stroke="url(#g-gold)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M30 31 24 14 37 24z" fill="#ff8ad8" stroke="url(#g-gold)" stroke-width="1.2"/><path d="M70 31 76 14 63 24z" fill="#ff8ad8" stroke="url(#g-gold)" stroke-width="1.2"/>
+      </symbol>
+      <symbol id="heart" viewBox="0 0 24 24"><path fill="currentColor" d="M12 21s-7.5-4.6-9.6-9.2C.9 8.5 3 5 6.4 5c2.1 0 3.6 1.2 4.6 2.6C12 6.2 13.5 5 15.6 5 19 5 21.1 8.5 19.6 11.8 17.5 16.4 12 21 12 21z"/></symbol>
+      <symbol id="petal" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2c4 4 6 8 0 20C6 10 8 6 12 2z"/></symbol>
+      <symbol id="tail" viewBox="0 0 70 230"><path d="M35 230C20 190 6 150 10 104 14 58 28 26 35 4c7 22 21 54 25 100 4 46-10 86-25 126z" fill="url(#g-tail)"/><path d="M35 230C28 180 24 120 35 30" stroke="#fff" stroke-opacity=".35" stroke-width="2" fill="none"/><path d="M35 4c5 14 12 26 16 38-6-4-11-5-16-5s-10 1-16 5c4-12 11-24 16-38z" fill="#fff4fa"/></symbol>
+      <symbol id="fox-wink" viewBox="0 0 40 40"><path d="M6 19 9 3l9 9z" fill="#ff8ad8"/><path d="M34 19 31 3l-9 9z" fill="#ff8ad8"/><path d="M9.5 13 10.5 6.5l4.5 4.5z" fill="#ffe1f3"/><path d="M30.5 13 29.5 6.5 25 11z" fill="#ffe1f3"/><path d="M5 21c0-9 8-11.5 15-11.5S35 12 35 21c0 9-7.5 14-15 14S5 30 5 21z" fill="#fff4fa" stroke="#ff8ad8" stroke-width="1.6"/><path d="M11 22q3-4 6 0" stroke="#5a2a45" stroke-width="2" fill="none" stroke-linecap="round"/><circle cx="26" cy="21" r="2.6" fill="#5a2a45"/><circle cx="27" cy="20" r=".9" fill="#fff"/><ellipse cx="11" cy="27" rx="3" ry="1.8" fill="#ff9fd6" opacity=".85"/><ellipse cx="29" cy="27" rx="3" ry="1.8" fill="#ff9fd6" opacity=".85"/><path d="M17 27q3 3 6 0" stroke="#5a2a45" stroke-width="1.6" fill="#ff6fa8" stroke-linecap="round"/></symbol>
     </defs>
   </svg>
 

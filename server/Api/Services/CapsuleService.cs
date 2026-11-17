@@ -16,6 +16,8 @@ public sealed class CapsuleOptions
     public int WelcomeCapsules { get; set; } = 3;
     public int EssencePerCapsule { get; set; } = 150;
     public int EssencePerPremium { get; set; } = 600;
+    /// <summary>Prix de la Relique de la Reine (que des objets d'Ahri), payée en essence et ouverte aussitôt.</summary>
+    public int EssencePerQueen { get; set; } = 1500;
     public int MaxOpenAtOnce { get; set; } = 10;
     /// <summary>Équipe de départ offerte à la création du portefeuille (un skin COMMON par poste).</summary>
     public bool StarterTeam { get; set; } = true;
@@ -69,7 +71,6 @@ public sealed class CapsuleService(
 
         var owned = await db.CollectionItems.Where(c => c.UserId == userId).ToDictionaryAsync(c => (c.Kind, c.ItemId));
         var available = Enum.GetValues<Rarity>().Where(r => r == CapsuleRules.ChampionRarity ? catalog.Champions.Count > 0 : catalog.SkinsByRarity[r].Any()).ToHashSet();
-        var now = clock.GetUtcNow();
         var drops = new List<CapsuleDropDto>();
 
         for (var i = 0; i < count; i++)
@@ -77,32 +78,79 @@ public sealed class CapsuleService(
             var guaranteed = wallet.SinceEpic >= CapsuleRules.PityThreshold - 1;
             var rarity = CapsuleRules.RollRarity(CryptoRandom.Instance, type, guaranteed, available);
             var (kind, itemId) = Pick(catalog, rarity, owned);
-
-            owned.TryGetValue((kind, itemId), out var item);
-            var isNew = item is null;
-            var essence = 0;
-            if (item is null)
-            {
-                item = new CollectionItem { UserId = userId, Kind = kind, ItemId = itemId, FirstObtainedAt = now };
-                db.CollectionItems.Add(item);
-                owned[(kind, itemId)] = item;
-            }
-            else
-            {
-                essence = CapsuleRules.DuplicateEssence(rarity);
-                wallet.Essence += essence;
-            }
-            item.Count++;
-
-            wallet.SinceEpic = rarity >= Rarity.EPIC ? 0 : wallet.SinceEpic + 1;
-            wallet.TotalOpened++;
             if (premium) wallet.PremiumStored--; else wallet.Stored--;
-            db.CapsuleDrops.Add(new CapsuleDrop { UserId = userId, Kind = kind, ItemId = itemId, Rarity = rarity, IsNew = isNew, OpenedAt = now });
-            drops.Add(new CapsuleDropDto(kind, itemId, rarity, isNew, item.Count, essence, guaranteed && !premium && rarity >= Rarity.EPIC));
+            drops.Add(Grant(wallet, owned, userId, kind, itemId, rarity, guaranteed && !premium));
         }
         if (wallet.Stored < _o.NotifyAt) wallet.FullNotified = false;
         await db.SaveChangesAsync();
         return new OpenCapsulesResponse(drops, ToDto(wallet));
+    }
+
+    /// <summary>
+    /// Objets de la Relique de la Reine, par rareté : les skins d'Ahri à leur rareté, Ahri elle-même au palier Exalté.
+    /// Vide si le catalogue n'a pas Ahri.
+    /// </summary>
+    public static Dictionary<Rarity, List<(CapsuleItemKind Kind, int Id)>> QueenPool(CapsuleCatalog catalog)
+    {
+        var ahri = catalog.Champions.FirstOrDefault(c => c.Alias == CapsuleRules.QueenAlias);
+        if (ahri is null) return [];
+        var pool = catalog.Skins.Where(sk => sk.ChampionId == ahri.Id)
+            .GroupBy(sk => sk.Rarity).ToDictionary(g => g.Key, g => g.Select(sk => (CapsuleItemKind.SKIN, sk.Id)).ToList());
+        pool[CapsuleRules.ChampionRarity] = [(CapsuleItemKind.CHAMPION, ahri.Id)];
+        return pool;
+    }
+
+    /// <summary>
+    /// Relique de la Reine : débite l'essence et ouvre aussitôt une relique limitée aux objets d'Ahri, aux taux de la relique standard
+    /// (raretés sans objet d'Ahri retirées). La garantie Épique s'applique ; un doublon rapporte l'essence habituelle de sa rareté.
+    /// </summary>
+    public async Task<OpenCapsulesResponse> OpenQueenAsync(Guid userId)
+    {
+        var catalog = await catalogs.GetAsync();
+        var pool = QueenPool(catalog);
+        if (pool.Count == 0) throw new AppException("La Relique de la Reine n'est pas disponible pour le moment.", 503);
+        using var _ = await locks.AcquireAsync(userId);
+        var wallet = await GetOrCreateWalletAsync(userId);
+        Normalize(wallet);
+        if (wallet.Essence < _o.EssencePerQueen) throw new AppException($"Il faut {_o.EssencePerQueen} essences pour la Relique de la Reine.", 409);
+        wallet.Essence -= _o.EssencePerQueen;
+
+        var owned = await db.CollectionItems.Where(c => c.UserId == userId).ToDictionaryAsync(c => (c.Kind, c.ItemId));
+        var guaranteed = wallet.SinceEpic >= CapsuleRules.PityThreshold - 1;
+        var rarity = CapsuleRules.RollRarity(CryptoRandom.Instance, CapsuleType.STANDARD, guaranteed, pool.Keys.ToHashSet());
+        var items = pool[rarity];
+        // Comme les autres reliques : un doublon est retiré une fois pour favoriser les nouveautés.
+        var pick = items[CryptoRandom.Instance.Next(items.Count)];
+        if (owned.ContainsKey(pick)) pick = items[CryptoRandom.Instance.Next(items.Count)];
+        var drop = Grant(wallet, owned, userId, pick.Kind, pick.Id, rarity, guaranteed);
+        await db.SaveChangesAsync();
+        return new OpenCapsulesResponse([drop], ToDto(wallet));
+    }
+
+    /// <summary>Ajoute l'objet tiré à la collection (ou le convertit en essence si doublon) et l'inscrit à l'historique.</summary>
+    private CapsuleDropDto Grant(CapsuleWallet wallet, Dictionary<(CapsuleItemKind, int), CollectionItem> owned, Guid userId,
+        CapsuleItemKind kind, int itemId, Rarity rarity, bool guaranteed)
+    {
+        var now = clock.GetUtcNow();
+        owned.TryGetValue((kind, itemId), out var item);
+        var isNew = item is null;
+        var essence = 0;
+        if (item is null)
+        {
+            item = new CollectionItem { UserId = userId, Kind = kind, ItemId = itemId, FirstObtainedAt = now };
+            db.CollectionItems.Add(item);
+            owned[(kind, itemId)] = item;
+        }
+        else
+        {
+            essence = CapsuleRules.DuplicateEssence(rarity);
+            wallet.Essence += essence;
+        }
+        item.Count++;
+        wallet.SinceEpic = rarity >= Rarity.EPIC ? 0 : wallet.SinceEpic + 1;
+        wallet.TotalOpened++;
+        db.CapsuleDrops.Add(new CapsuleDrop { UserId = userId, Kind = kind, ItemId = itemId, Rarity = rarity, IsNew = isNew, OpenedAt = now });
+        return new CapsuleDropDto(kind, itemId, rarity, isNew, item.Count, essence, guaranteed && rarity >= Rarity.EPIC);
     }
 
     /// <summary>Échange de l'essence des doublons contre une capsule (standard ou prestige).</summary>
@@ -174,7 +222,16 @@ public sealed class CapsuleService(
                 return new CapsuleOddsDto(t, EssenceCost(t),
                     weights.Select(w => new RarityOddsDto(w.Key, Math.Round(w.Value / total * 100, 2), CapsuleRules.DuplicateEssence(w.Key))).ToList());
             }).ToList(),
-            CapsuleRules.PityThreshold);
+            CapsuleRules.PityThreshold, QueenDto(c));
+    }
+
+    private QueenPackDto? QueenDto(CapsuleCatalog c)
+    {
+        var pool = QueenPool(c);
+        if (pool.Count == 0) return null;
+        var rates = CapsuleRules.RenormalizedRates(CapsuleRules.StandardWeights, pool.Keys.ToHashSet());
+        return new QueenPackDto(pool[CapsuleRules.ChampionRarity][0].Id, _o.EssencePerQueen, pool.Values.Sum(v => v.Count),
+            rates.Select(r => new RarityOddsDto(r.Key, r.Value, CapsuleRules.DuplicateEssence(r.Key))).ToList());
     }
 
     public int EssenceCost(CapsuleType type) => type == CapsuleType.PREMIUM ? _o.EssencePerPremium : _o.EssencePerCapsule;

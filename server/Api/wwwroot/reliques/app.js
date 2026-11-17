@@ -5,7 +5,7 @@ const CD = 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/
 const RARITIES = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY', 'MYTHIC', 'ULTIMATE', 'EXALTED'];
 const LABEL = { COMMON: 'Commun', RARE: 'Rare', EPIC: 'Épique', LEGENDARY: 'Légendaire', MYTHIC: 'Mythique', ULTIMATE: 'Ultime', EXALTED: 'Exalté' };
 const COLOR = { COMMON: '#9aa4b1', RARE: '#4f9cff', EPIC: '#b06cff', LEGENDARY: '#ff9f1a', MYTHIC: '#ff4d6d', ULTIMATE: '#ffd34d', EXALTED: '#ffffff' };
-const CATALOG_KEY = 'capsules.catalog.v6';
+const CATALOG_KEY = 'capsules.catalog.v7';
 // Build de cette coquille, gravé au déploiement par le Dockerfile ; « dev » en local.
 const APP_VERSION = '__BUILD__'.includes('_') ? 'dev' : '__BUILD__';
 const rank = (r) => RARITIES.indexOf(r);
@@ -165,7 +165,7 @@ async function loadCatalog() {
   const cached = JSON.parse(store.get(CATALOG_KEY) || 'null');
   if (cached && Date.now() - cached.at < 6 * 3600e3) { S.cat = indexCatalog(cached.data); return; }
   // Version dans l'URL : le catalogue est aussi en cache HTTP (6 h), un changement de format doit le contourner.
-  const data = await api('/capsules/catalog?v=6', { retry: true });
+  const data = await api('/capsules/catalog?v=7', { retry: true });
   store.set(CATALOG_KEY, JSON.stringify({ at: Date.now(), data }));
   S.cat = indexCatalog(data);
 }
@@ -377,6 +377,7 @@ function renderWallet() {
   document.title = all ? `(${all}) Reliques` : 'Reliques';
   try { all ? navigator.setAppBadge?.(all) : navigator.clearAppBadge?.(); } catch { /* non supporté */ }
   $('#debug').hidden = !w.debug;
+  renderQueenPack();
   renderTimer();
 }
 
@@ -508,11 +509,11 @@ function impactHTML(d, it) {
 function showSingle(d) {
   const it = item(d.kind, d.itemId);
   const el = $('#reveal-single');
-  const more = stockOf() > 0;
+  const more = stockOf() > 0 && !S.queenReveal;
   const queen = isAhriItem(it);
   $('#reveal').classList.toggle('ahri', queen);
   el.innerHTML = `<div class="summon r-${d.rarity}"><div class="summon-in">
-      <div class="summon-back"><svg viewBox="0 0 100 100"><use href="#crystal"/></svg></div>
+      <div class="summon-back"><svg viewBox="0 0 100 100"><use href="#${queen ? 'crystal-queen' : 'crystal'}"/></svg></div>
       <div class="summon-front big-card${more ? ' tappable' : ''}" ${more ? 'role="button" tabindex="0" aria-label="Ouvrir la relique suivante"' : ''}>${cardHTML(it, { isNew: d.isNew, tag: 'div' })}</div>
     </div></div>
     <div class="summon-after">${queen ? starsHTML(d.rarity).replace(/<svg viewBox="0 0 24 24"><path d="M12 2\.5[^"]*"\/><\/svg>/g, HEART_SVG) : starsHTML(d.rarity)}${dropInfo(d, it)}${queen ? '<p class="queen">La reine est arrivée ♡</p>' : ''}${impactHTML(d, it)}
@@ -595,7 +596,7 @@ function showRevealActions(pending) {
   $('#reveal-actions').hidden = false;
   $('#reveal-skip').hidden = !pending;
   const stock = stockOf();
-  $('#reveal-again').hidden = pending || stock < 1;
+  $('#reveal-again').hidden = pending || stock < 1 || S.queenReveal;
   $('#reveal-again').textContent = stock > 1 ? `Encore ×${Math.min(stock, 10)}` : 'Ouvrir encore';
   $('#reveal-close').hidden = pending;
 }
@@ -612,9 +613,141 @@ function heartBurst(n) {
 }
 
 function closeReveal() {
+  S.queenReveal = false;
   $('#reveal').classList.remove('ahri');
   $('#reveal').hidden = true; $('#rays').className = 'rays'; $('#reveal-single').classList.remove('done');
   S.busy = false; renderWallet();
+}
+
+// ---------- Relique de la Reine : que des objets d'Ahri, 1 500 essence, invocation de 10 s ----------
+/** Objets d'Ahri du catalogue (ses skins et le champion) et ceux déjà possédés. */
+function queenItems() {
+  const q = S.cat?.queen;
+  if (!q) return null;
+  const keys = [`CHAMPION:${q.championId}`, ...(S.cat.byChamp.get(q.championId) || []).map((id) => `SKIN:${id}`)];
+  return { q, total: keys.length, owned: keys.filter((k) => S.owned.has(k)).length };
+}
+
+function renderQueenPack() {
+  const el = $('#queen-pack');
+  const info = queenItems();
+  if (!el || !info || !S.wallet) { if (el) el.hidden = true; return; }
+  const { q, total, owned } = info;
+  const can = S.wallet.essence >= q.essenceCost && !S.busy && S.online;
+  const odds = RARITIES.map((r) => q.rates.find((x) => x.rarity === r)).filter(Boolean);
+  el.hidden = false;
+  el.innerHTML = `<div class="qp-main">
+      <span class="qp-gem"><svg viewBox="0 0 100 100"><use href="#crystal-queen"/></svg></span>
+      <span class="qp-txt"><span class="kicker">Relique spéciale</span><b>Relique de la Reine</b><span>Que des skins d'Ahri · taux de la relique standard</span></span>
+      <span class="qp-price"><b class="num">${fmtInt(q.essenceCost)}</b><span>essence</span></span>
+    </div>
+    <div class="qp-own"><span>Ta collection Ahri</span><span class="qp-bar"><i style="width:${Math.round((owned / Math.max(1, total)) * 100)}%"></i></span><b class="num">${owned} / ${total}</b></div>
+    <div class="qp-odds" aria-label="Taux">${odds.map((r) => `<i class="r-${r.rarity}" title="${LABEL[r.rarity]}"><span>${String(r.percent).replace('.', ',')} %</span></i>`).join('')}</div>
+    ${owned >= total ? '<p class="qp-note">Tu as tout : chaque invocation devient un doublon converti en essence.</p>' : ''}
+    <button class="btn block qp-go" type="button" id="queen-go" ${can ? '' : 'disabled'}>${S.wallet.essence >= q.essenceCost
+      ? `Invoquer la Reine · ${fmtInt(q.essenceCost)}` : `Encore ${fmtInt(q.essenceCost - S.wallet.essence)} essence`}</button>`;
+  $('#queen-go').onclick = confirmQueen;
+}
+
+/** Deux touches pour dépenser 1 500 essence : la première arme le bouton quelques secondes. */
+function confirmQueen() {
+  const btn = $('#queen-go');
+  if (!btn.classList.contains('armed')) {
+    btn.classList.add('armed'); btn.textContent = `Confirmer · −${fmtInt(S.cat.queen.essenceCost)} essence`;
+    clearTimeout(confirmQueen.t); confirmQueen.t = setTimeout(renderQueenPack, 3500);
+    return;
+  }
+  clearTimeout(confirmQueen.t);
+  openQueen();
+}
+
+const qwait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Cœurs et pétales qui montent du bas de la scène. */
+function queenRise(n) {
+  const fx = $('#q-fx');
+  for (let i = 0; i < n; i++) {
+    const h = document.createElement('span'); h.className = 'q-rise';
+    h.innerHTML = `<svg viewBox="0 0 24 24"><use href="#${Math.random() < 0.35 ? 'petal' : 'heart'}"/></svg>`;
+    h.style.cssText = `left:${50 + (Math.random() - 0.5) * 90}%;top:${80 + Math.random() * 14}%;--s:${8 + Math.random() * 12}px;--c:${['#ff8ad8', '#ffd1ee', '#e6cf98'][i % 3]};--x:${(Math.random() - 0.5) * 60}px;--r:${(Math.random() - 0.5) * 120}deg;--d:${2 + Math.random() * 1.6}s;animation-delay:${Math.random() * 1.2}s`;
+    fx.appendChild(h); setTimeout(() => h.remove(), 5000);
+  }
+}
+
+/** Gerbe de cœurs et pétales depuis le cristal. */
+function queenBurst(n) {
+  const fx = $('#q-fx');
+  for (let i = 0; i < n; i++) {
+    const b = document.createElement('span'); b.className = 'q-burst';
+    const a = (i / n) * Math.PI * 2 + Math.random() * 0.3, r = 120 + Math.random() * 130;
+    b.innerHTML = `<svg viewBox="0 0 24 24"><use href="#${i % 3 === 0 ? 'petal' : 'heart'}"/></svg>`;
+    b.style.cssText = `--s:${12 + Math.random() * 16}px;--c:${['#ff8ad8', '#ffe1f3', '#e6cf98'][i % 3]};--x:${Math.cos(a) * r}px;--y:${Math.sin(a) * r}px;--r:${(Math.random() - 0.5) * 360}deg`;
+    fx.appendChild(b); setTimeout(() => b.remove(), 1500);
+  }
+}
+
+/**
+ * Invocation : environ 8 s de cinématique (cristal rose, neuf queues, feux follets, charme, ruée), non interruptible,
+ * puis la révélation habituelle (dos, retournement, silhouette, couleur). Version sobre si l'utilisateur limite les animations.
+ */
+async function openQueen() {
+  if (S.busy || !S.online) return;
+  S.busy = true; renderWallet();
+  audio.ensure();
+  const st = $('#queen');
+  const calm = reduceMotion();
+  const tails = $('#q-tails');
+  if (!tails.children.length) {
+    for (let i = 0; i < 9; i++) tails.insertAdjacentHTML('beforeend',
+      `<div class="q-tail" style="--a:${-60 + i * 15}deg;--i:${Math.abs(i - 4) * 2 + (i > 4 ? 1 : 0)}"><svg viewBox="0 0 70 230"><use href="#tail"/></svg></div>`);
+  }
+  $('#q-fx').innerHTML = '';
+  st.className = `qscene${calm ? ' calm' : ''}`;
+  st.hidden = false;
+  void st.offsetWidth;
+  const add = (c) => st.classList.add(c);
+  add('run'); add('q0');
+  buzz(30);
+  let res;
+  try {
+    [res] = await Promise.all([api('/capsules/queen', { method: 'POST' }), qwait(calm ? 300 : 1000)]);
+  } catch (e) {
+    st.hidden = true; S.busy = false; renderWallet(); toast(e.message, true); return;
+  }
+  const d = res.drops[0];
+  if (calm) {
+    add('q1'); await qwait(1600);
+  } else {
+    add('q1'); queenRise(10);
+    for (let i = 0; i < 9; i++) setTimeout(() => audio.step(Math.min(6, Math.floor(i / 1.4))), 100 + i * 190);
+    await qwait(2000);
+    add('q2'); queenRise(14); buzz(20);
+    await qwait(1600);
+    add('q3'); queenRise(10); setTimeout(() => { audio.chime(3); buzz([30, 40, 30]); }, 900);
+    await qwait(1300);
+    add('q4'); restart($('#q-flash'), 'go'); restart(st, 'shake');
+    [1150, 1450, 1750].forEach((t) => setTimeout(() => { restart(st, 'shake'); audio.tone(880, 0.09, 'triangle', 0.1); }, t));
+    await qwait(1900);
+    add('q5'); queenBurst(34); restart($('#q-flash'), 'go'); audio.burst(Math.max(4, rank(d.rarity))); buzz([60, 40, 120]);
+    await qwait(500);
+  }
+
+  // Révélation habituelle, variante d'Ahri.
+  applyDrop(d);
+  setWallet(res.state);
+  saveSnapshot();
+  renderRecent();
+  if (S.view === 'collection') renderCollection();
+  const reveal = $('#reveal');
+  reveal.hidden = false; reveal.style.setProperty('--glow', '#ff8ad8');
+  $('#reveal-multi').hidden = true; $('#reveal-actions').hidden = true; $('#reveal-capsule').hidden = true;
+  $('#pillar').className = 'pillar'; $('#rays').className = rank(d.rarity) >= 2 ? 'rays on' : 'rays';
+  skipper.on = false;
+  S.queenReveal = true;
+  showSingle(d);
+  add('end');
+  await qwait(calm ? 200 : 600);
+  st.hidden = true; st.className = 'qscene';
 }
 
 // ---------- Collection ----------
